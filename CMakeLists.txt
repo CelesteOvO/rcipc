@@ -1,3 +1,7 @@
+# 顶层构建文件。用法见 README.md：
+#   cmake -S . -B build                      配置（第一次会下载依赖）
+#   cmake --build build --config Debug       编译
+#   ctest --test-dir build -C Debug          跑测试
 cmake_minimum_required(VERSION 3.24)
 project(rcipc LANGUAGES CXX)
 
@@ -6,28 +10,34 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(MSVC)
-  # /utf-8: sources are UTF-8 (the default code page here would warn on any non-ASCII byte).
+  # /utf-8：源文件按 UTF-8 读（注释里有中文；不加的话 MSVC 按 GBK 读，会报警告甚至读错）。
+  # /W4：较高的警告级别。/permissive-：按标准 C++ 严格检查。
   add_compile_options(/utf-8 /W4 /permissive-)
-  add_compile_definitions(_CRT_SECURE_NO_WARNINGS)  # fopen and friends are fine here
+  add_compile_definitions(_CRT_SECURE_NO_WARNINGS)  # 允许用 fopen 等函数，不必换成 fopen_s
 else()
   add_compile_options(-Wall -Wextra)
 endif()
 
+# 第三方依赖：Eigen、GoogleTest。
 include(cmake/Dependencies.cmake)
 
-# The library: everything later stages reuse.
+# 库 rcipc：后面各阶段都会复用的代码。头文件在 include/rcipc/，实现在 src/。
+# 每个阶段往这里加源文件（阶段 2 会加正运动学，阶段 4 会加接触，……）。
 add_library(rcipc
   src/barrier.cc
 )
 target_include_directories(rcipc PUBLIC include)
 target_link_libraries(rcipc PUBLIC Eigen3::Eigen)
 
-# Stage 1: one-dimensional IPC (a ball dropped on the ground). A toy, not part of the library.
+# 阶段 1：一维 IPC（小球落地）。它是一个练习用的小模型，不属于库。
+#   库 ipc1d：被测试和演示程序共用；
+#   可执行文件 ipc1d_demo：演示程序。
 add_library(ipc1d toys/ipc1d/ipc1d.cc)
 target_include_directories(ipc1d PUBLIC toys)
 target_link_libraries(ipc1d PUBLIC rcipc)
 add_executable(ipc1d_demo toys/ipc1d/main.cc)
 target_link_libraries(ipc1d_demo PRIVATE ipc1d)
 
+# 测试，定义在 tests/CMakeLists.txt。
 enable_testing()
 add_subdirectory(tests)

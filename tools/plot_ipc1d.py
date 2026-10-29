@@ -1,9 +1,9 @@
-"""Plot a stage 1 drop written by ipc1d_demo (columns t, x, v, newton).
+"""画阶段 1 的落地仿真（ipc1d_demo drop 写出的 CSV，列为 t, x, v, newton）。
 
     python tools/plot_ipc1d.py ipc1d.csv [--dhat 1e-3] [--show]
 
-Three panels, as in the book's figure 15: the whole trajectory, the gap around the impact in mm with
-dhat dashed, and the Newton iterations per step. Saves the figure next to the CSV as .png.
+三幅图，和书上的图 15 对应：整段轨迹；撞击附近的间隙（mm，虚线是 dhat）；每步的 Newton 次数。
+图保存在 CSV 旁边，扩展名换成 .png；加 --show 会同时弹出窗口。
 """
 import argparse
 import pathlib

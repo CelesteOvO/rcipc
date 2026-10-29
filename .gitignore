@@ -5,3 +5,5 @@ out/
 *.csv
 *.png
 __pycache__/
+.idea/
+cmake-build-*/

@@ -1,12 +1,11 @@
 # rcipc
 
-IPC in the joint coordinates of articulated rigid bodies (RC-IPC), rebuilt from scratch one stage at a time.
-The plan and the conventions are in [notes/00_roadmap.md](notes/00_roadmap.md); every stage has its own note.
+在关节体的关节坐标里做 IPC（RC-IPC），从头一个阶段一个阶段地重写。
+路线和约定见 [notes/00_roadmap.md](notes/00_roadmap.md)，每个阶段有自己的笔记。
 
-## Build and test
+## 编译和测试
 
-Needs CMake 3.24 or later and a C++17 compiler (tested with MSVC 2022). Eigen and GoogleTest are downloaded
-at configure time.
+需要 CMake 3.24 以上和支持 C++17 的编译器（在 MSVC 2022 上测过）。Eigen 和 GoogleTest 在配置时自动下载。
 
 ```
 cmake -S . -B build
@@ -14,10 +13,14 @@ cmake --build build --config Debug
 ctest --test-dir build -C Debug --output-on-failure
 ```
 
-## Layout
+## 目录
 
-- `include/rcipc/`, `src/`: the library (what later stages reuse).
-- `toys/`: small standalone models used to learn one idea (stage 1: `toys/ipc1d/`).
-- `tests/`: GoogleTest suites, one per topic.
-- `notes/`: derivations and exercises, in Chinese.
-- `tools/`: Python scripts that plot outputs.
+| 目录 | 内容 |
+|---|---|
+| `include/rcipc/`、`src/` | 库 `rcipc`：后面各阶段都会复用的代码（现在只有障碍函数） |
+| `toys/` | 练习用的小模型，每个只讲一个概念（阶段 1：`toys/ipc1d/`，小球落地） |
+| `tests/` | GoogleTest 测试，一个主题一个文件 |
+| `notes/` | 推导和练习 |
+| `tools/` | 画图用的 Python 脚本 |
+| `cmake/` | 依赖的下载（`Dependencies.cmake`） |
+| `build/` | 编译输出，不进 git |

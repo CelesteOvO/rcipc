@@ -1,12 +1,14 @@
-// Stage 1 demo: the book's ball drop (section 3.8) and one impact step (section 3.5.3).
+// 阶段 1 的演示程序：书 §3.8 的小球落地，以及书 §3.5.3 的撞击那一步。
 //
+// 用法（参数都可以省略，写成 名字=值）：
 //   ipc1d_demo [drop|impact] [kappa=1e4] [h=0.002] [dhat=1e-3] [c=0.9] [tol=1e-6] [x0=..] [v0=..]
 //              [T=1.5] [out=ipc1d.csv]
 //
-// drop:   simulates T seconds from gap x0 (default 0.45 m) and velocity v0 (default 0), prints the
-//         minimum and final gap and the Newton counts, and writes t, x, v, newton per step to the CSV
-//         (tools/plot_ipc1d.py plots it).
-// impact: prints the Newton iterations of a single step (defaults x0 = 3 mm, v0 = -3 m/s).
+// drop（默认）：从间隙 x0（默认 0.45 m）、速度 v0（默认 0）开始模拟 T 秒。打印最小间隙、最终间隙和
+//               Newton 次数，并把每一步的 t、x、v、newton 写进 CSV（用 tools/plot_ipc1d.py 画图）。
+// impact：      只算一个时间步，逐次打印 Newton 迭代（默认 x0 = 3 mm，v0 = -3 m/s，和书上的表一样）。
+//
+// 输出用英文，因为 Windows 控制台默认不是 UTF-8，中文会显示成乱码。
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -21,13 +23,15 @@ namespace {
 
 using namespace rcipc::ipc1d;
 
+// 命令行参数。
 struct Args {
   std::string mode = "drop";
   Params P;
-  double x0 = NAN, v0 = NAN, T = 1.5;  // NaN: the mode's default
+  double x0 = NAN, v0 = NAN, T = 1.5;  // x0、v0 是 NaN 表示“用这个模式的默认值”
   std::string out = "ipc1d.csv";
 };
 
+// 不带 = 的参数是模式（drop 或 impact），带 = 的是 名字=值。
 Args parse(int argc, char** argv) {
   Args a;
   for (int i = 1; i < argc; ++i) {
@@ -52,6 +56,7 @@ Args parse(int argc, char** argv) {
   return a;
 }
 
+// drop 模式：一步接一步地调用 step()，记录最小间隙和 Newton 次数。
 int drop(const Args& a) {
   const Params& P = a.P;
   double x = std::isnan(a.x0) ? 0.45 : a.x0, v = std::isnan(a.v0) ? 0.0 : a.v0, t = 0;
@@ -61,7 +66,7 @@ int drop(const Args& a) {
   FILE* f = std::fopen(a.out.c_str(), "w");
   if (f) std::fprintf(f, "t,x,v,newton\n");
   while (t < a.T - 1e-12) {
-    StepResult r = step(P, x, v);
+    StepResult r = step(P, x, v);  // 上一步的结果就是这一步的起点
     x = r.x;
     v = r.v;
     t += P.h;
@@ -84,6 +89,7 @@ int drop(const Args& a) {
   return 0;
 }
 
+// impact 模式：只算一个时间步，用 trace 拿到每次迭代，打印成和书上一样的表。
 int impact(const Args& a) {
   double x0 = std::isnan(a.x0) ? 3e-3 : a.x0, v0 = std::isnan(a.v0) ? -3.0 : a.v0;
   std::vector<Iterate> trace;
@@ -109,7 +115,7 @@ int main(int argc, char** argv) {
     if (a.mode == "impact") return impact(a);
     std::fprintf(stderr, "unknown mode %s (drop or impact)\n", a.mode.c_str());
     return 2;
-  } catch (const std::exception& e) {
+  } catch (const std::exception& e) {  // 还没实现的函数会抛出 "not implemented: ..."
     std::fprintf(stderr, "%s\n", e.what());
     return 1;
   }

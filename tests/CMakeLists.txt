@@ -1,11 +1,15 @@
 include(GoogleTest)
 
+# rcipc_test(名字 依赖...)：把 tests/名字.cc 编译成一个测试程序，链接给定的库和 gtest_main
+# （gtest_main 提供 main 函数，所以测试文件里只需要写 TEST）。
+# gtest_discover_tests 让 ctest 认识程序里的每一个 TEST，可以单独跑、单独报告。
+# 也可以直接运行测试程序，例如 build/tests/Debug/test_ipc1d.exe --gtest_filter=Ccd.*
 function(rcipc_test name)
   add_executable(${name} ${name}.cc)
   target_link_libraries(${name} PRIVATE ${ARGN} GTest::gtest_main)
   gtest_discover_tests(${name} DISCOVERY_MODE PRE_TEST)
 endfunction()
 
-rcipc_test(test_smoke rcipc)
-rcipc_test(test_barrier rcipc)
-rcipc_test(test_ipc1d ipc1d)
+rcipc_test(test_smoke rcipc)     # 阶段 0：编译和依赖都能用
+rcipc_test(test_barrier rcipc)   # 阶段 1：障碍函数
+rcipc_test(test_ipc1d ipc1d)     # 阶段 1：一维 IPC 的时间步
