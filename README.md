@@ -5,7 +5,7 @@
 
 ## 编译和测试
 
-需要 CMake 3.24 以上和支持 C++17 的编译器（在 MSVC 2022 上测过）。Eigen 和 GoogleTest 在配置时自动下载。
+需要 CMake 3.24 以上和支持 C++17 的编译器（在 MSVC 2022 上测过）。Eigen、GoogleTest 和 MuJoCo 在配置时自动下载（MuJoCo 用的是官方编译好的 Windows 版）。
 
 ```
 cmake -S . -B build
@@ -17,9 +17,10 @@ ctest --test-dir build -C Debug --output-on-failure
 
 | 目录 | 内容 |
 |---|---|
-| `include/rcipc/`、`src/` | 库 `rcipc`：后面各阶段都会复用的代码（现在只有障碍函数） |
+| `include/rcipc/`、`src/` | 库 `rcipc`：后面各阶段都会复用的代码（障碍函数、四元数、模型、运动学） |
 | `toys/` | 练习用的小模型，每个只讲一个概念（阶段 1：`toys/ipc1d/`，小球落地） |
 | `tests/` | GoogleTest 测试，一个主题一个文件 |
+| `models/` | MJCF 模型（阶段 2 起），可以用 MuJoCo 的 `simulate.exe` 打开看 |
 | `notes/` | 推导和练习 |
 | `tools/` | 画图用的 Python 脚本 |
 | `cmake/` | 依赖的下载（`Dependencies.cmake`） |

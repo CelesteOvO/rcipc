@@ -7,9 +7,12 @@ include(GoogleTest)
 function(rcipc_test name)
   add_executable(${name} ${name}.cc)
   target_link_libraries(${name} PRIVATE ${ARGN} GTest::gtest_main)
+  rcipc_copy_dlls(${name})
   gtest_discover_tests(${name} DISCOVERY_MODE PRE_TEST)
 endfunction()
 
-rcipc_test(test_smoke rcipc)     # 阶段 0：编译和依赖都能用
-rcipc_test(test_barrier rcipc)   # 阶段 1：障碍函数
-rcipc_test(test_ipc1d ipc1d)     # 阶段 1：一维 IPC 的时间步
+rcipc_test(test_smoke rcipc)       # 阶段 0：编译和依赖都能用
+rcipc_test(test_barrier rcipc)     # 阶段 1：障碍函数
+rcipc_test(test_ipc1d ipc1d)       # 阶段 1：一维 IPC 的时间步
+rcipc_test(test_quat rcipc)        # 阶段 2：四元数
+rcipc_test(test_kinematics rcipc)  # 阶段 2：正运动学、积分、Jacobian，和 MuJoCo 对比

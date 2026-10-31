@@ -12,7 +12,7 @@ RC-IPC：在关节坐标里做 IPC。未知量是 MuJoCo 的关节坐标 $q$，�
 |---|---|---|---|
 | 0 | 仓库骨架：CMake、Eigen、GoogleTest | 冒烟测试 | — |
 | 1 | 一维 IPC：增量势、障碍、Newton 加线搜索、CCD（[笔记](01_ipc1d.md)） | 和书上的数字一致，永不穿透 | §3.1–3.5, 3.8 |
-| 2 | 关节坐标：树结构、FK、四元数积分、顶点 Jacobian | 和 `mj_kinematics`、`mj_integratePos` 一致，有限差分 | §1.3–1.4, 7.2–7.3 |
+| 2 | 关节坐标：树结构、FK、四元数积分、顶点 Jacobian（[笔记](02_kinematics.md)） | 和 `mj_kinematics`、`mj_integratePos` 一致，有限差分 | §1.3–1.4, 7.2–7.3 |
 | 3 | body 形式的惯性项：每个刚体做隐式 Euler，再经 FK 写成 $q$ 的函数 | Hessian 和 `mj_fullM` 一致；无接触双摆 | §7.4–7.5 |
 | 4 | 地面接触：障碍行 $r = \partial d^2/\partial q$，$\kappa$ 的初值。先用直弦 CCD | 故意复现直弦 CCD 的穿模 | §8.1–8.3, 9.5 |
 | 5 | 曲线 CCD：弦加矢高，每个刚体的加速度界，逐对保守推进 | 上一阶段的反例不再穿模 | §9.1–9.4 |

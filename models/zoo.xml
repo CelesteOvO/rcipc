@@ -1,0 +1,65 @@
+<!--
+  阶段 2 的测试模型：把正运动学可能出错的地方都放进去。
+    - 四种关节都有：free、ball、hinge、slide；
+    - 两棵树：躯干（自由关节，可以在空间里随便动）和挂在世界上的摆（铰链）；
+    - 树有分叉：躯干下面有头和手臂两个分支；
+    - 刚体有非零的位置偏移和姿态偏移（pos、quat、euler）；
+    - 关节锚点不在刚体原点（joint 的 pos）；
+    - 铰链和滑动有非零的 ref（qpos0 不是 0）；
+    - 有一个没有关节、焊死在父刚体上的刚体（hand）。
+  用 MuJoCo 自带的 simulate.exe 打开就能看到它（build/_deps/mujoco-src/bin/simulate.exe）。
+  这里所有的角度都用弧度（compiler angle="radian"），MuJoCo 默认是角度。
+-->
+<mujoco model="zoo">
+  <compiler angle="radian"/>
+  <option gravity="0 0 -9.81"/>
+
+  <worldbody>
+    <geom name="floor" type="plane" size="2 2 0.1"/>
+
+    <!-- 第一棵树：自由关节的躯干。它的 pos 只决定 qpos0；FK 直接用 q 里的位置和四元数。 -->
+    <body name="torso" pos="0 0 1" quat="0.9 0.1 -0.2 0.3">
+      <freejoint name="root"/>
+      <geom type="box" size="0.15 0.1 0.2"/>
+
+      <!-- 分支 1：球关节的头，锚点在头的下方（脖子），不在头的原点。 -->
+      <body name="head" pos="0 0 0.3" quat="0.95 0.05 0.2 -0.1">
+        <joint name="neck" type="ball" pos="0 0 -0.08"/>
+        <geom type="sphere" size="0.08"/>
+      </body>
+
+      <!-- 分支 2：手臂。铰链的轴是斜的，锚点偏离原点，ref 非零。 -->
+      <body name="arm" pos="0.2 0 0.1" euler="0 0.5 0">
+        <joint name="shoulder" type="hinge" axis="0 1 1" pos="-0.05 0 0" ref="0.3"/>
+        <geom type="capsule" fromto="0 0 0 0.3 0 0" size="0.04"/>
+
+        <!-- 滑动关节：前臂沿一根斜轴伸缩，ref 非零。 -->
+        <body name="forearm" pos="0.3 0 0">
+          <joint name="elbow" type="slide" axis="1 0.2 0" ref="0.1"/>
+          <geom type="capsule" fromto="0 0 0 0.25 0 0" size="0.03"/>
+
+          <!-- 没有关节：手焊死在前臂上，只有固定偏移。 -->
+          <body name="hand" pos="0.25 0 0" euler="0.2 0.3 0.4">
+            <geom type="box" size="0.04 0.03 0.01"/>
+
+            <!-- 手指：铰链，锚点偏离原点。它到根的链是 knuckle、elbow、shoulder、root。 -->
+            <body name="finger" pos="0.05 0 0">
+              <joint name="knuckle" type="hinge" axis="0 0 1" pos="0.01 0.02 0"/>
+              <geom type="capsule" fromto="0 0 0 0.05 0 0" size="0.01"/>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+
+    <!-- 第二棵树：挂在世界上的摆，铰链加一个球关节。 -->
+    <body name="post" pos="1 0 0.8" euler="0.3 0 0">
+      <joint name="swing" type="hinge" axis="1 0 0"/>
+      <geom type="capsule" fromto="0 0 0 0 0 -0.4" size="0.02"/>
+      <body name="bob" pos="0 0 -0.4">
+        <joint name="twist" type="ball" pos="0 0 0.05"/>
+        <geom type="sphere" size="0.06"/>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>

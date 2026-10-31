@@ -18,16 +18,21 @@ else()
   add_compile_options(-Wall -Wextra)
 endif()
 
-# 第三方依赖：Eigen、GoogleTest。
+# 第三方依赖：Eigen、GoogleTest、MuJoCo。
 include(cmake/Dependencies.cmake)
 
 # 库 rcipc：后面各阶段都会复用的代码。头文件在 include/rcipc/，实现在 src/。
-# 每个阶段往这里加源文件（阶段 2 会加正运动学，阶段 4 会加接触，……）。
+# 每个阶段往这里加源文件（阶段 4 会加接触，……）。
 add_library(rcipc
-  src/barrier.cc
+  src/barrier.cc     # 阶段 1：障碍函数
+  src/quat.cc        # 阶段 2：四元数的 exp 和 log
+  src/model.cc       # 阶段 2：从 MuJoCo 读出树结构
+  src/kinematics.cc  # 阶段 2：正运动学、q 的加减、点的 Jacobian
 )
 target_include_directories(rcipc PUBLIC include)
-target_link_libraries(rcipc PUBLIC Eigen3::Eigen)
+target_link_libraries(rcipc PUBLIC Eigen3::Eigen mujoco::mujoco)
+# 模型文件（MJCF）所在的目录，测试和演示程序用 RCIPC_MODEL_DIR "/zoo.xml" 这样的写法找到它们。
+target_compile_definitions(rcipc PUBLIC RCIPC_MODEL_DIR="${CMAKE_CURRENT_SOURCE_DIR}/models")
 
 # 阶段 1：一维 IPC（小球落地）。它是一个练习用的小模型，不属于库。
 #   库 ipc1d：被测试和演示程序共用；
@@ -37,6 +42,7 @@ target_include_directories(ipc1d PUBLIC toys)
 target_link_libraries(ipc1d PUBLIC rcipc)
 add_executable(ipc1d_demo toys/ipc1d/main.cc)
 target_link_libraries(ipc1d_demo PRIVATE ipc1d)
+rcipc_copy_dlls(ipc1d_demo)
 
 # 测试，定义在 tests/CMakeLists.txt。
 enable_testing()
