@@ -115,7 +115,7 @@ int main(int argc, char** argv) {
     if (a.mode == "impact") return impact(a);
     std::fprintf(stderr, "unknown mode %s (drop or impact)\n", a.mode.c_str());
     return 2;
-  } catch (const std::exception& e) {  // 还没实现的函数会抛出 "not implemented: ..."
+  } catch (const std::exception& e) {
     std::fprintf(stderr, "%s\n", e.what());
     return 1;
   }
