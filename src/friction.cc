@@ -2,6 +2,8 @@
 
 #include <cmath>
 
+#include <Eigen/Eigenvalues>
+
 #include "rcipc/barrier.h"
 
 // 滞后摩擦。推导见 notes/08_friction.md，测试见 tests/test_friction.cc。
@@ -100,6 +102,41 @@ VectorXd friction_gradient(const Model& model, const Frames& frames, const std::
   return g;
 }
 
+namespace {
+
+// 切平面里的 2 x 2 刚度 K（friction_hessian 的说明）。
+Eigen::Matrix2d tangent_stiffness(const Vector2d& u, double eps_v) {
+  const double y = u.norm();
+  const double radial = friction_f1_over_y(y, eps_v);                         // f1 / |u|
+  const double along = y < eps_v ? 2 / eps_v - 2 * y / (eps_v * eps_v) : 0.0;  // f1'
+  Eigen::Matrix2d K = radial * Eigen::Matrix2d::Identity();
+  if (y > 1e-12) {
+    const Vector2d uh = u / y;
+    K += (along - radial) * uh * uh.transpose();
+  }
+  return K;
+}
+
+}  // namespace
+
+std::vector<Row> friction_rows(const Model& model, const Frames& frames, const std::vector<FrictionContact>& fc, double h,
+                               double mu, double eps_v) {
+  // K 是对称半正定的 2 x 2 矩阵，特征分解 K = sum_i k_i v_i v_i^T（k_i >= 0），每个特征向量给一行 v_i^T R。
+  std::vector<Row> rows;
+  rows.reserve(2 * fc.size());
+  for (const FrictionContact& f : fc) {
+    const Vector2d u = friction_velocity(model, frames, f, h);
+    const Eigen::Matrix2d K = tangent_stiffness(u, eps_v);
+    const Eigen::SelfAdjointEigenSolver<Eigen::Matrix2d> es(K);
+    const RowVectorXd r1 = tangent_row(model, frames, f, f.t1), r2 = tangent_row(model, frames, f, f.t2);
+    for (int i = 0; i < 2; ++i) {
+      const Vector2d v = es.eigenvectors().col(i);
+      rows.push_back({v[0] * r1 + v[1] * r2, mu * f.lambda * std::max(es.eigenvalues()[i], 0.0) / h});
+    }
+  }
+  return rows;
+}
+
 MatrixXd friction_hessian(const Model& model, const Frames& frames, const std::vector<FrictionContact>& fc, double h,
                           double mu, double eps_v) {
   // 切平面里 f0(|u|) 的精确二阶导数是 (f1 / |u|) (1 - u^ u^T) + f1' u^ u^T（书第 186 页）：
@@ -109,15 +146,7 @@ MatrixXd friction_hessian(const Model& model, const Frames& frames, const std::v
   // 上界在滑动方向上比真实值硬几百倍，Newton 会在那个方向上爬行（台阶场景一步跑满 50 次），所以这里用精确值。
   MatrixXd H = MatrixXd::Zero(model.nv, model.nv);
   for (const FrictionContact& f : fc) {
-    const Vector2d u = friction_velocity(model, frames, f, h);
-    const double y = u.norm();
-    const double radial = friction_f1_over_y(y, eps_v);                         // f1 / |u|
-    const double along = y < eps_v ? 2 / eps_v - 2 * y / (eps_v * eps_v) : 0.0;  // f1'
-    Eigen::Matrix2d K = radial * Eigen::Matrix2d::Identity();
-    if (y > 1e-12) {
-      const Vector2d uh = u / y;
-      K += (along - radial) * uh * uh.transpose();
-    }
+    const Eigen::Matrix2d K = tangent_stiffness(friction_velocity(model, frames, f, h), eps_v);
     Eigen::Matrix<double, 2, Eigen::Dynamic> R(2, model.nv);
     R.row(0) = tangent_row(model, frames, f, f.t1);
     R.row(1) = tangent_row(model, frames, f, f.t2);

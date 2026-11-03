@@ -2,7 +2,8 @@
 //
 // 用法（参数都可以省略，写成 名字=值）：
 //   contact_demo [drop|flail|stack|ledge|slope] [h=..] [T=..] [dhat=..] [w=..] [kappa=..] [mu=..] [theta=..] [eps_v=..]
-//                [trace=0|1] [out=..]
+//                [ldlt=0|1] [semi=0|1] [adapt=0|1] [trace=0|1] [out=..]
+//   阶段 9 的开关（stack、ledge、slope）：ldlt=1 用稠密 LDLT 代替 PCG；semi=1 打开半隐式提前停止；adapt=0 关掉 kappa 调整。
 //
 // drop（默认）：models/drop.xml，盒子从 0.5 m 静止落到地面，模拟 T 秒（默认 1.5）。
 //               每步沿真实轨迹采样 64 点检查最小距离；打印最小间隙、静止间隙、kappa、Newton 次数、力平衡。
@@ -40,6 +41,7 @@ struct Args {
   double h = NAN, T = NAN, dhat = 1e-3, w = 40.0, kappa = 0;  // kappa = 0：由梯度平衡初始化
   double mu = 0.2, theta = 0.3, eps_v = 1e-3;  // 阶段 8：摩擦系数；斜面的坡度（tan theta）；摩擦光滑化的速度
   int trace = 0;
+  int ldlt = 0, semi = 0, adapt = 1;  // 阶段 9：用稠密 LDLT 而不是 PCG；半隐式停止；kappa 调整
   std::string out;
 };
 
@@ -62,6 +64,9 @@ Args parse(int argc, char** argv) {
     else if (k == "mu") a.mu = std::atof(v.c_str());
     else if (k == "theta") a.theta = std::atof(v.c_str());
     else if (k == "eps_v") a.eps_v = std::atof(v.c_str());
+    else if (k == "ldlt") a.ldlt = std::atoi(v.c_str());
+    else if (k == "semi") a.semi = std::atoi(v.c_str());
+    else if (k == "adapt") a.adapt = std::atoi(v.c_str());
     else if (k == "out") a.out = v;
     else std::fprintf(stderr, "unknown option %s\n", k.c_str());
   }
@@ -145,8 +150,11 @@ int scene(const Args& a, const char* file) {
 
   VectorXd q = model.qpos0, v = VectorXd::Zero(model.nv);
   double t = 0, dmin = 1e9, t_dmin = 0;
-  int nmax = 0, capped = 0;
-  long nsum = 0, nstep = 0;
+  int nmax = 0, capped = 0, semi_stops = 0;
+  long nsum = 0, nstep = 0, pcg_sum = 0;
+  P.solver = a.ldlt ? LinearSolver::kLdlt : LinearSolver::kPcg;
+  P.semi_implicit = a.semi != 0;
+  P.adapt_kappa = a.adapt != 0;
   FILE* f = a.out.empty() ? nullptr : std::fopen(a.out.c_str(), "w");
   if (f) std::fprintf(f, "t,min_distance,newton,kappa\n");
   while (t < T - 1e-12) {
@@ -174,6 +182,8 @@ int scene(const Args& a, const char* file) {
     }
     nmax = std::max(nmax, r.newton);
     nsum += r.newton;
+    pcg_sum += r.pcg;
+    semi_stops += r.semi_stopped;
     ++nstep;
     if (f) std::fprintf(f, "%.6f,%.17g,%d,%.6g\n", t, r.min_distance, r.newton, r.kappa);
   }
@@ -181,8 +191,9 @@ int scene(const Args& a, const char* file) {
   std::printf("%s, h %g s, T %g s, dhat %g m, kappa %.4g\n", file, P.h, T, P.dhat, S.kappa);
   std::printf("min distance along all trajectories: %.4f mm at t = %.3f s%s\n", dmin * 1e3, t_dmin,
               dmin > 0 ? "" : "  <-- PENETRATION");
-  std::printf("Newton iterations per step: max %d, mean %.2f, %d steps hit the cap\n", nmax, double(nsum) / nstep,
-              capped);
+  std::printf("Newton iterations per step: max %d, mean %.2f, %d steps hit the cap; PCG iterations per step: mean %.2f\n",
+              nmax, double(nsum) / nstep, capped, double(pcg_sum) / nstep);
+  if (a.semi) std::printf("semi-implicit stop: %d of %ld steps stopped early\n", semi_stops, nstep);
   std::printf("final v:");
   for (int i = 0; i < model.nv; ++i) std::printf(" %.4f", v[i]);
   std::printf("\nfinal q:");

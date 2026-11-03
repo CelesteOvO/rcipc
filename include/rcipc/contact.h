@@ -58,8 +58,22 @@ double contact_distance(const Model& model, const Frames& frames, const Contact&
 // J 是顶点的 point_jacobian（世界上的顶点 J = 0）。含义：关节沿 delta 动时，平方距离的变化率。
 Eigen::RowVectorXd contact_row(const Model& model, const Frames& frames, const Contact& c);
 
-// 能量 kappa * sum b(d^2)、梯度 kappa * sum b' r^T、Gauss-Newton Hessian kappa * sum max(b'', 0) r^T r。
+// Newton 系统里的一“行”（阶段 9，书第 152 页、§10）：Hessian 加 D r^T r。障碍行 D = kappa m b''，摩擦行见 friction.h。
+// 一行只在两侧刚体的链上非零，所以 H = H_k + sum_r D_r r_r^T r_r 不用组装成稠密矩阵就能乘向量（solver.h）。
+struct Row {
+  Eigen::RowVectorXd r;
+  double D;
+};
+
+// 障碍行的权重：阶段 4 是 max(b'', 0)；阶段 9 起是 b(d^2) 对 d 的精确二阶导数的系数 max(b'' + b' / (2 d^2), 0)
+// （contact.cc 里有说明）。两者都半正定，后者让 Newton 在法向上二次收敛。
+double barrier_row_weight(double d, double dhat);
+
+// 能量 kappa * sum b(d^2)、梯度 kappa * sum b' r^T、Hessian kappa * sum weight r^T r。
+// contact_rows 给出 Hessian 的行形式（contact_hessian 就是这些行的 sum D r^T r，测试拿两者对比）。
 double contact_energy(const Model& model, const std::vector<Contact>& contacts, double kappa, double dhat);
+std::vector<Row> contact_rows(const Model& model, const Frames& frames, const std::vector<Contact>& contacts, double kappa,
+                              double dhat);
 Eigen::VectorXd contact_gradient(const Model& model, const Frames& frames, const std::vector<Contact>& contacts,
                                  double kappa, double dhat);
 Eigen::MatrixXd contact_hessian(const Model& model, const Frames& frames, const std::vector<Contact>& contacts,

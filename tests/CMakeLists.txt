@@ -24,3 +24,4 @@ rcipc_test(test_curvature rcipc)   # 阶段 6：曲率上界
 rcipc_test(test_distance rcipc)    # 阶段 7：最近点
 rcipc_test(test_pairs rcipc)       # 阶段 7：刚体之间的接触、CCD、堆叠
 rcipc_test(test_friction rcipc)    # 阶段 8：摩擦
+rcipc_test(test_solver rcipc)      # 阶段 9：PCG、预条件器、停止规则、kappa 调整

@@ -281,6 +281,7 @@ TEST(Ccd, FastBoxOnBoxIsStoppedBeforeImpact) {
 TEST(Scene, StackNeverPenetratesAndRests) {
   const Model M = load("stack.xml");
   StepParams P;
+  P.adapt_kappa = false;  // 沿步首到步末的直线采样检查需要阶段 7 的大间隙；阶段 9 的检查见 test_solver.cc
   SolverState S;
   VectorXd q = M.qpos0, v = VectorXd::Zero(12);
   double dmin = 1e9;
@@ -306,6 +307,7 @@ TEST(Scene, StackNeverPenetratesAndRests) {
 TEST(Scene, LedgeNeverPenetrates) {
   const Model M = load("ledge.xml");
   StepParams P;
+  P.adapt_kappa = false;
   SolverState S;
   VectorXd q = M.qpos0, v = VectorXd::Zero(6);
   double dmin = 1e9;

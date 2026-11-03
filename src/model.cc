@@ -152,16 +152,24 @@ Model from_mujoco(const mjModel* m) {
     B.radius = std::max(B.radius, v.local.norm() + v.radius);
   }
 
+  // 阶段 9：树。父刚体是世界的刚体开一棵新树，其余刚体继承父刚体的树（parent < 自己的编号，所以一遍就够）。
+  M.body_tree.assign(m->nbody, -1);
+  for (int b = 1; b < m->nbody; ++b) {
+    M.body_tree[b] = M.bodies[b].parent == 0 ? M.ntree++ : M.body_tree[M.bodies[b].parent];
+  }
+
   // 自由度：每个属于哪个关节、哪个刚体，是转动还是平移。
   M.dof_joint.resize(m->nv);
   M.dof_body.resize(m->nv);
   M.dof_rot.resize(m->nv);
+  M.dof_tree.resize(m->nv);
   for (int i = 0; i < m->njnt; ++i) {
     const Joint& j = M.joints[i];
     for (int k = 0; k < j.nv; ++k) {
       M.dof_joint[j.dadr + k] = i;
       M.dof_body[j.dadr + k] = j.body;
       M.dof_rot[j.dadr + k] = is_rotation(j, k);
+      M.dof_tree[j.dadr + k] = M.body_tree[j.body];
     }
   }
   return M;

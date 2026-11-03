@@ -35,6 +35,7 @@ add_library(rcipc
   src/chain.cc       # 阶段 5：链上的关节和静态力臂
   src/distance.cc    # 阶段 7：点–三角形、线段–线段的最近点
   src/friction.cc    # 阶段 8：滞后的光滑化 Coulomb 摩擦
+  src/solver.cc      # 阶段 9：PCG 和树块预条件器
 )
 target_include_directories(rcipc PUBLIC include)
 target_link_libraries(rcipc PUBLIC Eigen3::Eigen mujoco::mujoco)

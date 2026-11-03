@@ -94,6 +94,11 @@ struct Model {
   std::vector<Plane> planes;     // 阶段 4：世界上的平面障碍（MJCF 里挂在 worldbody 上的 plane geom）
   std::vector<Edge> edges;       // 阶段 7：边
   std::vector<Face> faces;       // 阶段 7：三角形
+  // 阶段 9：树。挂在世界上的每个刚体连同它的子孙是一棵运动学树；树内部的自由度通过质量矩阵紧密耦合，
+  // 树之间只通过接触耦合。预条件器按树分块。
+  int ntree = 0;
+  std::vector<int> body_tree;    // 每个刚体属于哪棵树（世界是 -1）
+  std::vector<int> dof_tree;     // 每个自由度属于哪棵树（长度 nv）
 
   int nbody() const { return static_cast<int>(bodies.size()); }
   int nvertex() const { return static_cast<int>(vertices.size()); }

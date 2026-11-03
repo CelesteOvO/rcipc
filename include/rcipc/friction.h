@@ -52,4 +52,10 @@ Eigen::VectorXd friction_gradient(const Model& model, const Frames& frames, cons
 Eigen::MatrixXd friction_hessian(const Model& model, const Frames& frames, const std::vector<FrictionContact>& fc,
                                  double h, double mu, double eps_v);
 
+// Hessian 的行形式（阶段 9）：每个摩擦接触两行。把 2 x 2 的 K = (f1 / |u|)(1 - u^ u^T) + f1' u^ u^T 按特征向量拆开，
+//   K = sum_i k_i v_i v_i^T，于是 (mu lambda / h) R^T K R = sum_i (mu lambda k_i / h) (v_i^T R)^T (v_i^T R)：
+// 行是 v_i^T R（两条切向行的线性组合），权重 mu lambda k_i / h。
+std::vector<Row> friction_rows(const Model& model, const Frames& frames, const std::vector<FrictionContact>& fc, double h,
+                               double mu, double eps_v);
+
 }  // namespace rcipc

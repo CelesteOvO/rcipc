@@ -247,6 +247,7 @@ TEST(CurvedCcd, CatchesTheArcThroughTheFloor) {
 // 甩杆连续 100 步（40 rad/s 撞向地面，之后被弹回或停住）：每一步的真实轨迹都不穿透。
 TEST(CurvedCcd, FlailNeverPenetratesOverManySteps) {
   FlailSetup S;
+  S.P.adapt_kappa = false;  // 阶段 9 的 kappa 调整会把间隙压到 1e-2 dhat，这里保持阶段 5 的设置
   SolverState state;
   VectorXd q = S.q, v = S.v;
   double dmin = 1e9;
@@ -267,6 +268,7 @@ TEST(CurvedCcd, FlailNeverPenetratesOverManySteps) {
 TEST(CurvedCcd, TumblingBoxNeverPenetrates) {
   const Model M = load("drop.xml");
   StepParams P;
+  P.adapt_kappa = false;
   SolverState S;
   VectorXd q = M.qpos0, v = VectorXd::Zero(6);
   v[3] = 6.0;  // 绕 x 轴 6 rad/s

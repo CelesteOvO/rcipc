@@ -52,6 +52,7 @@ Model load(const char* file) { return from_mujoco(load_mjcf(std::string(RCIPC_MO
 
 void run(const Model& model, StepParams P, VectorXd q, VectorXd v, int steps, double scale) {
   P.curv_scale = scale;
+  P.adapt_kappa = false;  // 阶段 6 的实验只看 Newton 模型，不让 kappa 在迭代之间变
   SolverState S;
   std::printf("curv_scale %g\n", scale);
   for (int i = 0; i < steps; ++i) {

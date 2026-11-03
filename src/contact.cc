@@ -256,6 +256,26 @@ VectorXd contact_gradient(const Model& model, const Frames& frames, const std::v
   return g;
 }
 
+double barrier_row_weight(double d, double dhat) {
+  // 行的权重（阶段 4 用 b''；阶段 9 起用 b(d^2) 对 d 的精确二阶导数，笔记 notes/09_solver.md 第 7 节）。
+  //   沿法向，d^2 的二阶导数是 2，所以 d^2/dd^2 [b(d^2)] = b'' (2d)^2 + 2 b'。写成行的外积 r^T r = 4 d^2 (n J)^T (n J)
+  //   的系数：b'' + b' / (2 d^2)。它就是把 Gauss-Newton 丢掉的 2 kappa b' |Delta'|^2 里沿法向的那一部分补回来：
+  //   d 很小时 b'' ≈ x^2/d^4 而 b'/(2 d^2) ≈ -x^2/(2 d^4)，GN 的权重比精确值大一倍，Newton 在法向上每次只走一半
+  //   （线性收敛，比例 1/2）；补回来以后法向上是二次收敛。在 (0, dhat) 上它始终 > 0（测试 Weight.*），仍然半正定。
+  //   切向的那部分 2 kappa b' |Delta'_t|^2 仍然丢掉（它 <= 0，丢掉只会让模型更硬，安全）。
+  const BarrierValue bv = barrier(d * d, dhat * dhat);
+  return std::max(bv.ddb + bv.db / (2 * d * d), 0.0);
+}
+
+std::vector<Row> contact_rows(const Model& model, const Frames& frames, const std::vector<Contact>& contacts, double kappa,
+                              double dhat) {
+  // 每个活跃接触一行：r 是接触行，权重 D = kappa m max(b'', 0)。
+  std::vector<Row> rows;
+  rows.reserve(contacts.size());
+  for (const Contact& c : contacts) rows.push_back({contact_row(model, frames, c), kappa * c.moll * barrier_row_weight(c.d, dhat)});
+  return rows;
+}
+
 MatrixXd contact_hessian(const Model& model, const Frames& frames, const std::vector<Contact>& contacts, double kappa,
                          double dhat) {
   // Gauss-Newton Hessian（阶段 4 笔记第 3 节）。精确的二阶导数是
@@ -266,9 +286,8 @@ MatrixXd contact_hessian(const Model& model, const Frames& frames, const std::ve
   // （b' m' (r^T rho + rho^T r)，不定）都丢掉，模型仍然半正定；线搜索保证能量下降。
   MatrixXd H = MatrixXd::Zero(model.nv, model.nv);
   for (const Contact& c : contacts) {
-    const double ddb = std::max(barrier(c.d * c.d, dhat * dhat).ddb, 0.0);
     const RowVectorXd r = contact_row(model, frames, c);
-    H += kappa * c.moll * ddb * r.transpose() * r;
+    H += kappa * c.moll * barrier_row_weight(c.d, dhat) * r.transpose() * r;
   }
   return H;
 }
