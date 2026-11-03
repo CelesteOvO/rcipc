@@ -3,14 +3,14 @@
 // 一段 [s0, s0 + len] 的检查分两部分，并行方式和接触检测一样：
 //   - 顶点–平面：一个线程一个顶点，闭式解；
 //   - 刚体之间：先用扫掠盒找候选刚体对（launch_body_pairs，余量是两侧的矢高），
-//     再剔除（k_pair_ccd，一个 warp 一对刚体，narrow.cuh），剩下的候选图元对一个线程一对做 ACCD（k_ccd_exact）。
+//     再剔除（narrow.cu，在刚体坐标系里），剩下的候选图元对一个线程一对：先按 CPU 版的盒子规则用双精度复核，
+//     再做 ACCD（k_ccd_exact）。
 // 截断位置和需要的更短段长都用原子 min 汇总。分段、缩短重做的循环在主机上（stepper.cc），和 CPU 版一样。
 #include <algorithm>
 #include <cfloat>
 
 #include "devmath.cuh"
 #include "kernels.h"
-#include "narrow.cuh"
 
 namespace rcipc::gpu {
 
@@ -163,57 +163,44 @@ __global__ void k_body_disp(DModel m, const double* Xa, const double* Xb, double
   atomic_max(D + m.vbody[v], norm(v3load(Xb + 3 * v) - v3load(Xa + 3 * v)));
 }
 
-__global__ void k_pair_ccd(DModel m, const double* boxes, PrimBufs P, const double* D, const double* A, double len,
-                           double c, const int* pairs, const int* npairs_d, int pair_cap, DCands C) {
-  // 剔除（一个 warp 一对刚体，narrow.cuh）。CPU 版 curved_ccd 的刚体之间部分的规则：
-  //   点–三角形：顶点的扫掠盒和对方刚体的扫掠盒、和三角形的扫掠盒都按 xi 重叠，才做 ACCD；
-  //   边–边：第一条边的扫掠盒和对方刚体、和第二条边都按 xi 重叠，才做 ACCD。
-  // 在这之前先用单精度剔两遍，剔掉的都是做了 ACCD 也没有任何作用的对：
-  //   1. 单精度的扫掠盒离对方刚体超过 xi 的图元（只会多留）；
-  //   2. 段起点的距离 d0 足够大的图元对。accd_pair 在 d0 >= 2 xi 并且 c (d0 - xi) >= ell 时第一步就返回 1，
-  //      什么也不改（不截断、不要求缩短段长）。ell = la + lb，la、lb 都不超过 2 Dmax（Dmax 是两个刚体的顶点
-  //      在这一段里的最大位移，k_body_disp），所以 d0 >= T = max(2 xi, xi + 4 Dmax / c) 就可以跳过（T 再放大 1%，
-  //      盖住双精度的舍入）。d0 用单精度算，减去余量。
-  // 通过的再用双精度的盒子（P.dbox）把 CPU 版的条件原样查一遍，写进候选数组，由 k_ccd_exact 做 ACCD。
-  // 所以做 ACCD 的组合是 CPU 版的一个子集，少掉的都是 ACCD 什么也不改的，结果和 CPU 版完全一样。
-  const int warp = threadIdx.x >> 5;
-  const int pi = blockIdx.x * kPairWarps + warp;
-  __shared__ WarpLists lists[kPairWarps];
-  if (pi >= min(*npairs_d, pair_cap)) return;  // 刚体对的个数在显存里，按容量发线程块
-  const int body[2] = {pairs[2 * pi], pairs[2 * pi + 1]};
-  const double xi = (A[body[0]] + A[body[1]]) * len * len / 8;
-  const double T = 1.01 * fmax(2 * xi, xi + 4 * fmax(D[body[0]], D[body[1]]) / c);
-  const float pad = pair_pad(boxes, body);
-  bool full[6];
-  int len6[6];
-  warp_fill(m, P, boxes, body, xi, lists[warp], full, len6);
-  warp_scan(m, P, lists[warp], full, body, len6, C, [&](int L1, int id1, int id2, float df) {
-    const bool pt = L1 != 4;
-    if (df - pad >= __double2float_ru(T + pair_radii(m, id1, id2, !pt))) return false;
-    // 双精度复核：第一个图元（顶点或 a 的边）和对方刚体、和第二个图元。
-    const int other = body[1 - L1 % 2];
-    const double* b1 = P.dbox + 6 * static_cast<size_t>(prim_slot(m, pt ? 0 : 1, id1));
-    const double* b2 = P.dbox + 6 * static_cast<size_t>(prim_slot(m, pt ? 2 : 1, id2));
-    const V3 lo1 = v3load(b1), hi1 = v3load(b1 + 3);
-    if (!overlaps(lo1, hi1, v3load(boxes + 6 * other), v3load(boxes + 6 * other + 3), xi)) return false;
-    return overlaps(lo1, hi1, v3load(b2), v3load(b2 + 3), xi);
-  });
-}
-
 __global__ void k_ccd_init(double* tmin, double* ds_need, double* seen, double len) {
-  // 一段开始时的初值（一个线程）：截断位置 1、需要的段长 len、候选和刚体对的个数 0。用内核写，不用同步的拷贝。
+  // 一段开始时的初值（一个线程）：截断位置 1、需要的段长 len、候选、刚体对、工作项的个数 0。用内核写，不用同步的拷贝。
   *tmin = 1.0;
   *ds_need = len;
-  seen[0] = seen[1] = 0;
+  seen[0] = seen[1] = seen[2] = 0;
 }
 
-__global__ void k_ccd_exact(DModel m, const double* Xa, const double* Xb, const double* A, double len, double c,
-                            DCands C, const int* npairs_d, double* tmin, double* ds_need, double* seen) {
-  // 一个线程一个候选：ACCD（accd_pair）。xi、A_pair 由两个图元所在的刚体算，和 k_pair_ccd 里的一样。
-  // seen[0]、seen[1]：候选总数、刚体对总数（可能超过容量），主机和 tmin、ds_need 一起读回来，超过时扩容重做这一段。
+// 顶点 v 在 [Xa, Xb] 上的扫掠盒（按半径放大），和 CPU 版 curved_ccd 的一样。
+__device__ inline void vbox(const DModel& m, const double* Xa, const double* Xb, int v, V3& lo, V3& hi) {
+  const double r = m.vradius[v];
+  const V3 a = v3load(Xa + 3 * v), b = v3load(Xb + 3 * v), rr = v3(r, r, r);
+  lo = vmin(a, b) - rr;
+  hi = vmax(a, b) + rr;
+}
+// 几个顶点的扫掠盒的并。
+__device__ inline void prim_box(const DModel& m, const double* Xa, const double* Xb, const int* ids, int n, V3& lo,
+                                V3& hi) {
+  vbox(m, Xa, Xb, ids[0], lo, hi);
+  for (int k = 1; k < n; ++k) {
+    V3 l2, h2;
+    vbox(m, Xa, Xb, ids[k], l2, h2);
+    lo = vmin(lo, l2);
+    hi = vmax(hi, h2);
+  }
+}
+
+__global__ void k_ccd_exact(DModel m, const double* Xa, const double* Xb, const double* boxes, const double* A,
+                            double len, double c, DCands C, const int* npairs_d, const int* work_n, double* tmin,
+                            double* ds_need, double* seen) {
+  // 一个线程一个候选（narrow.cu 剔下来的）。剔除只保证“段起点的距离不小于阈值 T 的对一定被剔掉”，所以这里先按
+  // CPU 版 curved_ccd 的规则用双精度复核（第一个图元的扫掠盒和对方刚体、和第二个图元都按 xi 重叠），
+  // 通过的才做 ACCD（accd_pair）。做 ACCD 的对是 CPU 版的一个子集，少掉的都是 ACCD 什么也不改的（笔记第 4 节）。
+  // xi、A_pair 由两个图元所在的刚体算。
+  // seen[0..2]：候选、刚体对、工作项的总数（可能超过容量），主机和 tmin、ds_need 一起读回来，超过时扩容重做这一段。
   if (blockIdx.x == 0 && threadIdx.x == 0) {
     seen[0] = static_cast<double>(*C.count);
     seen[1] = static_cast<double>(*npairs_d);
+    seen[2] = static_cast<double>(*work_n);
   }
   const int n = cand_count(C);
   for (int k = blockIdx.x * blockDim.x + threadIdx.x; k < n; k += gridDim.x * blockDim.x) {
@@ -238,6 +225,14 @@ __global__ void k_ccd_exact(DModel m, const double* Xa, const double* Xb, const 
     }
     const double A_pair = A[ba] + A[bb];
     const double xi = A_pair * len * len / 8;
+    {
+      // CPU 版的盒子规则：点–三角形是顶点对三角形所在的刚体、对三角形；边–边是第一条边对第二条边的刚体、对第二条边。
+      V3 lo1, hi1, lo2, hi2;
+      prim_box(m, Xa, Xb, ids, ee ? 2 : 1, lo1, hi1);
+      if (!overlaps(lo1, hi1, v3load(boxes + 6 * bb), v3load(boxes + 6 * bb + 3), xi)) continue;
+      prim_box(m, Xa, Xb, ids + (ee ? 2 : 1), ee ? 2 : 3, lo2, hi2);
+      if (!overlaps(lo1, hi1, lo2, hi2, xi)) continue;
+    }
     const double radii = m.vradius[ids[0]] + m.vradius[ids[ee ? 2 : 1]];
     const double t = accd_pair(Xa, Xb, ids, !ee, radii, xi, A_pair, c, ds_need, tmin);
     if (t < 1.0) atomic_min(tmin, t);
@@ -264,15 +259,13 @@ void launch_ccd_init(double* tmin, double* ds_need, double* seen, double len) {
   k_ccd_init<<<1, 1>>>(tmin, ds_need, seen, len);
 }
 
-void launch_pair_ccd(const DModel& m, const double* Xa, const double* Xb, const double* boxes, const PrimBufs& P,
-                     const double* D, const double* A, double len, double c, const int* pairs, const int* npairs_d,
-                     int pair_cap, DCands C, double* tmin, double* ds_need, double* seen) {
-  cudaMemsetAsync(C.count, 0, sizeof(int));
-  if (pair_cap > 0) {
-    k_pair_ccd<<<(pair_cap + kPairWarps - 1) / kPairWarps, 32 * kPairWarps>>>(m, boxes, P, D, A, len, c, pairs,
-                                                                             npairs_d, pair_cap, C);
-    k_ccd_exact<<<std::min(blocks(C.cap), 1024), kThreads>>>(m, Xa, Xb, A, len, c, C, npairs_d, tmin, ds_need, seen);
-  }
+void launch_pair_ccd(const DModel& m, const DFrames& Fa, const double* Xb, const double* boxes, const double* D,
+                     const double* A, double len, double c, const int* pairs, const int* npairs_d, int pair_cap,
+                     DNarrow N, DCands C, double* tmin, double* ds_need, double* seen) {
+  launch_narrow(m, Fa, boxes, pairs, npairs_d, pair_cap, 0.0, A, D, len, c, N, C);
+  if (pair_cap > 0)
+    k_ccd_exact<<<std::min(blocks(C.cap), 1024), kThreads>>>(m, Fa.X, Xb, boxes, A, len, c, C, npairs_d, N.work_n, tmin,
+                                                           ds_need, seen);
 }
 
 }  // namespace rcipc::gpu

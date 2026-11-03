@@ -2,9 +2,7 @@
 //
 // 检测分三层，和 CPU 版的 for_each_candidate 规则一样（所以找到的接触一样）：
 //   1. 刚体对：一个线程一对刚体，包围盒按 dmax 放大后重叠的写进候选列表；
-//   2. 图元：一个 warp 一对刚体（k_pair_detect）。先把单精度盒子离对方刚体包围盒超过 dmax 的顶点、边、三角形剔掉
-//      （剩下的编号放在共享内存里），再在剩下的点–三角形、边–边里，用单精度距离（带余量）剔掉一定不是接触的，
-//      其余写进候选数组（narrow.cuh）；
+//   2. 剔除（narrow.cu）：在刚体坐标系里用事先分好组的盒子和单精度距离剔，剩下的写进候选数组；
 //   3. 图元对：一个线程一个候选，双精度算最近点，d < dmax 的原子地追加到接触列表（k_detect_exact）。
 // 单精度的盒子向外取整、距离带余量，只会多留不会漏，最后的距离用双精度算。
 // 每个接触的能量、梯度、行、曲率上界由一个线程算，往全局数组里原子加。
@@ -13,7 +11,6 @@
 
 #include "devmath.cuh"
 #include "kernels.h"
-#include "narrow.cuh"
 #include "rows.cuh"
 
 namespace rcipc::gpu {
@@ -174,74 +171,6 @@ __device__ bool make_ee(const DModel& m, const double* X, int e1, int e2, double
   return true;
 }
 
-
-// 每个图元的单精度包围盒（顶点按半径放大；Xb 不为空时是两个位置的并，CCD 用）：一个线程一个图元，
-// 顶点、边、三角形依次排在 [0, nvert + nedge + nface) 里。每次检测（或 CCD 的每一段）算一次，
-// 窄相里每一对图元直接读，不用再从顶点坐标算（同一个三角形会和几十个顶点配对）。
-// P.dbox 不为空时把双精度的盒子也存下来，P.xf 不为空时顺便存顶点坐标（X）的单精度版。
-__global__ void k_prim_boxes(DModel m, const double* X, const double* Xb, PrimBufs P) {
-  const int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i >= m.nvert + m.nedge + m.nface) return;
-  int ids[3], n;
-  if (i < m.nvert) {
-    ids[0] = i;
-    n = 1;
-    if (P.xf)
-      for (int k = 0; k < 3; ++k) P.xf[3 * i + k] = static_cast<float>(X[3 * i + k]);
-  } else if (i < m.nvert + m.nedge) {
-    const int e = i - m.nvert;
-    ids[0] = m.ev[2 * e];
-    ids[1] = m.ev[2 * e + 1];
-    n = 2;
-  } else {
-    const int f = i - m.nvert - m.nedge;
-    ids[0] = m.fv[3 * f];
-    ids[1] = m.fv[3 * f + 1];
-    ids[2] = m.fv[3 * f + 2];
-    n = 3;
-  }
-  V3 lo = v3(DBL_MAX, DBL_MAX, DBL_MAX), hi = v3(-DBL_MAX, -DBL_MAX, -DBL_MAX);
-  for (int k = 0; k < n; ++k) {
-    const double r = m.vradius[ids[k]];
-    const V3 rr = v3(r, r, r);
-    const V3 x = v3load(X + 3 * ids[k]);
-    lo = vmin(lo, x - rr);
-    hi = vmax(hi, x + rr);
-    if (Xb) {
-      const V3 y = v3load(Xb + 3 * ids[k]);
-      lo = vmin(lo, y - rr);
-      hi = vmax(hi, y + rr);
-    }
-  }
-  fbox_store(make_fbox(lo, hi), P.fbox + 6 * static_cast<size_t>(i));
-  if (P.dbox) {
-    v3store(lo, P.dbox + 6 * static_cast<size_t>(i));
-    v3store(hi, P.dbox + 6 * static_cast<size_t>(i) + 3);
-  }
-}
-
-__global__ void k_pair_detect(DModel m, const double* boxes, PrimBufs P, const int* pairs, const int* npairs_d,
-                              int pair_cap, double dmax, DCands C) {
-  // 剔除（一个 warp 一对刚体，narrow.cuh）：
-  //   1. 六张表只留单精度盒子离对方刚体包围盒不超过 dmax 的图元；
-  //   2. 三种组合里，单精度距离减去余量还不小于 dmax + 半径的跳过（make_pt / make_ee 一定判它“不是接触”）；
-  //   3. 剩下的写进候选数组，由 k_detect_exact 用双精度判断。
-  // 剔掉的都是双精度也会剔掉的，所以找到的接触和 CPU 版一样。
-  // 刚体对的个数在显存里（k_body_pairs 数的），不用先读回主机：按容量发线程块，多出来的 warp 直接退出。
-  const int warp = threadIdx.x >> 5;
-  const int pi = blockIdx.x * kPairWarps + warp;
-  __shared__ WarpLists lists[kPairWarps];
-  if (pi >= min(*npairs_d, pair_cap)) return;  // 整个 warp 一起退出（下面只用 warp 内的同步）
-  const int body[2] = {pairs[2 * pi], pairs[2 * pi + 1]};
-  const float pad = pair_pad(boxes, body);
-  bool full[6];
-  int len[6];
-  warp_fill(m, P, boxes, body, dmax, lists[warp], full, len);
-  warp_scan(m, P, lists[warp], full, body, len, C, [&](int L1, int id1, int id2, float df) {
-    const double lim = dmax + pair_radii(m, id1, id2, L1 == 4);
-    return !(df - pad >= __double2float_ru(lim));  // df 是 NaN 时也留下
-  });
-}
 
 __global__ void k_detect_exact(DModel m, const double* X, DCands C, double dmax, DContact* out, int cap, int* count) {
   // 一个线程一个候选：双精度的最近点，d < dmax 的追加到接触列表（make_pt / make_ee）。
@@ -513,23 +442,14 @@ void launch_body_pairs(const DModel& m, const double* boxes, double margin, cons
                                                                                     d_count);
 }
 
-void launch_prim_boxes(const DModel& m, const double* X, const double* Xb, const PrimBufs& P) {
-  const int n = m.nvert + m.nedge + m.nface;
-  if (n > 0) k_prim_boxes<<<blocks(n), kThreads>>>(m, X, Xb, P);
-}
-
-void launch_detect(const DModel& m, const double* X, const double* boxes, const PrimBufs& P, const int* pairs,
-                   int pair_cap, double dmax, DCands C, DContact* out, int cap, int* d_cnt, int h_cnt[3]) {
+void launch_detect(const DModel& m, const DFrames& F, const double* boxes, const int* pairs, int pair_cap,
+                   double dmax, DNarrow N, DCands C, DContact* out, int cap, int* d_cnt, int h_cnt[4]) {
   int* d_contacts = d_cnt + 1;
   cudaMemsetAsync(d_contacts, 0, sizeof(int));
-  cudaMemsetAsync(C.count, 0, sizeof(int));
-  if (m.nplane > 0 && m.nvert > 0) k_ground_detect<<<blocks(m.nvert), kThreads>>>(m, X, dmax, out, cap, d_contacts);
-  if (pair_cap > 0) {
-    k_pair_detect<<<(pair_cap + kPairWarps - 1) / kPairWarps, 32 * kPairWarps>>>(m, boxes, P, pairs, d_cnt, pair_cap,
-                                                                                dmax, C);
-    k_detect_exact<<<std::min(blocks(C.cap), 1024), kThreads>>>(m, X, C, dmax, out, cap, d_contacts);
-  }
-  cudaMemcpy(h_cnt, d_cnt, 3 * sizeof(int), cudaMemcpyDeviceToHost);  // 刚体对、接触、候选的个数，一次读回
+  if (m.nplane > 0 && m.nvert > 0) k_ground_detect<<<blocks(m.nvert), kThreads>>>(m, F.X, dmax, out, cap, d_contacts);
+  launch_narrow(m, F, boxes, pairs, d_cnt, pair_cap, dmax, nullptr, nullptr, 0.0, 0.0, N, C);
+  if (pair_cap > 0) k_detect_exact<<<std::min(blocks(C.cap), 1024), kThreads>>>(m, F.X, C, dmax, out, cap, d_contacts);
+  cudaMemcpy(h_cnt, d_cnt, 4 * sizeof(int), cudaMemcpyDeviceToHost);  // 刚体对、接触、候选、工作项的个数，一次读回
 }
 
 void launch_contact_terms(const DModel& m, const DFrames& F, const double* q, const DContact* c, int n, double kappa,

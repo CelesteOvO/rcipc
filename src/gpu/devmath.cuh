@@ -209,10 +209,10 @@ __device__ inline bool fbox_overlap(const FBox& a, const FBox& b, float margin) 
   return true;
 }
 
-// ---------- 单精度的距离（只用来剔除，narrow.cuh） ----------
+// ---------- 单精度的距离（只用来剔除，narrow.cu） ----------
 //
 // 和上面两个最近点函数是同一个算法（Ericson 5.1.5、5.1.9），换成单精度：消费级显卡的单精度比双精度快几十倍。
-// 结果只当作“大概的距离”：调用者要加一个余量（narrow.cuh 的 kFloatPad），离得比阈值加余量还远才跳过。
+// 结果只当作“大概的距离”：调用者要加一个余量（narrow.cu 的 kFloatPad），离得比阈值加余量还远才跳过。
 struct F3 {
   float x, y, z;
 };

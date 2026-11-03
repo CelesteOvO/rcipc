@@ -44,14 +44,20 @@ void launch_body_pairs(const DModel& m, const double* boxes, double margin, cons
                        int cap, int* d_count);
 // 接触检测（find_contacts）：顶点–平面，加上候选刚体对之间的点–三角形、边–边。只留 d < dmax 的。
 // 返回总数（同步）；可能大于 cap，调用者扩容后重来。
-// P 是 launch_prim_boxes 在 X 处算的（不用 dbox）。d_cnt 是显存里的 3 个计数：[0] 是 launch_body_pairs 数的刚体对，
-// [1] 接触、[2] 候选（C.count 要指向 d_cnt + 2）。三个计数一次读回 h_cnt（同步）；任何一个超过容量时，
-// 调用者扩容后重来（这时接触不全）。pair_cap = 0 表示没有刚体对（模型里没有边和三角形）。
-void launch_detect(const DModel& m, const double* X, const double* boxes, const PrimBufs& P, const int* pairs,
-                   int pair_cap, double dmax, DCands C, DContact* out, int cap, int* d_cnt, int h_cnt[3]);
-// 每个图元的单精度包围盒（向外取整，narrow.cuh），写到 P.fbox；P.dbox 不为空时另存双精度的盒子，
-// P.xf 不为空时另存 X 的单精度版。Xb 不为空时盒子是两个位置的并（CCD 的扫掠盒）。
-void launch_prim_boxes(const DModel& m, const double* X, const double* Xb, const PrimBufs& P);
+// 接触检测：F 是这个位置的 FK（要 X、xpos、xquat）。d_cnt 是显存里的 4 个计数：[0] 是 launch_body_pairs 数的刚体对，
+// [1] 接触、[2] 候选（C.count 要指向 d_cnt + 2）、[3] 剔除的工作项（N.work_n 要指向 d_cnt + 3）。
+// 四个计数一次读回 h_cnt（同步）；任何一个超过容量时，调用者扩容后重来（这时接触不全）。
+// pair_cap = 0 表示没有刚体对（模型里没有边和三角形）。
+void launch_detect(const DModel& m, const DFrames& F, const double* boxes, const int* pairs, int pair_cap,
+                   double dmax, DNarrow N, DCands C, DContact* out, int cap, int* d_cnt, int h_cnt[4]);
+// 窄相的剔除（narrow.cu）：候选刚体对里，在刚体坐标系里剔掉“距离一定不小于阈值”的图元对，剩下的写进 C。
+// 检测时 A 为空，阈值是 dmax；CCD 时阈值是 max(2 xi, xi + 4 Dmax / c)（A 是加速度界，D 是每个刚体的最大位移）。
+// 都再加上两个图元的半径。F 是剔除用的位置的 FK（CCD 时是段起点）。
+void launch_narrow(const DModel& m, const DFrames& F, const double* boxes, const int* pairs, const int* npairs_d,
+                   int pair_cap, double dmax, const double* A, const double* D, double len, double c, DNarrow N,
+                   DCands C);
+// out[i] = (float) x[i]，i < n（CCD 的单精度扫掠盒用）。
+void launch_to_float(const double* x, int n, float* out);
 // 接触的各项（contact_energy、contact_gradient、contact_rows、contact_curvature）：
 //   能量累加到 *e，梯度累加到 g，曲率上界累加到 Hk 的对角，行写到 rows 的第 0..n-1 行（哪个为空就不算）。
 void launch_contact_terms(const DModel& m, const DFrames& F, const double* q, const DContact* c, int n, double kappa,
@@ -75,12 +81,11 @@ void launch_accel_bounds(const DModel& m, const double* q, const double* p, doub
 //   段内的截断位置 atomic_min 到 *tmin（调用者先设成 1），需要的更短段长 atomic_min 到 *ds_need（先设成 len）。
 void launch_ground_ccd(const DModel& m, const double* Xa, const double* Xb, const double* A, double len, double c,
                        double* tmin, double* ds_need);
-// P 是 launch_prim_boxes(Xa, Xb) 算的（要 dbox 和 xf），D 是 launch_body_disp 算的每个刚体的最大位移，
-// npairs_d 是显存里的刚体对个数（launch_body_pairs）。seen[0]、seen[1] 写候选、刚体对的总数（double），
-// 超过容量时调用者扩容后重做这一段。
-void launch_pair_ccd(const DModel& m, const double* Xa, const double* Xb, const double* boxes, const PrimBufs& P,
-                     const double* D, const double* A, double len, double c, const int* pairs, const int* npairs_d,
-                     int pair_cap, DCands C, double* tmin, double* ds_need, double* seen);
+// Fa 是段起点的 FK，Xb 是段终点的顶点，D 是 launch_body_disp 算的每个刚体的最大位移，npairs_d 是显存里的刚体对个数
+// （launch_body_pairs）。seen[0..2] 写候选、刚体对、工作项的总数（double），超过容量时调用者扩容后重做这一段。
+void launch_pair_ccd(const DModel& m, const DFrames& Fa, const double* Xb, const double* boxes, const double* D,
+                     const double* A, double len, double c, const int* pairs, const int* npairs_d, int pair_cap,
+                     DNarrow N, DCands C, double* tmin, double* ds_need, double* seen);
 // 一段 CCD 的初值：*tmin = 1，*ds_need = len，seen[0..1] = 0（一个小内核，不用同步的拷贝）。
 void launch_ccd_init(double* tmin, double* ds_need, double* seen, double len);
 // 每个刚体的顶点从 Xa 到 Xb 的最大位移，写到 D（nbody 个，先清零）。

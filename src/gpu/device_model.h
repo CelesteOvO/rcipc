@@ -74,6 +74,22 @@ struct DModel {
   const int* fbody = nullptr;
   const double* pn = nullptr;       // nplane x 3
   const double* poff = nullptr;
+
+  // 刚体坐标系里的几何（窄相的剔除用，narrow.cu；上传时算一次，以后不变）。单精度的盒子都向外取整。
+  const float* vlf = nullptr;       // nvert x 3：顶点在自己刚体坐标系里的坐标（单精度）
+  const float* flbox = nullptr;     // nface x 6：三角形在自己刚体坐标系里的盒子（含半径）
+  const float* elbox = nullptr;     // nedge x 6：边的盒子
+  const float* blbox_f = nullptr;   // nbody x 6：刚体全部三角形的总盒子（没有三角形时 lo > hi）
+  const float* blbox_e = nullptr;   // nbody x 6：全部边的总盒子
+  // 分组（chunk）：每个刚体的三角形按空间分成至多 32 个一组，组的盒子是组里各个盒子的并。
+  const int* fch_order = nullptr;   // nface：按组排好的三角形编号
+  const int* fch_range = nullptr;   // 每组 2 个：在 fch_order 里的起点、个数
+  const float* fch_box = nullptr;   // 每组 6 个
+  const int* bfch = nullptr;        // nbody x 2：刚体的第一组、组数
+  const int* ech_order = nullptr;   // 边的分组，同上
+  const int* ech_range = nullptr;
+  const float* ech_box = nullptr;
+  const int* bech = nullptr;
 };
 
 // 正运动学的结果（显存）。
@@ -104,14 +120,24 @@ struct DFriction {
   double X0[12];
 };
 
-// 图元的缓冲区（launch_prim_boxes 写，窄相读，narrow.cuh）。
-struct PrimBufs {
-  float* fbox = nullptr;   // 每个图元的单精度盒子（向外取整），顶点、边、三角形依次排，每个 6 个 float
-  double* dbox = nullptr;  // 同样的盒子的双精度版（可以为空；CCD 的精确复核用）
-  float* xf = nullptr;     // 顶点坐标的单精度版（3 nvert 个；CCD 时是段起点的坐标）
+// 窄相剔除的工作区（narrow.cu，调用者分配）：每对刚体的两个相对变换、阈值、单精度的余量，和工作列表。
+struct DWork {
+  int a, b;  // a = 3 x 刚体对的序号 + 查询的种类（0、1、2），b = 查询的顶点或边
+};
+struct DNarrow {
+  float* pxf = nullptr;    // 每对 24 个：a 到 b、b 到 a 的变换（R 9 个，t 3 个）
+  double* pT = nullptr;    // 每对的阈值
+  float* ppad = nullptr;   // 每对的单精度余量
+  float* pxm = nullptr;    // 每对的 xi（向上取整）加余量，CCD 的扫掠盒测试用
+  DWork* work = nullptr;
+  int* work_n = nullptr;   // 显存里的计数（可能超过 work_cap，超过时调用者扩容后重来）
+  int work_cap = 0;
+  // CCD 时段起点、终点的顶点世界坐标的单精度版（launch_to_float）；检测时为空。
+  const float* xa = nullptr;
+  const float* xb = nullptr;
 };
 
-// 窄相的候选图元对（narrow.cuh）：剔除的内核写，精确判断的内核读。
+// 窄相的候选图元对（narrow.cu）：剔除的内核写，精确判断的内核读。
 //   点–三角形：a 是顶点、b 是三角形；边–边：a 是第一条边、b = ~（第二条边），所以 b < 0 就是边–边。
 struct DCand {
   int a, b;
@@ -121,6 +147,10 @@ struct DCands {
   int* count = nullptr;  // 显存里的计数（可能超过 cap，超过时调用者扩容后重来）
   int cap = 0;
 };
+#ifdef __CUDACC__
+// 精确判断的内核用：显存里的候选个数（不超过 cap）。一个线程一个候选，网格跨步，不用回主机读个数。
+__device__ inline int cand_count(const DCands& C) { return min(*C.count, C.cap); }
+#endif
 
 // Newton 系统的行（行形式，阶段 9）。GPU 上按“力旋量”存（rows.cuh）：每行两侧，每侧一个刚体和一个力旋量 (f, tau)。
 // 这一行在自由度 d 上的值：d 在某一侧刚体的链上时，转动自由度 a_d . (tau - o_d x f)，滑动自由度 a_d . f；两侧相加。

@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -95,6 +96,111 @@ struct FrameBufs {
 
 double host_max(const VectorXd& x) { return x.size() ? x.cwiseAbs().maxCoeff() : 0.0; }
 
+// 双精度转单精度，向下 / 向上取整（盒子要向外取整，单精度的盒子才一定包住双精度的）。
+float f_down(double x) {
+  float f = static_cast<float>(x);
+  if (static_cast<double>(f) > x) f = std::nextafter(f, -std::numeric_limits<float>::infinity());
+  return f;
+}
+float f_up(double x) {
+  float f = static_cast<float>(x);
+  if (static_cast<double>(f) < x) f = std::nextafter(f, std::numeric_limits<float>::infinity());
+  return f;
+}
+
+// 一种图元（三角形或边）在刚体坐标系里的盒子和分组（narrow.cu）。
+struct ChunkSet {
+  std::vector<float> box;    // 每个图元 6 个：刚体坐标系里的盒子（含半径，向外取整）
+  std::vector<int> order;    // 按组排好的图元编号
+  std::vector<int> range;    // 每组 2 个：在 order 里的起点、个数
+  std::vector<float> cbox;   // 每组 6 个：组里各个盒子的并
+  std::vector<int> bch;      // 每个刚体 2 个：第一组、组数
+  std::vector<float> bbox;   // 每个刚体 6 个：它全部图元的总盒子（没有图元时 lo > hi）
+};
+
+// 刚体 b 的图元是 [first[b], first[b] + count[b])，图元 i 的顶点是 verts[k i .. k i + k - 1]。
+// 分组和上一个分支的一样：按盒子中心坐标跨度最大的那个轴，在中位数处一分为二，直到每组不超过 CH 个。
+ChunkSet build_chunks(int nbody, const std::vector<int>& first, const std::vector<int>& count, const std::vector<int>& verts,
+                      int k, const std::vector<double>& vlocal, const std::vector<double>& vradius, int CH = 32) {
+  ChunkSet S;
+  const int n = static_cast<int>(verts.size()) / k;
+  S.box.resize(6 * static_cast<size_t>(n));
+  std::vector<double> cen(3 * static_cast<size_t>(n));
+  for (int i = 0; i < n; ++i) {
+    double lo[3] = {1e300, 1e300, 1e300}, hi[3] = {-1e300, -1e300, -1e300};
+    for (int j = 0; j < k; ++j) {
+      const int v = verts[k * i + j];
+      for (int a = 0; a < 3; ++a) {
+        lo[a] = std::min(lo[a], vlocal[3 * v + a] - vradius[v]);
+        hi[a] = std::max(hi[a], vlocal[3 * v + a] + vradius[v]);
+      }
+    }
+    for (int a = 0; a < 3; ++a) {
+      S.box[6 * i + a] = f_down(lo[a]);
+      S.box[6 * i + 3 + a] = f_up(hi[a]);
+      cen[3 * i + a] = 0.5 * (lo[a] + hi[a]);
+    }
+  }
+  const float inf = std::numeric_limits<float>::infinity();
+  const auto add_chunk = [&](const std::vector<int>& ids) {
+    S.range.push_back(static_cast<int>(S.order.size()));
+    S.range.push_back(static_cast<int>(ids.size()));
+    float c[6] = {inf, inf, inf, -inf, -inf, -inf};
+    for (int i : ids) {
+      S.order.push_back(i);
+      for (int a = 0; a < 3; ++a) {
+        c[a] = std::min(c[a], S.box[6 * i + a]);
+        c[3 + a] = std::max(c[3 + a], S.box[6 * i + 3 + a]);
+      }
+    }
+    S.cbox.insert(S.cbox.end(), c, c + 6);
+  };
+  std::function<void(std::vector<int>)> split = [&](std::vector<int> ids) {
+    if (static_cast<int>(ids.size()) <= CH) {
+      add_chunk(ids);
+      return;
+    }
+    double lo[3] = {1e300, 1e300, 1e300}, hi[3] = {-1e300, -1e300, -1e300};
+    for (int i : ids)
+      for (int a = 0; a < 3; ++a) {
+        lo[a] = std::min(lo[a], cen[3 * i + a]);
+        hi[a] = std::max(hi[a], cen[3 * i + a]);
+      }
+    int ax = 0;
+    for (int a = 1; a < 3; ++a)
+      if (hi[a] - lo[a] > hi[ax] - lo[ax]) ax = a;
+    std::stable_sort(ids.begin(), ids.end(), [&](int x, int y) { return cen[3 * x + ax] < cen[3 * y + ax]; });
+    const size_t h = ids.size() / 2;
+    split(std::vector<int>(ids.begin(), ids.begin() + h));
+    split(std::vector<int>(ids.begin() + h, ids.end()));
+  };
+  S.bch.resize(2 * static_cast<size_t>(nbody));
+  S.bbox.resize(6 * static_cast<size_t>(nbody));
+  for (int b = 0; b < nbody; ++b) {
+    const int c0 = static_cast<int>(S.range.size()) / 2;
+    std::vector<int> ids(count[b]);
+    for (int i = 0; i < count[b]; ++i) ids[i] = first[b] + i;
+    if (!ids.empty()) split(ids);
+    const int c1 = static_cast<int>(S.range.size()) / 2;
+    S.bch[2 * b] = c0;
+    S.bch[2 * b + 1] = c1 - c0;
+    float bb[6] = {inf, inf, inf, -inf, -inf, -inf};
+    for (int c = c0; c < c1; ++c)
+      for (int a = 0; a < 3; ++a) {
+        bb[a] = std::min(bb[a], S.cbox[6 * c + a]);
+        bb[3 + a] = std::max(bb[3 + a], S.cbox[6 * c + 3 + a]);
+      }
+    for (int a = 0; a < 6; ++a) S.bbox[6 * b + a] = bb[a];
+  }
+  if (S.range.empty()) {  // 没有这种图元：放一个空组，显存里的数组不为空
+    S.range = {0, 0};
+    S.cbox = {inf, inf, inf, -inf, -inf, -inf};
+  }
+  if (S.order.empty()) S.order = {0};
+  if (S.box.empty()) S.box = {inf, inf, inf, -inf, -inf, -inf};
+  return S;
+}
+
 }  // namespace
 
 bool available() {
@@ -117,9 +223,14 @@ struct Stepper::Impl {
   FrameBufs F, F0, Fp, F1, Fa, Fb, Ft;
   DBuf<double> q, q0, qprev, p, qtrial, g, ge0, gb, Hk, P, scale, work, scal, tc, tA, A, boxes, rhs;
   DBuf<int> pairs, cnt;
-  DBuf<float> primbox;     // 每个图元的单精度盒子：顶点、边、三角形依次排，每个 6 个 float（narrow.cuh）
-  DBuf<double> primbox_d;  // 同样的盒子的双精度版（CCD 的精确复核用）
-  DBuf<float> xf;          // 顶点坐标的单精度版（窄相的单精度距离用）
+  // 窄相剔除（narrow.cu）：刚体坐标系里的几何（上传时算一次）和每次用的工作区。
+  DBuf<float> f_vlf, f_flbox, f_elbox, f_blbox_f, f_blbox_e, f_fch_box, f_ech_box;
+  DBuf<int> i_fch_order, i_fch_range, i_bfch, i_ech_order, i_ech_range, i_bech;
+  DBuf<float> n_pxf, n_ppad, n_pxm;
+  DBuf<float> xfa, xfb;  // CCD 一段起点、终点的顶点坐标（单精度）
+  DBuf<double> n_pT;
+  DBuf<DWork> n_work;
+  int work_cap = 0;
   DBuf<double> bdisp;      // CCD 每一段里每个刚体的最大位移
   DBuf<DCand> cand;        // 窄相的候选图元对（个数在 cnt[2]）
   int cand_cap = 0;
@@ -299,6 +410,12 @@ struct Stepper::Impl {
       poff[pl] = M.planes[pl].offset;
     }
 
+    // 刚体坐标系里的几何和分组（窄相的剔除用，narrow.cu）。
+    std::vector<float> vlf(3 * static_cast<size_t>(m.nvert));
+    for (size_t i = 0; i < vlf.size(); ++i) vlf[i] = static_cast<float>(vlocal[i]);
+    const ChunkSet fc = build_chunks(nb, bface0, bnface, fv, 3, vlocal, vradius);
+    const ChunkSet ec = build_chunks(nb, bedge0, bnedge, ev, 2, vlocal, vradius);
+
     // 上传，并把指针填进 DModel。
     const auto up_i = [](DBuf<int>& buf, const std::vector<int>& v) {
       buf.upload(v);
@@ -352,6 +469,23 @@ struct Stepper::Impl {
     m.fbody = up_i(i_fbody, fbody);
     m.pn = up_d(d_pn, pn);
     m.poff = up_d(d_poff, poff);
+    const auto up_f = [](DBuf<float>& buf, const std::vector<float>& v) {
+      buf.upload(v);
+      return buf.get();
+    };
+    m.vlf = up_f(f_vlf, vlf);
+    m.flbox = up_f(f_flbox, fc.box);
+    m.elbox = up_f(f_elbox, ec.box);
+    m.blbox_f = up_f(f_blbox_f, fc.bbox);
+    m.blbox_e = up_f(f_blbox_e, ec.bbox);
+    m.fch_order = up_i(i_fch_order, fc.order);
+    m.fch_range = up_i(i_fch_range, fc.range);
+    m.fch_box = up_f(f_fch_box, fc.cbox);
+    m.bfch = up_i(i_bfch, fc.bch);
+    m.ech_order = up_i(i_ech_order, ec.order);
+    m.ech_range = up_i(i_ech_range, ec.range);
+    m.ech_box = up_f(f_ech_box, ec.cbox);
+    m.bech = up_i(i_bech, ec.bch);
 
     // 工作区。
     for (FrameBufs* f : {&F, &F0, &Fp, &F1, &Fa, &Fb, &Ft}) f->reserve(m);
@@ -366,9 +500,9 @@ struct Stepper::Impl {
     tA.reserve(9 * nb);
     A.reserve(nb);
     boxes.reserve(6 * nb);
-    primbox.reserve(6 * static_cast<size_t>(m.nvert + m.nedge + m.nface));
-    primbox_d.reserve(6 * static_cast<size_t>(m.nvert + m.nedge + m.nface));
-    xf.reserve(3 * static_cast<size_t>(std::max(m.nvert, 1)));
+    grow_work(1 << 16);
+    xfa.reserve(3 * static_cast<size_t>(std::max(m.nvert, 1)));
+    xfb.reserve(3 * static_cast<size_t>(std::max(m.nvert, 1)));
     bdisp.reserve(nb);
     grow_cands(1 << 16);
     cnt.reserve(4);
@@ -380,6 +514,26 @@ struct Stepper::Impl {
   void grow_pairs(int n) {
     pair_cap = n;
     pairs.reserve(2 * static_cast<size_t>(n));
+    n_pxf.reserve(24 * static_cast<size_t>(n));
+    n_ppad.reserve(n);
+    n_pxm.reserve(n);
+    n_pT.reserve(n);
+  }
+  void grow_work(int n) {
+    work_cap = n;
+    n_work.reserve(n);
+  }
+  // 工作项的个数在 cnt[3]。
+  DNarrow narrow() const {
+    DNarrow N;
+    N.pxf = n_pxf.get();
+    N.pT = n_pT.get();
+    N.ppad = n_ppad.get();
+    N.pxm = n_pxm.get();
+    N.work = n_work.get();
+    N.work_n = cnt.get() + 3;
+    N.work_cap = work_cap;
+    return N;
   }
   void grow_contacts(int n) {
     // 只扩接触的缓冲区。摩擦接触在步首冻结以后整步都要用，不能在这里跟着重新分配（重新分配会丢掉内容）。
@@ -418,26 +572,20 @@ struct Stepper::Impl {
     return v;
   }
 
-  // 检测用的图元缓冲区不要双精度的盒子，CCD 用的要。
-  PrimBufs prims(bool with_dbox) const { return PrimBufs{primbox.get(), with_dbox ? primbox_d.get() : nullptr, xf.get()}; }
-
   bool pairs_on() const { return m.nedge > 0 || m.nface > 0; }
 
   // 接触检测（find_contacts，dmax = dhat）：结果放在 contacts 里，返回个数。
-  // 刚体对、候选、接触的个数都留在显存里，最后一次读回（cnt[0..2]）；哪个放不下就扩容重来。
+  // 刚体对、接触、候选、工作项的个数都留在显存里，最后一次读回（cnt[0..3]）；哪个放不下就扩容重来。
   int detect(const FrameBufs& Fr, double dmax) {
     launch_body_boxes(m, Fr.X.get(), boxes.get());
-    int h[3];
+    int h[4];
     for (;;) {
-      if (pairs_on()) {
-        launch_body_pairs(m, boxes.get(), dmax, nullptr, 0.0, pairs.get(), pair_cap, cnt.get());
-        launch_prim_boxes(m, Fr.X.get(), nullptr, prims(false));
-      } else {
-        cudaMemsetAsync(cnt.get(), 0, sizeof(int));
-      }
-      launch_detect(m, Fr.X.get(), boxes.get(), prims(false), pairs.get(), pairs_on() ? pair_cap : 0, dmax, cands(),
+      if (pairs_on()) launch_body_pairs(m, boxes.get(), dmax, nullptr, 0.0, pairs.get(), pair_cap, cnt.get());
+      else cudaMemsetAsync(cnt.get(), 0, sizeof(int));
+      launch_detect(m, Fr.view(), boxes.get(), pairs.get(), pairs_on() ? pair_cap : 0, dmax, narrow(), cands(),
                     contacts.get(), contact_cap, cnt.get(), h);
       if (h[0] > pair_cap) grow_pairs(2 * h[0]);
+      else if (h[3] > work_cap) grow_work(2 * h[3]);
       else if (h[2] > cand_cap) grow_cands(2 * h[2]);
       else if (h[1] > contact_cap) grow_contacts(2 * h[1]);
       else break;
@@ -557,7 +705,7 @@ struct Stepper::Impl {
     const bool pairs_on = m.nedge > 0 || m.nface > 0;
     double ds = A_max > 0 ? std::min(1.0, std::sqrt(8 * Pm.dhat / A_max)) : 1.0;
     double s0 = 0, result = -1, limit_t = 1.0;
-    const double* Xa = F.X.get();
+    const FrameBufs* Fs = &F;  // 段起点的 FK
     // 限位的 CCD 和分段无关，先发出去；结果在 scal[3]，跟着每一段的结果一起读回。
     set_scalar(3, 1.0);
     launch_limit_ccd(m, qd, pd, Pm.c, scal.get() + 3);
@@ -566,22 +714,31 @@ struct Stepper::Impl {
       const double len = s1 - s0;
       launch_integrate(m, qd, pd, s1, qtrial.get());
       launch_fk(m, qtrial.get(), Fb.view());
-      // scal[1] 截断位置，scal[2] 需要的段长，scal[9..10] 候选、刚体对的个数。这一段只在最后读回一次。
+      // scal[1] 截断位置，scal[2] 需要的段长，scal[9..11] 候选、刚体对、工作项的个数。这一段只在最后读回一次。
+      const double* Xa = Fs->X.get();
       launch_ccd_init(scal.get() + 1, scal.get() + 2, scal.get() + 9, len);
       launch_ground_ccd(m, Xa, Fb.X.get(), A.get(), len, Pm.c, scal.get() + 1, scal.get() + 2);
       if (pairs_on) {
         launch_swept_boxes(m, Xa, Fb.X.get(), boxes.get());
         launch_body_pairs(m, boxes.get(), 0.0, A.get(), len, pairs.get(), pair_cap, cnt.get());
-        launch_prim_boxes(m, Xa, Fb.X.get(), prims(true));
         launch_body_disp(m, Xa, Fb.X.get(), bdisp.get());
-        launch_pair_ccd(m, Xa, Fb.X.get(), boxes.get(), prims(true), bdisp.get(), A.get(), len, Pm.c, pairs.get(),
-                        cnt.get(), pair_cap, cands(), scal.get() + 1, scal.get() + 2, scal.get() + 9);
+        launch_to_float(Xa, 3 * m.nvert, xfa.get());
+        launch_to_float(Fb.X.get(), 3 * m.nvert, xfb.get());
+        DNarrow N = narrow();
+        N.xa = xfa.get();
+        N.xb = xfb.get();
+        launch_pair_ccd(m, Fs->view(), Fb.X.get(), boxes.get(), bdisp.get(), A.get(), len, Pm.c, pairs.get(), cnt.get(),
+                        pair_cap, N, cands(), scal.get() + 1, scal.get() + 2, scal.get() + 9);
       }
-      double out[10];  // scal[1..10]
-      check(cudaMemcpy(out, scal.get() + 1, 10 * sizeof(double), cudaMemcpyDeviceToHost), "ccd read");
+      double out[11];  // scal[1..11]
+      check(cudaMemcpy(out, scal.get() + 1, 11 * sizeof(double), cudaMemcpyDeviceToHost), "ccd read");
       limit_t = out[2];
       if (out[9] > pair_cap) {  // 刚体对放不下：扩容，这一段重做
         grow_pairs(static_cast<int>(2 * out[9]));
+        continue;
+      }
+      if (out[10] > work_cap) {  // 工作列表放不下：扩容，这一段重做
+        grow_work(static_cast<int>(2 * out[10]));
         continue;
       }
       if (out[8] > cand_cap) {  // 候选数组放不下：扩容，这一段重做
@@ -603,7 +760,7 @@ struct Stepper::Impl {
       }
       s0 = s1;
       Fa.swap(Fb);  // 这一段的终点是下一段的起点（Fb 下一段会被 FK 覆盖）
-      Xa = Fa.X.get();
+      Fs = &Fa;
     }
     if (result < 0) result = std::min(s0, 1.0);
     result = std::min(result, limit_t);

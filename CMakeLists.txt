@@ -91,6 +91,7 @@ if(RCIPC_CUDA AND CMAKE_CUDA_COMPILER)
     src/gpu/stepper.cc   # 主机：上传模型、Newton 循环
     src/gpu/kin.cu       # 正运动学、惯性项、关节限位
     src/gpu/contact.cu   # 接触检测、接触行、摩擦
+    src/gpu/narrow.cu    # 检测和 CCD 共用的窄相剔除（刚体坐标系里的分组）
     src/gpu/ccd.cu       # 曲线 CCD
     src/gpu/solver.cu    # PCG 和树块预条件器
     src/gpu/pcg_coop.cu  # 协作内核版的 PCG（整个循环一个内核）
