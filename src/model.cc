@@ -41,6 +41,7 @@ Model from_mujoco(const mjModel* m) {
   M.qpos0 = Eigen::Map<const Eigen::VectorXd>(m->qpos0, m->nq);
   M.gravity = Eigen::Vector3d(m->opt.gravity);
   M.timestep = m->opt.timestep;
+  M.filter_parent = (m->opt.disableflags & mjDSBL_FILTERPARENT) == 0;  // 阶段 10 之后：对比 libuipc 时关掉父子过滤
 
   // 关节：逐个抄出类型、地址、锚点和轴。
   M.joints.resize(m->njnt);

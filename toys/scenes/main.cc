@@ -1,7 +1,8 @@
 // 阶段 10 的场景程序：跑任意一个 MJCF 场景，每步检查穿模，写出轨迹。
 //
 // 用法（参数都可以省略，写成 名字=值）：
-//   scene_demo model=ragdoll.xml [T=2] [h=..] [dhat=..] [mu=..] [semi=0|1] [ldlt=0|1] [check=0|1] [out=traj.csv]
+//   scene_demo model=ragdoll.xml [T=2] [h=..] [dhat=..] [mu=..] [eps_v=..] [tol=..] [semi=0|1] [adapt=0|1] [ldlt=0|1]
+//              [check=0|1] [debug=0|1] [out=traj.csv]
 //
 //   model：models/ 下的文件名（或绝对路径）。有的场景：ragdoll.xml、ragdoll_pile.xml、chain.xml、stack.xml、ledge.xml。
 //   check=1：每次接受的 Newton 迭代都沿真实轨迹采样最小距离（慢，但验证的是 CCD 真正保证的东西）。
@@ -30,8 +31,8 @@ using Eigen::VectorXd;
 
 struct Args {
   std::string model = "ragdoll.xml", out;
-  double T = 2.0, h = NAN, dhat = 1e-3, mu = 0.2;
-  int semi = 0, ldlt = 0, check = 0, debug = 0;
+  double T = 2.0, h = NAN, dhat = 1e-3, mu = 0.2, eps_v = 1e-3, tol = 1e-6;
+  int semi = 0, ldlt = 0, check = 0, debug = 0, adapt = 1;
 };
 
 Args parse(int argc, char** argv) {
@@ -49,6 +50,9 @@ Args parse(int argc, char** argv) {
     else if (k == "h") a.h = std::atof(v.c_str());
     else if (k == "dhat") a.dhat = std::atof(v.c_str());
     else if (k == "mu") a.mu = std::atof(v.c_str());
+    else if (k == "eps_v") a.eps_v = std::atof(v.c_str());
+    else if (k == "tol") a.tol = std::atof(v.c_str());
+    else if (k == "adapt") a.adapt = std::atoi(v.c_str());
     else if (k == "semi") a.semi = std::atoi(v.c_str());
     else if (k == "ldlt") a.ldlt = std::atoi(v.c_str());
     else if (k == "check") a.check = std::atoi(v.c_str());
@@ -71,14 +75,19 @@ int main(int argc, char** argv) {
     P.h = std::isnan(a.h) ? model.timestep : a.h;
     P.dhat = a.dhat;
     P.mu = a.mu;
+    P.eps_v = a.eps_v;
+    P.tol = a.tol;
+    P.adapt_kappa = a.adapt != 0;
     P.semi_implicit = a.semi != 0;
     P.solver = a.ldlt ? LinearSolver::kLdlt : LinearSolver::kPcg;
     P.check_iterates = a.check != 0;
     SolverState S;
 
-    std::printf("%s: %d bodies, %d trees, nv %d, %d vertices, %d edges, %d faces; h %g, T %g, dhat %g, mu %g, %s%s\n",
+    std::printf("%s: %d bodies, %d trees, nv %d, %d vertices, %d edges, %d faces; h %g, T %g, dhat %g, mu %g, eps_v %g, "
+                "tol %g m/s, %s%s%s\n",
                 a.model.c_str(), model.nbody() - 1, model.ntree, model.nv, model.nvertex(), model.nedge(), model.nface(),
-                P.h, a.T, P.dhat, P.mu, a.ldlt ? "LDLT" : "PCG", a.semi ? ", semi-implicit stop" : "");
+                P.h, a.T, P.dhat, P.mu, P.eps_v, P.tol, a.ldlt ? "LDLT" : "PCG", a.semi ? ", semi-implicit stop" : "",
+                model.filter_parent ? "" : ", parent-child contact on");
 
     VectorXd q = model.qpos0, v = VectorXd::Zero(model.nv);
     FILE* f = a.out.empty() ? nullptr : std::fopen(a.out.c_str(), "w");

@@ -31,5 +31,6 @@ python tools/replay.py models/ragdoll_pile.xml pile.csv
 | `models/` | MJCF 模型（阶段 2 起），可以用 MuJoCo 的 `simulate.exe` 打开看 |
 | `notes/` | 推导和练习 |
 | `tools/` | Python 脚本：画图、生成布娃娃堆、在 MuJoCo 窗口里回放轨迹（只用来看，不参与计算） |
+| `compare/` | 和其他引擎的对比（`compare/libuipc/`：同一个布娃娃堆上和 libuipc 比，说明见 `notes/compare_libuipc.md`） |
 | `cmake/` | 依赖的下载（`Dependencies.cmake`） |
 | `build/` | 编译输出，不进 git |

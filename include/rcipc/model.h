@@ -111,10 +111,12 @@ struct Model {
 
   // 两个刚体之间要不要检测接触（阶段 7）：不同的刚体，而且不是父子（MuJoCo 的默认规则；世界除外，
   // 挂在世界上的刚体和世界上的静态几何要检测）。
+  //   MJCF 里 <option><flag filterparent="disable"/></option> 关掉父子过滤（和 libuipc 对比时用：它检测所有刚体对）。
+  bool filter_parent = true;
   bool collide(int a, int b) const {
     if (a == b) return false;
-    if (bodies[a].parent == b && b != 0) return false;
-    if (bodies[b].parent == a && a != 0) return false;
+    if (filter_parent && bodies[a].parent == b && b != 0) return false;
+    if (filter_parent && bodies[b].parent == a && a != 0) return false;
     return true;
   }
 };

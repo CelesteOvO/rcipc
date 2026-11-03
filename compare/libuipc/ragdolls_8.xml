@@ -1,0 +1,365 @@
+<!--
+  libuipc 对比用的布娃娃堆：8 个布娃娃（compare/libuipc/make_mjcf.py 从 ragdoll_scene.py 生成，不要手改）。
+  y 轴朝上；没有关节限位；相邻刚体也检测接触。
+-->
+<mujoco model="ragdolls_8">
+  <compiler angle="radian"/>
+  <option gravity="0 -9.8 0" timestep="0.01">
+    <flag filterparent="disable"/>
+  </option>
+  <worldbody>
+    <geom name="floor" type="plane" size="10 10 0.1" quat="0.70710678 -0.70710678 0 0"/>
+    <body name="pelvis_0" pos="-1.23791025 0.3 -1.23260081" quat="0.294950732 0.294950732 -0.642653924 0.642653924">
+      <freejoint/>
+      <geom type="capsule" fromto="-0.08 0 0 0.08 0 0" size="0.09" mass="6.01225714"/>
+      <body name="torso_0" pos="0 0.33 0">
+        <joint type="ball" pos="0 -0.225 0"/>
+        <geom type="capsule" fromto="0 -0.1 0 0 0.1 0" size="0.11" mass="11.129218"/>
+        <body name="head_0" pos="0 0.37 0">
+          <joint type="ball" pos="0 -0.13 0"/>
+          <geom type="sphere" size="0.1" mass="3.21895142"/>
+        </body>
+        <body name="uarm_r_0" pos="0.31 0.14 0">
+          <joint type="ball" pos="-0.175 0 0"/>
+          <geom type="capsule" fromto="-0.11 0 0 0.11 0 0" size="0.045" mass="1.55339123"/>
+          <body name="farm_r_0" pos="0.31 0 0">
+            <joint type="hinge" pos="-0.1475 0 0" axis="0 1 0"/>
+            <geom type="capsule" fromto="-0.1 0 0 0.1 0 0" size="0.04" mass="1.11110957"/>
+          </body>
+        </body>
+        <body name="uarm_l_0" pos="-0.31 0.14 0">
+          <joint type="ball" pos="0.175 0 0"/>
+          <geom type="capsule" fromto="0.11 0 0 -0.11 0 0" size="0.045" mass="1.55339123"/>
+          <body name="farm_l_0" pos="-0.31 0 0">
+            <joint type="hinge" pos="0.1475 0 0" axis="0 1 0"/>
+            <geom type="capsule" fromto="0.1 0 0 -0.1 0 0" size="0.04" mass="1.11110957"/>
+          </body>
+        </body>
+      </body>
+      <body name="thigh_r_0" pos="0.1 -0.31 0">
+        <joint type="ball" pos="0 0.21 0"/>
+        <geom type="capsule" fromto="0 0.14 0 0 -0.14 0" size="0.06" mass="3.54634805"/>
+        <body name="shin_r_0" pos="0 -0.405 0">
+          <joint type="hinge" pos="0 0.2 0" axis="1 0 0"/>
+          <geom type="capsule" fromto="0 0.135 0 0 -0.135 0" size="0.05" mass="2.31155724"/>
+        </body>
+      </body>
+      <body name="thigh_l_0" pos="-0.1 -0.31 0">
+        <joint type="ball" pos="0 0.21 0"/>
+        <geom type="capsule" fromto="0 0.14 0 0 -0.14 0" size="0.06" mass="3.54634805"/>
+        <body name="shin_l_0" pos="0 -0.405 0">
+          <joint type="hinge" pos="0 0.2 0" axis="1 0 0"/>
+          <geom type="capsule" fromto="0 0.135 0 0 -0.135 0" size="0.05" mass="2.31155724"/>
+        </body>
+      </body>
+    </body>
+    <body name="pelvis_1" pos="-1.15038591 0.3 1.19379982" quat="0.467973404 0.467973404 0.530095173 -0.530095173">
+      <freejoint/>
+      <geom type="capsule" fromto="-0.08 0 0 0.08 0 0" size="0.09" mass="6.01225714"/>
+      <body name="torso_1" pos="0 0.33 0">
+        <joint type="ball" pos="0 -0.225 0"/>
+        <geom type="capsule" fromto="0 -0.1 0 0 0.1 0" size="0.11" mass="11.129218"/>
+        <body name="head_1" pos="0 0.37 0">
+          <joint type="ball" pos="0 -0.13 0"/>
+          <geom type="sphere" size="0.1" mass="3.21895142"/>
+        </body>
+        <body name="uarm_r_1" pos="0.31 0.14 0">
+          <joint type="ball" pos="-0.175 0 0"/>
+          <geom type="capsule" fromto="-0.11 0 0 0.11 0 0" size="0.045" mass="1.55339123"/>
+          <body name="farm_r_1" pos="0.31 0 0">
+            <joint type="hinge" pos="-0.1475 0 0" axis="0 1 0"/>
+            <geom type="capsule" fromto="-0.1 0 0 0.1 0 0" size="0.04" mass="1.11110957"/>
+          </body>
+        </body>
+        <body name="uarm_l_1" pos="-0.31 0.14 0">
+          <joint type="ball" pos="0.175 0 0"/>
+          <geom type="capsule" fromto="0.11 0 0 -0.11 0 0" size="0.045" mass="1.55339123"/>
+          <body name="farm_l_1" pos="-0.31 0 0">
+            <joint type="hinge" pos="0.1475 0 0" axis="0 1 0"/>
+            <geom type="capsule" fromto="0.1 0 0 -0.1 0 0" size="0.04" mass="1.11110957"/>
+          </body>
+        </body>
+      </body>
+      <body name="thigh_r_1" pos="0.1 -0.31 0">
+        <joint type="ball" pos="0 0.21 0"/>
+        <geom type="capsule" fromto="0 0.14 0 0 -0.14 0" size="0.06" mass="3.54634805"/>
+        <body name="shin_r_1" pos="0 -0.405 0">
+          <joint type="hinge" pos="0 0.2 0" axis="1 0 0"/>
+          <geom type="capsule" fromto="0 0.135 0 0 -0.135 0" size="0.05" mass="2.31155724"/>
+        </body>
+      </body>
+      <body name="thigh_l_1" pos="-0.1 -0.31 0">
+        <joint type="ball" pos="0 0.21 0"/>
+        <geom type="capsule" fromto="0 0.14 0 0 -0.14 0" size="0.06" mass="3.54634805"/>
+        <body name="shin_l_1" pos="0 -0.405 0">
+          <joint type="hinge" pos="0 0.2 0" axis="1 0 0"/>
+          <geom type="capsule" fromto="0 0.135 0 0 -0.135 0" size="0.05" mass="2.31155724"/>
+        </body>
+      </body>
+    </body>
+    <body name="pelvis_2" pos="1.21273049 0.3 -1.15164781" quat="0.701256703 0.701256703 0.090769135 -0.090769135">
+      <freejoint/>
+      <geom type="capsule" fromto="-0.08 0 0 0.08 0 0" size="0.09" mass="6.01225714"/>
+      <body name="torso_2" pos="0 0.33 0">
+        <joint type="ball" pos="0 -0.225 0"/>
+        <geom type="capsule" fromto="0 -0.1 0 0 0.1 0" size="0.11" mass="11.129218"/>
+        <body name="head_2" pos="0 0.37 0">
+          <joint type="ball" pos="0 -0.13 0"/>
+          <geom type="sphere" size="0.1" mass="3.21895142"/>
+        </body>
+        <body name="uarm_r_2" pos="0.31 0.14 0">
+          <joint type="ball" pos="-0.175 0 0"/>
+          <geom type="capsule" fromto="-0.11 0 0 0.11 0 0" size="0.045" mass="1.55339123"/>
+          <body name="farm_r_2" pos="0.31 0 0">
+            <joint type="hinge" pos="-0.1475 0 0" axis="0 1 0"/>
+            <geom type="capsule" fromto="-0.1 0 0 0.1 0 0" size="0.04" mass="1.11110957"/>
+          </body>
+        </body>
+        <body name="uarm_l_2" pos="-0.31 0.14 0">
+          <joint type="ball" pos="0.175 0 0"/>
+          <geom type="capsule" fromto="0.11 0 0 -0.11 0 0" size="0.045" mass="1.55339123"/>
+          <body name="farm_l_2" pos="-0.31 0 0">
+            <joint type="hinge" pos="0.1475 0 0" axis="0 1 0"/>
+            <geom type="capsule" fromto="0.1 0 0 -0.1 0 0" size="0.04" mass="1.11110957"/>
+          </body>
+        </body>
+      </body>
+      <body name="thigh_r_2" pos="0.1 -0.31 0">
+        <joint type="ball" pos="0 0.21 0"/>
+        <geom type="capsule" fromto="0 0.14 0 0 -0.14 0" size="0.06" mass="3.54634805"/>
+        <body name="shin_r_2" pos="0 -0.405 0">
+          <joint type="hinge" pos="0 0.2 0" axis="1 0 0"/>
+          <geom type="capsule" fromto="0 0.135 0 0 -0.135 0" size="0.05" mass="2.31155724"/>
+        </body>
+      </body>
+      <body name="thigh_l_2" pos="-0.1 -0.31 0">
+        <joint type="ball" pos="0 0.21 0"/>
+        <geom type="capsule" fromto="0 0.14 0 0 -0.14 0" size="0.06" mass="3.54634805"/>
+        <body name="shin_l_2" pos="0 -0.405 0">
+          <joint type="hinge" pos="0 0.2 0" axis="1 0 0"/>
+          <geom type="capsule" fromto="0 0.135 0 0 -0.135 0" size="0.05" mass="2.31155724"/>
+        </body>
+      </body>
+    </body>
+    <body name="pelvis_3" pos="1.20518298 0.3 1.24973064" quat="0.706153812 0.706153812 0.0366986798 -0.0366986798">
+      <freejoint/>
+      <geom type="capsule" fromto="-0.08 0 0 0.08 0 0" size="0.09" mass="6.01225714"/>
+      <body name="torso_3" pos="0 0.33 0">
+        <joint type="ball" pos="0 -0.225 0"/>
+        <geom type="capsule" fromto="0 -0.1 0 0 0.1 0" size="0.11" mass="11.129218"/>
+        <body name="head_3" pos="0 0.37 0">
+          <joint type="ball" pos="0 -0.13 0"/>
+          <geom type="sphere" size="0.1" mass="3.21895142"/>
+        </body>
+        <body name="uarm_r_3" pos="0.31 0.14 0">
+          <joint type="ball" pos="-0.175 0 0"/>
+          <geom type="capsule" fromto="-0.11 0 0 0.11 0 0" size="0.045" mass="1.55339123"/>
+          <body name="farm_r_3" pos="0.31 0 0">
+            <joint type="hinge" pos="-0.1475 0 0" axis="0 1 0"/>
+            <geom type="capsule" fromto="-0.1 0 0 0.1 0 0" size="0.04" mass="1.11110957"/>
+          </body>
+        </body>
+        <body name="uarm_l_3" pos="-0.31 0.14 0">
+          <joint type="ball" pos="0.175 0 0"/>
+          <geom type="capsule" fromto="0.11 0 0 -0.11 0 0" size="0.045" mass="1.55339123"/>
+          <body name="farm_l_3" pos="-0.31 0 0">
+            <joint type="hinge" pos="0.1475 0 0" axis="0 1 0"/>
+            <geom type="capsule" fromto="0.1 0 0 -0.1 0 0" size="0.04" mass="1.11110957"/>
+          </body>
+        </body>
+      </body>
+      <body name="thigh_r_3" pos="0.1 -0.31 0">
+        <joint type="ball" pos="0 0.21 0"/>
+        <geom type="capsule" fromto="0 0.14 0 0 -0.14 0" size="0.06" mass="3.54634805"/>
+        <body name="shin_r_3" pos="0 -0.405 0">
+          <joint type="hinge" pos="0 0.2 0" axis="1 0 0"/>
+          <geom type="capsule" fromto="0 0.135 0 0 -0.135 0" size="0.05" mass="2.31155724"/>
+        </body>
+      </body>
+      <body name="thigh_l_3" pos="-0.1 -0.31 0">
+        <joint type="ball" pos="0 0.21 0"/>
+        <geom type="capsule" fromto="0 0.14 0 0 -0.14 0" size="0.06" mass="3.54634805"/>
+        <body name="shin_l_3" pos="0 -0.405 0">
+          <joint type="hinge" pos="0 0.2 0" axis="1 0 0"/>
+          <geom type="capsule" fromto="0 0.135 0 0 -0.135 0" size="0.05" mass="2.31155724"/>
+        </body>
+      </body>
+    </body>
+    <body name="pelvis_4" pos="-1.24610084 0.65 -1.1806425" quat="0.588886683 0.588886683 -0.391423652 0.391423652">
+      <freejoint/>
+      <geom type="capsule" fromto="-0.08 0 0 0.08 0 0" size="0.09" mass="6.01225714"/>
+      <body name="torso_4" pos="0 0.33 0">
+        <joint type="ball" pos="0 -0.225 0"/>
+        <geom type="capsule" fromto="0 -0.1 0 0 0.1 0" size="0.11" mass="11.129218"/>
+        <body name="head_4" pos="0 0.37 0">
+          <joint type="ball" pos="0 -0.13 0"/>
+          <geom type="sphere" size="0.1" mass="3.21895142"/>
+        </body>
+        <body name="uarm_r_4" pos="0.31 0.14 0">
+          <joint type="ball" pos="-0.175 0 0"/>
+          <geom type="capsule" fromto="-0.11 0 0 0.11 0 0" size="0.045" mass="1.55339123"/>
+          <body name="farm_r_4" pos="0.31 0 0">
+            <joint type="hinge" pos="-0.1475 0 0" axis="0 1 0"/>
+            <geom type="capsule" fromto="-0.1 0 0 0.1 0 0" size="0.04" mass="1.11110957"/>
+          </body>
+        </body>
+        <body name="uarm_l_4" pos="-0.31 0.14 0">
+          <joint type="ball" pos="0.175 0 0"/>
+          <geom type="capsule" fromto="0.11 0 0 -0.11 0 0" size="0.045" mass="1.55339123"/>
+          <body name="farm_l_4" pos="-0.31 0 0">
+            <joint type="hinge" pos="0.1475 0 0" axis="0 1 0"/>
+            <geom type="capsule" fromto="0.1 0 0 -0.1 0 0" size="0.04" mass="1.11110957"/>
+          </body>
+        </body>
+      </body>
+      <body name="thigh_r_4" pos="0.1 -0.31 0">
+        <joint type="ball" pos="0 0.21 0"/>
+        <geom type="capsule" fromto="0 0.14 0 0 -0.14 0" size="0.06" mass="3.54634805"/>
+        <body name="shin_r_4" pos="0 -0.405 0">
+          <joint type="hinge" pos="0 0.2 0" axis="1 0 0"/>
+          <geom type="capsule" fromto="0 0.135 0 0 -0.135 0" size="0.05" mass="2.31155724"/>
+        </body>
+      </body>
+      <body name="thigh_l_4" pos="-0.1 -0.31 0">
+        <joint type="ball" pos="0 0.21 0"/>
+        <geom type="capsule" fromto="0 0.14 0 0 -0.14 0" size="0.06" mass="3.54634805"/>
+        <body name="shin_l_4" pos="0 -0.405 0">
+          <joint type="hinge" pos="0 0.2 0" axis="1 0 0"/>
+          <geom type="capsule" fromto="0 0.135 0 0 -0.135 0" size="0.05" mass="2.31155724"/>
+        </body>
+      </body>
+    </body>
+    <body name="pelvis_5" pos="-1.22605643 0.65 1.24267391" quat="0.680712515 0.680712515 -0.191390887 0.191390887">
+      <freejoint/>
+      <geom type="capsule" fromto="-0.08 0 0 0.08 0 0" size="0.09" mass="6.01225714"/>
+      <body name="torso_5" pos="0 0.33 0">
+        <joint type="ball" pos="0 -0.225 0"/>
+        <geom type="capsule" fromto="0 -0.1 0 0 0.1 0" size="0.11" mass="11.129218"/>
+        <body name="head_5" pos="0 0.37 0">
+          <joint type="ball" pos="0 -0.13 0"/>
+          <geom type="sphere" size="0.1" mass="3.21895142"/>
+        </body>
+        <body name="uarm_r_5" pos="0.31 0.14 0">
+          <joint type="ball" pos="-0.175 0 0"/>
+          <geom type="capsule" fromto="-0.11 0 0 0.11 0 0" size="0.045" mass="1.55339123"/>
+          <body name="farm_r_5" pos="0.31 0 0">
+            <joint type="hinge" pos="-0.1475 0 0" axis="0 1 0"/>
+            <geom type="capsule" fromto="-0.1 0 0 0.1 0 0" size="0.04" mass="1.11110957"/>
+          </body>
+        </body>
+        <body name="uarm_l_5" pos="-0.31 0.14 0">
+          <joint type="ball" pos="0.175 0 0"/>
+          <geom type="capsule" fromto="0.11 0 0 -0.11 0 0" size="0.045" mass="1.55339123"/>
+          <body name="farm_l_5" pos="-0.31 0 0">
+            <joint type="hinge" pos="0.1475 0 0" axis="0 1 0"/>
+            <geom type="capsule" fromto="0.1 0 0 -0.1 0 0" size="0.04" mass="1.11110957"/>
+          </body>
+        </body>
+      </body>
+      <body name="thigh_r_5" pos="0.1 -0.31 0">
+        <joint type="ball" pos="0 0.21 0"/>
+        <geom type="capsule" fromto="0 0.14 0 0 -0.14 0" size="0.06" mass="3.54634805"/>
+        <body name="shin_r_5" pos="0 -0.405 0">
+          <joint type="hinge" pos="0 0.2 0" axis="1 0 0"/>
+          <geom type="capsule" fromto="0 0.135 0 0 -0.135 0" size="0.05" mass="2.31155724"/>
+        </body>
+      </body>
+      <body name="thigh_l_5" pos="-0.1 -0.31 0">
+        <joint type="ball" pos="0 0.21 0"/>
+        <geom type="capsule" fromto="0 0.14 0 0 -0.14 0" size="0.06" mass="3.54634805"/>
+        <body name="shin_l_5" pos="0 -0.405 0">
+          <joint type="hinge" pos="0 0.2 0" axis="1 0 0"/>
+          <geom type="capsule" fromto="0 0.135 0 0 -0.135 0" size="0.05" mass="2.31155724"/>
+        </body>
+      </body>
+    </body>
+    <body name="pelvis_6" pos="1.16895022 0.65 -1.2391907" quat="0.23247903 0.23247903 -0.6677975 0.6677975">
+      <freejoint/>
+      <geom type="capsule" fromto="-0.08 0 0 0.08 0 0" size="0.09" mass="6.01225714"/>
+      <body name="torso_6" pos="0 0.33 0">
+        <joint type="ball" pos="0 -0.225 0"/>
+        <geom type="capsule" fromto="0 -0.1 0 0 0.1 0" size="0.11" mass="11.129218"/>
+        <body name="head_6" pos="0 0.37 0">
+          <joint type="ball" pos="0 -0.13 0"/>
+          <geom type="sphere" size="0.1" mass="3.21895142"/>
+        </body>
+        <body name="uarm_r_6" pos="0.31 0.14 0">
+          <joint type="ball" pos="-0.175 0 0"/>
+          <geom type="capsule" fromto="-0.11 0 0 0.11 0 0" size="0.045" mass="1.55339123"/>
+          <body name="farm_r_6" pos="0.31 0 0">
+            <joint type="hinge" pos="-0.1475 0 0" axis="0 1 0"/>
+            <geom type="capsule" fromto="-0.1 0 0 0.1 0 0" size="0.04" mass="1.11110957"/>
+          </body>
+        </body>
+        <body name="uarm_l_6" pos="-0.31 0.14 0">
+          <joint type="ball" pos="0.175 0 0"/>
+          <geom type="capsule" fromto="0.11 0 0 -0.11 0 0" size="0.045" mass="1.55339123"/>
+          <body name="farm_l_6" pos="-0.31 0 0">
+            <joint type="hinge" pos="0.1475 0 0" axis="0 1 0"/>
+            <geom type="capsule" fromto="0.1 0 0 -0.1 0 0" size="0.04" mass="1.11110957"/>
+          </body>
+        </body>
+      </body>
+      <body name="thigh_r_6" pos="0.1 -0.31 0">
+        <joint type="ball" pos="0 0.21 0"/>
+        <geom type="capsule" fromto="0 0.14 0 0 -0.14 0" size="0.06" mass="3.54634805"/>
+        <body name="shin_r_6" pos="0 -0.405 0">
+          <joint type="hinge" pos="0 0.2 0" axis="1 0 0"/>
+          <geom type="capsule" fromto="0 0.135 0 0 -0.135 0" size="0.05" mass="2.31155724"/>
+        </body>
+      </body>
+      <body name="thigh_l_6" pos="-0.1 -0.31 0">
+        <joint type="ball" pos="0 0.21 0"/>
+        <geom type="capsule" fromto="0 0.14 0 0 -0.14 0" size="0.06" mass="3.54634805"/>
+        <body name="shin_l_6" pos="0 -0.405 0">
+          <joint type="hinge" pos="0 0.2 0" axis="1 0 0"/>
+          <geom type="capsule" fromto="0 0.135 0 0 -0.135 0" size="0.05" mass="2.31155724"/>
+        </body>
+      </body>
+    </body>
+    <body name="pelvis_7" pos="1.15041434 0.65 1.19357646" quat="0.466778625 0.466778625 -0.531147545 0.531147545">
+      <freejoint/>
+      <geom type="capsule" fromto="-0.08 0 0 0.08 0 0" size="0.09" mass="6.01225714"/>
+      <body name="torso_7" pos="0 0.33 0">
+        <joint type="ball" pos="0 -0.225 0"/>
+        <geom type="capsule" fromto="0 -0.1 0 0 0.1 0" size="0.11" mass="11.129218"/>
+        <body name="head_7" pos="0 0.37 0">
+          <joint type="ball" pos="0 -0.13 0"/>
+          <geom type="sphere" size="0.1" mass="3.21895142"/>
+        </body>
+        <body name="uarm_r_7" pos="0.31 0.14 0">
+          <joint type="ball" pos="-0.175 0 0"/>
+          <geom type="capsule" fromto="-0.11 0 0 0.11 0 0" size="0.045" mass="1.55339123"/>
+          <body name="farm_r_7" pos="0.31 0 0">
+            <joint type="hinge" pos="-0.1475 0 0" axis="0 1 0"/>
+            <geom type="capsule" fromto="-0.1 0 0 0.1 0 0" size="0.04" mass="1.11110957"/>
+          </body>
+        </body>
+        <body name="uarm_l_7" pos="-0.31 0.14 0">
+          <joint type="ball" pos="0.175 0 0"/>
+          <geom type="capsule" fromto="0.11 0 0 -0.11 0 0" size="0.045" mass="1.55339123"/>
+          <body name="farm_l_7" pos="-0.31 0 0">
+            <joint type="hinge" pos="0.1475 0 0" axis="0 1 0"/>
+            <geom type="capsule" fromto="0.1 0 0 -0.1 0 0" size="0.04" mass="1.11110957"/>
+          </body>
+        </body>
+      </body>
+      <body name="thigh_r_7" pos="0.1 -0.31 0">
+        <joint type="ball" pos="0 0.21 0"/>
+        <geom type="capsule" fromto="0 0.14 0 0 -0.14 0" size="0.06" mass="3.54634805"/>
+        <body name="shin_r_7" pos="0 -0.405 0">
+          <joint type="hinge" pos="0 0.2 0" axis="1 0 0"/>
+          <geom type="capsule" fromto="0 0.135 0 0 -0.135 0" size="0.05" mass="2.31155724"/>
+        </body>
+      </body>
+      <body name="thigh_l_7" pos="-0.1 -0.31 0">
+        <joint type="ball" pos="0 0.21 0"/>
+        <geom type="capsule" fromto="0 0.14 0 0 -0.14 0" size="0.06" mass="3.54634805"/>
+        <body name="shin_l_7" pos="0 -0.405 0">
+          <joint type="hinge" pos="0 0.2 0" axis="1 0 0"/>
+          <geom type="capsule" fromto="0 0.135 0 0 -0.135 0" size="0.05" mass="2.31155724"/>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>
