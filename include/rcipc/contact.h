@@ -46,6 +46,15 @@ Eigen::VectorXd contact_gradient(const Model& model, const Frames& frames, const
 Eigen::MatrixXd contact_hessian(const Model& model, const Frames& frames, const std::vector<GroundContact>& contacts,
                                 double kappa, double dhat);
 
+// 曲率上界（阶段 6，笔记 notes/06_curvature.md，书 §8.4）。Gauss-Newton 丢掉的那一项里有顶点轨迹的曲率
+//   2 kappa b'(x) Delta . Delta''，
+// 它的绝对值不超过 f |Delta''|，f = 2 kappa |b'(x)| d 是法向力；而 |Delta''| <= sum_j C_j w_j^2（w_j 是第 j 个转动组
+// 的增量大小，C_j = sum_k R_max(j, k) 由链上的静态力臂算出）。所以在顶点所在链上每个转动组的对角块加 scale * f * C_j，
+// 得到的模型在每个方向上都不比真实 Hessian 弯得少（scale = 1 是可证明的上界，0 是纯 Gauss-Newton）。
+// 只动 Hessian，不动梯度，所以收敛点不变。返回 nv x nv 的对角矩阵。
+Eigen::MatrixXd contact_curvature(const Model& model, const Eigen::VectorXd& q, const std::vector<GroundContact>& contacts,
+                                  double kappa, double dhat, double scale);
+
 // kappa 的取值范围（笔记第 4 节）。参考值 kappa_ref 让“一个障碍在 dhat/2 处的斥力”等于一个平均刚体的重量：
 //   kappa_ref * |b'(dhat^2 / 4)| * dhat = m_avg * |g|
 // 下限是 kappa_ref / 100，上限是 100 kappa_ref（上限 / 下限 = 1e4，同书第 174 页）。

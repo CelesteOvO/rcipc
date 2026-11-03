@@ -5,6 +5,7 @@
 #include <limits>
 #include <vector>
 
+#include "rcipc/chain.h"
 #include "rcipc/contact.h"
 
 // CCD。直弦版本的推导见 notes/04_ground.md 第 5 节，曲线版本见 notes/05_curved_ccd.md；测试见 tests/test_ccd.cc。
@@ -44,41 +45,25 @@ VectorXd acceleration_bounds(const Model& model, const VectorXd& q, const Vector
   VectorXd A = VectorXd::Zero(model.nbody());
   std::vector<double> w, u, R;  // 链上的关节，从根到刚体的顺序：转动组的 w、滑动的 u、静态力臂 R
   for (int b = 1; b < model.nbody(); ++b) {
-    // 第 1 步：沿链往上走，收集每个关节的 w、u 和静态力臂 R。先按“从刚体到根”的顺序收集，之后反过来。
-    w.clear();
-    u.clear();
-    R.clear();
-    double path = model.bodies[b].radius;  // 从当前走到的刚体原点到 b 的顶点的路径长度
-    for (int k = b; k != 0; k = model.bodies[k].parent) {
-      const int j = model.bodies[k].joint;
-      if (j >= 0) {
-        const Joint& J = model.joints[j];
-        if (J.type == JointType::kSlide) {
-          // 滑动：u = |p|，力臂还要加上它现在和这一步内的伸长。
-          const double us = std::abs(p[J.dadr]);
-          w.push_back(0.0);
-          u.push_back(us);
-          R.push_back(path + J.pos.norm());
-          path += std::abs(q[J.qadr] - J.ref) + us;
-        } else {
-          // 转动组：铰链 1 个自由度（dadr），球关节 3 个（dadr..），自由关节后 3 个（dadr+3..）。
-          double wj = 0;
-          for (int d = J.dadr; d < J.dadr + J.nv; ++d) {
-            if (model.dof_rot[d]) wj += p[d] * p[d];
-          }
-          w.push_back(std::sqrt(wj));
-          u.push_back(0.0);
-          R.push_back(path + J.pos.norm());  // 锚点到 k 的原点，再沿路径到 b 的顶点
-        }
-      }
-      path += model.bodies[k].pos.norm();  // 往上一段：k 的原点到父刚体原点的固定偏移
+    // 第 1 步：链上的关节和静态力臂（chain.h）。每个关节的 w 或 u 是 p 在它那组自由度上的长度。
+    const std::vector<ChainJoint> chain = chain_joints(model, q, b);
+    const int n = static_cast<int>(chain.size());
+    w.assign(n, 0.0);
+    u.assign(n, 0.0);
+    R.assign(n, 0.0);
+    for (int j = 0; j < n; ++j) {
+      const ChainJoint& cj = chain[j];
+      const double mag = p.segment(cj.dadr, cj.nv).norm();
+      (cj.rotation ? w[j] : u[j]) = mag;
+      R[j] = cj.reach;
     }
-    std::reverse(w.begin(), w.end());
-    std::reverse(u.begin(), u.end());
-    std::reverse(R.begin(), R.end());
+    // 滑动关节在这一步内最多再伸 u_s：它上游各关节的力臂都要加上这一段。
+    for (int s = 0; s < n; ++s) {
+      if (chain[s].rotation) continue;
+      for (int j = 0; j < s; ++j) R[j] += u[s];
+    }
 
     // 第 2 步：套公式。W_below 是更靠近根的各转动组的 w 之和。
-    const int n = static_cast<int>(w.size());
     double a = 0, W_below = 0;
     for (int j = 0; j < n; ++j) {
       double s = W_below * R[j];

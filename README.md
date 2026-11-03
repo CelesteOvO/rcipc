@@ -18,7 +18,7 @@ ctest --test-dir build -C Debug --output-on-failure
 | 目录 | 内容 |
 |---|---|
 | `include/rcipc/`、`src/` | 库 `rcipc`：后面各阶段都会复用的代码（障碍函数、四元数、模型、运动学、惯性项、接触、CCD、时间步） |
-| `toys/` | 演示程序和练习用的小模型（阶段 1：`toys/ipc1d/`，小球落地；阶段 3：`toys/dynamics/`，双摆和旋转的盒子；阶段 4：`toys/contact/`，落地的盒子和甩过地面的杆） |
+| `toys/` | 演示程序和练习用的小模型（阶段 1：`toys/ipc1d/`，小球落地；阶段 3：`toys/dynamics/`，双摆和旋转的盒子；阶段 4、5：`toys/contact/`，落地的盒子和甩过地面的杆；阶段 6：`toys/curvature/`，逐次迭代看间隙） |
 | `tests/` | GoogleTest 测试，一个主题一个文件 |
 | `models/` | MJCF 模型（阶段 2 起），可以用 MuJoCo 的 `simulate.exe` 打开看 |
 | `notes/` | 推导和练习 |

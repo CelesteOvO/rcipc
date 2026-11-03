@@ -28,6 +28,7 @@ struct StepParams {
   double dhat = 1e-3;   // 阶段 4：障碍激活距离（m）
   double c = 0.9;       // 阶段 4：CCD 的保守系数，一次迭代最多闭合当前距离的这个比例
   CcdMode ccd = CcdMode::kCurved;  // 阶段 5：用哪种 CCD
+  double curv_scale = 1.0;         // 阶段 6：曲率上界的缩放。1 是可证明的上界，0 是纯 Gauss-Newton（复现间隙塌缩）
 };
 
 // 跨时间步保留的求解器状态。kappa 在第一次出现接触时初始化，之后沿用（阶段 9 再按间隙调整）。
@@ -37,10 +38,11 @@ struct SolverState {
 
 // 一次 Newton 迭代的记录，用来看收敛过程。
 struct NewtonIterate {
-  double energy;     // 迭代开始时的能量 E(q)
-  double step;       // max_i |p_i| / h，收敛判断用的量
-  double alpha_max;  // CCD 给的步长上限（没有接触时是 1）
-  double alpha;      // 线搜索接受的步长
+  double energy;        // 迭代开始时的能量 E(q)
+  double step;          // max_i |p_i| / h，收敛判断用的量
+  double alpha_max;     // CCD 给的步长上限（没有接触时是 1）
+  double alpha;         // 线搜索接受的步长
+  double min_distance;  // 迭代开始时的最小距离（阶段 6 用它看间隙有没有被一次次挖小）
 };
 
 struct StepResult {

@@ -1,0 +1,21 @@
+<!--
+  阶段 6 的“顶杆”：一根杆从地板下面的铰链（z = -0.2）伸上来，顶端一个半径 2 cm 的球，球底离地 0.5 mm。
+  杆本身只用来显示（contype="0" conaffinity="0"，不参与碰撞）。
+  球在它的圆弧的最高点：往哪边转，球都会沿弧线往下压进地面；而在最高点处球的速度是水平的，
+  一阶的接触行 r = 2 d n . (a x (x - o)) 等于 0。Gauss-Newton 看不到“转动会把球压进地面”这件事，
+  只有弧线的曲率（二阶项）知道。这是书 §8.4 “间隙被一步步挖小”的最小复现。
+  q = 0 时杆竖直向上；关节绕 y 轴转。
+-->
+<mujoco model="lever">
+  <compiler angle="radian"/>
+  <option gravity="0 0 -9.81" timestep="0.01"/>
+
+  <worldbody>
+    <geom name="floor" type="plane" size="2 2 0.1"/>
+    <body name="lever" pos="0 0 -0.2">
+      <joint name="hinge" type="hinge" axis="0 1 0"/>
+      <geom type="capsule" fromto="0 0 0 0 0 0.2" size="0.005" mass="0.1" contype="0" conaffinity="0"/>
+      <geom type="sphere" pos="0 0 0.2205" size="0.02" mass="1"/>
+    </body>
+  </worldbody>
+</mujoco>

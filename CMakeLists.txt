@@ -30,8 +30,9 @@ add_library(rcipc
   src/kinematics.cc  # 阶段 2：正运动学、q 的加减、点的 Jacobian
   src/inertia.cc     # 阶段 3：body 形式的惯性项
   src/step.cc        # 阶段 3：关节坐标里的时间步（阶段 4 加上接触和 CCD）
-  src/contact.cc     # 阶段 4：地面接触：距离、接触行、能量、梯度、Hessian、kappa
-  src/ccd.cc         # 阶段 4：直弦 CCD
+  src/contact.cc     # 阶段 4：地面接触：距离、接触行、能量、梯度、Hessian、kappa（阶段 6 加曲率上界）
+  src/ccd.cc         # 阶段 4：直弦 CCD；阶段 5：弦加矢高
+  src/chain.cc       # 阶段 5：链上的关节和静态力臂
 )
 target_include_directories(rcipc PUBLIC include)
 target_link_libraries(rcipc PUBLIC Eigen3::Eigen mujoco::mujoco)
@@ -57,6 +58,11 @@ rcipc_copy_dlls(dynamics_demo)
 add_executable(contact_demo toys/contact/main.cc)
 target_link_libraries(contact_demo PRIVATE rcipc)
 rcipc_copy_dlls(contact_demo)
+
+# 阶段 6：曲率上界（逐次迭代看间隙）。
+add_executable(curvature_demo toys/curvature/main.cc)
+target_link_libraries(curvature_demo PRIVATE rcipc)
+rcipc_copy_dlls(curvature_demo)
 
 # 测试，定义在 tests/CMakeLists.txt。
 enable_testing()

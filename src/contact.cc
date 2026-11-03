@@ -4,6 +4,7 @@
 #include <limits>
 
 #include "rcipc/barrier.h"
+#include "rcipc/chain.h"
 
 // 地面接触。推导见 notes/04_ground.md，测试见 tests/test_contact.cc。
 namespace rcipc {
@@ -88,6 +89,34 @@ MatrixXd contact_hessian(const Model& model, const Frames& frames, const std::ve
     const double ddb = std::max(barrier(c.d * c.d, dhat * dhat).ddb, 0.0);
     const RowVectorXd r = contact_row(model, frames, c);
     H += kappa * ddb * r.transpose() * r;
+  }
+  return H;
+}
+
+MatrixXd contact_curvature(const Model& model, const VectorXd& q, const std::vector<GroundContact>& contacts,
+                           double kappa, double dhat, double scale) {
+  // 曲率上界（笔记第 3 节，书 §8.4 第 176–177 页）。推导的三步：
+  //   1. 被丢掉的项沿方向 delta 是 2 kappa b' Delta . Delta''，Cauchy-Schwarz 给 |.| <= 2 kappa |b'| d |Delta''| = f |Delta''|。
+  //   2. 顶点的二阶导 Delta'' = sum_{j,k} delta_j delta_k d^2X/dq_j dq_k，两个转动的二阶导形如 a_j x (a_k x (X - o_k))，
+  //      大小不超过到较深那个锚点的力臂 R_max(j,k)。于是 |Delta''| <= sum_{j,k} w_j w_k R_max(j,k)。
+  //   3. w_j w_k <= (w_j^2 + w_k^2) / 2 把交叉项摊到对角上：|Delta''| <= sum_j C_j w_j^2，C_j = sum_k R_max(j,k)。
+  // 合起来 |被丢掉的项| <= delta^T (f sum_j C_j P_j) delta，P_j 是第 j 组自由度上的单位对角块。
+  MatrixXd H = MatrixXd::Zero(model.nv, model.nv);
+  if (scale <= 0) return H;
+  for (const GroundContact& c : contacts) {
+    const double f = 2 * kappa * std::abs(barrier(c.d * c.d, dhat * dhat).db) * c.d;  // 法向力的大小
+    const std::vector<ChainJoint> chain = chain_joints(model, q, model.vertices[c.vertex].body);
+    const int n = static_cast<int>(chain.size());
+    for (int j = 0; j < n; ++j) {
+      if (!chain[j].rotation) continue;
+      // C_j = sum_k R_max(j, k)：k 比 j 靠近根时较深的是 j，用 R_j；k 比 j 深时用 R_k。
+      double C = 0;
+      for (int k = 0; k < n; ++k) {
+        if (!chain[k].rotation) continue;
+        C += chain[k <= j ? j : k].reach;
+      }
+      for (int d = chain[j].dadr; d < chain[j].dadr + chain[j].nv; ++d) H(d, d) += scale * f * C;
+    }
   }
   return H;
 }

@@ -19,4 +19,5 @@ rcipc_test(test_kinematics rcipc)  # 阶段 2：正运动学、积分、Jacobian
 rcipc_test(test_inertia rcipc)     # 阶段 3：body 形式的惯性项，和 mj_fullM 对比
 rcipc_test(test_step rcipc)        # 阶段 3：关节坐标里的时间步
 rcipc_test(test_contact rcipc)     # 阶段 4：地面接触、kappa、落地
-rcipc_test(test_ccd rcipc)         # 阶段 4：直弦 CCD 和它漏掉的反例
+rcipc_test(test_ccd rcipc)         # 阶段 4：直弦 CCD 和它漏掉的反例；阶段 5：曲线 CCD
+rcipc_test(test_curvature rcipc)   # 阶段 6：曲率上界

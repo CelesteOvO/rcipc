@@ -55,8 +55,10 @@ StepResult step(const Model& model, const StepParams& P, const VectorXd& q0, con
     // 第 1 步：Newton 方向。阶段 1 是 p = -E' / E''，现在是解线性方程组 H p = -g。
     //   g = 惯性梯度 + 接触梯度，H = M(q) / h^2 + sum kappa b'' r^T r：两项都对称正定（半正定），
     //   LDLT 分解（一种 Cholesky 分解）解得又快又稳。
+    //   阶段 6 再加上曲率上界（对角）：补回 Gauss-Newton 丢掉的轨迹曲率项的上界，不改梯度。
     const VectorXd g = g_e + contact_gradient(model, F, C, kappa, P.dhat);
-    const MatrixXd H = inertia_hessian(model, F, h) + contact_hessian(model, F, C, kappa, P.dhat);
+    const MatrixXd H = inertia_hessian(model, F, h) + contact_hessian(model, F, C, kappa, P.dhat) +
+                       contact_curvature(model, q, C, kappa, P.dhat, P.curv_scale);
     const VectorXd p = H.ldlt().solve(-g);
 
     // 第 2 步：收敛判断。max_i |p_i| / h 相当于“这次修正的最大速度”，小于 tol 就不再移动。
@@ -82,7 +84,7 @@ StepResult step(const Model& model, const StepParams& P, const VectorXd& q0, con
     }
 
     // 第 5 步：记录，然后更新。阶段 1 是 x = x + alpha * p。
-    if (trace != nullptr) trace->push_back({e0, size, alpha_max, alpha});
+    if (trace != nullptr) trace->push_back({e0, size, alpha_max, alpha, min_ground_distance(model, F)});
     q = integrate(model, q, p, alpha);
   }
 
