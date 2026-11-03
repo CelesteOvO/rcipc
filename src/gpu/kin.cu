@@ -1,0 +1,316 @@
+// GPU 版的运动学、惯性项、关节限位（阶段 11，笔记 notes/11_gpu.md 第 2 节）。
+//
+// 每个内核对应 CPU 版的一个函数（kinematics.cc、inertia.cc、limits.cc），运算顺序照抄，结果只差舍入。
+// 并行的方式：
+//   - FK：一个线程一个刚体。每个线程从根沿链往下自己算一遍（重复计算祖先，但链很短，省掉了按层同步）；
+//   - 顶点、惯性目标、能量、梯度：一个线程一个刚体或顶点，往全局数组里原子加；
+//   - 树块 M / h^2：一个线程块一棵树，块里一个线程一个 (i, j) 元素。
+#include <cfloat>
+
+#include "devmath.cuh"
+#include "kernels.h"
+
+namespace rcipc::gpu {
+
+namespace {
+
+constexpr int kThreads = 128;
+inline int blocks(int n) { return (n + kThreads - 1) / kThreads; }
+
+__global__ void k_integrate(DModel m, const double* q, const double* p, double s, double* out) {
+  // integrate：每个线程一个关节，只改写这个关节的那几个数。
+  const int j = blockIdx.x * blockDim.x + threadIdx.x;
+  if (j >= m.njnt) return;
+  const int a = m.jqadr[j], d = m.jdadr[j];
+  switch (m.jtype[j]) {
+    case kHinge:
+    case kSlide:
+      out[a] = q[a] + s * p[d];
+      break;
+    case kBall: {
+      const Q4 r = qnormalize(q4load(q + a));
+      q4store(qmul(r, qexp(s * v3load(p + d))), out + a);
+      break;
+    }
+    case kFree: {
+      for (int k = 0; k < 3; ++k) out[a + k] = q[a + k] + s * p[d + k];
+      const Q4 r = qnormalize(q4load(q + a + 3));
+      q4store(qmul(r, qexp(s * v3load(p + d + 3))), out + a + 3);
+      break;
+    }
+  }
+}
+
+__global__ void k_fk(DModel m, const double* q, DFrames F) {
+  // forward_kinematics：每个线程一个刚体 b。先沿父刚体收集到根的链，再从根往下逐个刚体套 CPU 版的第 1–3 步。
+  // 只有 b 自己的关节写 dof_axis / dof_anchor（祖先的由祖先自己的线程写）。
+  const int b = blockIdx.x * blockDim.x + threadIdx.x;
+  if (b >= m.nbody) return;
+  if (b == 0) {
+    v3store(v3(0, 0, 0), F.xpos);
+    q4store(Q4{1, 0, 0, 0}, F.xquat);
+    return;
+  }
+  int chain[kMaxDepth];
+  int n = 0;
+  for (int k = b; k != 0 && n < kMaxDepth; k = m.parent[k]) chain[n++] = k;
+  V3 x = v3(0, 0, 0);
+  Q4 r = Q4{1, 0, 0, 0};  // 父刚体的世界位姿（姿态已归一化）
+  for (int i = n - 1; i >= 0; --i) {
+    const int k = chain[i];
+    const bool own = k == b;
+    // 第 1 步：固定偏移。
+    V3 xk = x + qrot(r, v3load(m.bpos + 3 * k));
+    Q4 rk = qmul(r, q4load(m.bquat + 4 * k));
+    // 第 2 步：关节。
+    const int j = m.bjnt[k];
+    if (j >= 0) {
+      const int a = m.jqadr[j], d = m.jdadr[j];
+      const V3 jpos = v3load(m.jpos + 3 * j), jaxis = v3load(m.jaxis + 3 * j);
+      switch (m.jtype[j]) {
+        case kHinge: {
+          const V3 o = xk + qrot(rk, jpos);
+          if (own) {
+            v3store(qrot(rk, jaxis), F.daxis + 3 * d);
+            v3store(o, F.danchor + 3 * d);
+          }
+          rk = qmul(rk, qexp((q[a] - m.jref[j]) * jaxis));
+          xk = o - qrot(rk, jpos);
+          break;
+        }
+        case kBall: {
+          const V3 o = xk + qrot(rk, jpos);
+          rk = qmul(rk, qnormalize(q4load(q + a)));
+          xk = o - qrot(rk, jpos);
+          if (own) {
+            for (int c = 0; c < 3; ++c) {
+              v3store(qrot(rk, v3(c == 0, c == 1, c == 2)), F.daxis + 3 * (d + c));
+              v3store(o, F.danchor + 3 * (d + c));
+            }
+          }
+          break;
+        }
+        case kSlide: {
+          const V3 axis = qrot(rk, jaxis);
+          if (own) {
+            v3store(axis, F.daxis + 3 * d);
+            v3store(xk + qrot(rk, jpos), F.danchor + 3 * d);
+          }
+          xk = xk + axis * (q[a] - m.jref[j]);
+          break;
+        }
+        case kFree: {
+          xk = v3load(q + a);
+          rk = qnormalize(q4load(q + a + 3));
+          if (own) {
+            for (int c = 0; c < 3; ++c) {
+              v3store(v3(c == 0, c == 1, c == 2), F.daxis + 3 * (d + c));
+              v3store(xk, F.danchor + 3 * (d + c));
+              v3store(qrot(rk, v3(c == 0, c == 1, c == 2)), F.daxis + 3 * (d + 3 + c));
+              v3store(xk, F.danchor + 3 * (d + 3 + c));
+            }
+          }
+          break;
+        }
+      }
+    }
+    // 第 3 步：保存（归一化），作为下一层的父刚体位姿。
+    x = xk;
+    r = qnormalize(rk);
+  }
+  v3store(x, F.xpos + 3 * b);
+  q4store(r, F.xquat + 4 * b);
+}
+
+__global__ void k_vertices(DModel m, DFrames F) {
+  // world_point：每个线程一个顶点。
+  const int v = blockIdx.x * blockDim.x + threadIdx.x;
+  if (v >= m.nvert) return;
+  const int b = m.vbody[v];
+  v3store(v3load(F.xpos + 3 * b) + qrot(q4load(F.xquat + 4 * b), v3load(m.vlocal + 3 * v)), F.X + 3 * v);
+}
+
+__device__ V3 com(const DModel& m, const DFrames& F, int b) {
+  return v3load(F.xpos + 3 * b) + qrot(q4load(F.xquat + 4 * b), v3load(m.ipos + 3 * b));
+}
+
+__global__ void k_targets(DModel m, DFrames now, DFrames prev, double h, double* tc, double* tA) {
+  // inertia_targets：c~ = 2 c^n - c^{n-1} + g h^2，A~ = 2 R^n - R^{n-1}。
+  const int b = blockIdx.x * blockDim.x + threadIdx.x;
+  if (b >= m.nbody) return;
+  if (b == 0) {
+    for (int i = 0; i < 3; ++i) tc[i] = 0;
+    for (int i = 0; i < 9; ++i) tA[i] = 0;
+    return;
+  }
+  const V3 g = v3(m.gravity[0], m.gravity[1], m.gravity[2]);
+  v3store(2 * com(m, now, b) - com(m, prev, b) + g * (h * h), tc + 3 * b);
+  const M3 Rn = qmat(q4load(now.xquat + 4 * b)), Rp = qmat(q4load(prev.xquat + 4 * b));
+  for (int i = 0; i < 9; ++i) tA[9 * b + i] = 2 * Rn.m[i] - Rp.m[i];
+}
+
+__global__ void k_inertia_energy(DModel m, DFrames F, const double* tc, const double* tA, double h, double* e) {
+  // inertia_energy：每个刚体 m |c - c~|^2 + tr(D S D^T)，D = R - A~，再除以 2 h^2。
+  const int b = blockIdx.x * blockDim.x + threadIdx.x;
+  if (b < 1 || b >= m.nbody) return;
+  const V3 dc = com(m, F, b) - v3load(tc + 3 * b);
+  double sum = m.mass[b] * norm2(dc);
+  const M3 R = qmat(q4load(F.xquat + 4 * b));
+  M3 D;
+  for (int i = 0; i < 9; ++i) D.m[i] = R.m[i] - tA[9 * b + i];
+  const M3 DS = mm(D, mload(m.S + 9 * b));
+  for (int i = 0; i < 9; ++i) sum += DS.m[i] * D.m[i];  // tr(D S D^T) = sum_ij (D S)_ij D_ij
+  atomicAdd(e, sum / (2 * h * h));
+}
+
+__global__ void k_inertia_gradient(DModel m, DFrames F, const double* tc, const double* tA, double h, double* g) {
+  // inertia_gradient：刚体上的力 f 和力矩 tau，沿链投影到每个自由度上。
+  const int b = blockIdx.x * blockDim.x + threadIdx.x;
+  if (b < 1 || b >= m.nbody) return;
+  const V3 c = com(m, F, b);
+  const M3 R = qmat(q4load(F.xquat + 4 * b));
+  const V3 f = (m.mass[b] * (c - v3load(tc + 3 * b))) / (h * h);
+  M3 Dt;  // (R - A~)^T
+  for (int i = 0; i < 3; ++i)
+    for (int k = 0; k < 3; ++k) Dt.m[3 * i + k] = R.m[3 * k + i] - tA[9 * b + 3 * k + i];
+  const M3 A = mm(mm(R, mload(m.S + 9 * b)), Dt);
+  const V3 tau = v3(A.m[5] - A.m[7], A.m[6] - A.m[2], A.m[1] - A.m[3]) / (h * h);  // vex(A) / h^2
+  for (int k = 0; k < m.chain_n[b]; ++k) {
+    const int d = m.chain_dof[b * m.CH + k];
+    const V3 a = v3load(F.daxis + 3 * d);
+    const double val = m.drot[d] ? dot(cross(a, c - v3load(F.danchor + 3 * d)), f) + dot(a, tau) : dot(a, f);
+    atomicAdd(g + d, val);
+  }
+}
+
+__global__ void k_inertia_hessian(DModel m, DFrames F, double h, double* Hk) {
+  // inertia_hessian：一个线程块一棵树 t。
+  //   H_ij = 1/h^2 sum_b ( m V_i . V_j + W_i . (I_world W_j) )，只对链上同时有 i 和 j 的刚体 b 求和。
+  //   自由度 i 在 b 的链上 <=> i 所在的刚体是 b 的祖先或 b 自己 <=> dbody[i] <= b < bsub_end[dbody[i]]。
+  // 先把这棵树每个刚体的质心 c_b、世界系的惯量 R I R^T，和每个自由度的轴、锚点放进共享内存（每个只算一次），
+  // 再由块里的线程分摊上三角的 (i, j)（H 对称，下三角照抄）。
+  extern __shared__ double sh[];
+  const int t = blockIdx.x;
+  const int TD = m.TD, n = m.tndof[t], d0 = m.tdof0[t], b0 = m.tbody0[t], nb = m.tnbody[t];
+  double* sc = sh;                  // nb x 3
+  double* sI = sc + 3 * m.TB;       // nb x 9
+  double* sa = sI + 9 * m.TB;       // n x 3
+  double* so = sa + 3 * TD;         // n x 3
+  for (int k = threadIdx.x; k < nb; k += blockDim.x) {
+    const int b = b0 + k;
+    v3store(com(m, F, b), sc + 3 * k);
+    const M3 R = qmat(q4load(F.xquat + 4 * b));
+    const M3 Iw = mm(mm(R, mload(m.inertia + 9 * b)), mt(R));
+    for (int e = 0; e < 9; ++e) sI[9 * k + e] = Iw.m[e];
+  }
+  for (int li = threadIdx.x; li < n; li += blockDim.x) {
+    for (int c = 0; c < 3; ++c) {
+      sa[3 * li + c] = F.daxis[3 * (d0 + li) + c];
+      so[3 * li + c] = F.danchor[3 * (d0 + li) + c];
+    }
+  }
+  __syncthreads();
+  for (int e = threadIdx.x; e < TD * TD; e += blockDim.x) {
+    const int li = e / TD, lj = e % TD;
+    if (lj < li) continue;  // 下三角由对称的那个线程写
+    double acc = 0;
+    if (lj < n) {
+      const int i = d0 + li, j = d0 + lj;
+      const int bi = m.dbody[i], bj = m.dbody[j];
+      const bool ri = m.drot[i], rj = m.drot[j];
+      const V3 ai = v3load(sa + 3 * li), aj = v3load(sa + 3 * lj);
+      const V3 oi = v3load(so + 3 * li), oj = v3load(so + 3 * lj);
+      // 链上同时有 i 和 j 的刚体：两个子树的交，也就是较深的那个刚体的子树（不在一条链上时为空）。
+      const int lo = max(bi, bj), hi = min(m.bsub_end[bi], m.bsub_end[bj]);
+      for (int b = lo; b < hi; ++b) {
+        const V3 c = v3load(sc + 3 * (b - b0));
+        const V3 Vi = ri ? cross(ai, c - oi) : ai;
+        const V3 Vj = rj ? cross(aj, c - oj) : aj;
+        acc += m.mass[b] * dot(Vi, Vj);
+        if (ri && rj) {
+          M3 Iw;
+          for (int k = 0; k < 9; ++k) Iw.m[k] = sI[9 * (b - b0) + k];
+          acc += dot(ai, mv(Iw, aj));
+        }
+      }
+    }
+    Hk[t * TD * TD + li * TD + lj] = acc / (h * h);
+    Hk[t * TD * TD + lj * TD + li] = acc / (h * h);
+  }
+}
+
+__global__ void k_limits(DModel m, const double* q, double k, double dhat, double* e, double* g, double* Hk) {
+  // limits.cc：到两端的距离各一个一维障碍。
+  const int j = blockIdx.x * blockDim.x + threadIdx.x;
+  if (j >= m.njnt || !m.jlimited[j]) return;
+  const int a = m.jqadr[j], d = m.jdadr[j];
+  const BV lo = barrier(q[a] - m.jrange[2 * j], dhat), hi = barrier(m.jrange[2 * j + 1] - q[a], dhat);
+  if (e) atomicAdd(e, k * (lo.b + hi.b));
+  if (g) atomicAdd(g + d, k * (lo.db - hi.db));
+  if (Hk) {
+    const int t = m.dtree[d], l = d - m.tdof0[t];
+    atomicAdd(Hk + t * m.TD * m.TD + l * m.TD + l, k * (lo.ddb + hi.ddb));
+  }
+}
+
+__global__ void k_limit_ccd(DModel m, const double* q, const double* p, double c, double* tmin) {
+  // limit_ccd：和阶段 1 的 ccd_max_step 一样的闭式解。
+  const int j = blockIdx.x * blockDim.x + threadIdx.x;
+  if (j >= m.njnt || !m.jlimited[j]) return;
+  const int a = m.jqadr[j], d = m.jdadr[j];
+  const double dlo = q[a] - m.jrange[2 * j], dhi = m.jrange[2 * j + 1] - q[a];
+  if (p[d] < 0) atomic_min(tmin, c * dlo / -p[d]);
+  if (p[d] > 0) atomic_min(tmin, c * dhi / p[d]);
+}
+
+__global__ void k_fill(double* p, double v) { *p = v; }
+
+__global__ void k_max_displacement(const double* Xa, const double* Xb, int n, double* out) {
+  const int v = blockIdx.x * blockDim.x + threadIdx.x;
+  if (v >= n) return;
+  atomic_max(out, norm(v3load(Xb + 3 * v) - v3load(Xa + 3 * v)));
+}
+
+}  // namespace
+
+void launch_integrate(const DModel& m, const double* q, const double* p, double s, double* out) {
+  if (m.njnt > 0) k_integrate<<<blocks(m.njnt), kThreads>>>(m, q, p, s, out);
+}
+
+void launch_fk(const DModel& m, const double* q, const DFrames& F) {
+  k_fk<<<blocks(m.nbody), kThreads>>>(m, q, F);
+  if (m.nvert > 0) k_vertices<<<blocks(m.nvert), kThreads>>>(m, F);
+}
+
+void launch_targets(const DModel& m, const DFrames& now, const DFrames& prev, double h, double* tc, double* tA) {
+  k_targets<<<blocks(m.nbody), kThreads>>>(m, now, prev, h, tc, tA);
+}
+
+void launch_inertia_energy(const DModel& m, const DFrames& F, const double* tc, const double* tA, double h, double* e) {
+  k_inertia_energy<<<blocks(m.nbody), kThreads>>>(m, F, tc, tA, h, e);
+}
+
+void launch_inertia_gradient(const DModel& m, const DFrames& F, const double* tc, const double* tA, double h, double* g) {
+  k_inertia_gradient<<<blocks(m.nbody), kThreads>>>(m, F, tc, tA, h, g);
+}
+
+void launch_inertia_hessian(const DModel& m, const DFrames& F, double h, double* Hk) {
+  const size_t smem = sizeof(double) * (12 * static_cast<size_t>(m.TB) + 6 * static_cast<size_t>(m.TD));
+  if (m.ntree > 0) k_inertia_hessian<<<m.ntree, 256, smem>>>(m, F, h, Hk);
+}
+
+void launch_limits(const DModel& m, const double* q, double k, double dhat, double* e, double* g, double* Hk) {
+  if (m.njnt > 0) k_limits<<<blocks(m.njnt), kThreads>>>(m, q, k, dhat, e, g, Hk);
+}
+
+void launch_limit_ccd(const DModel& m, const double* q, const double* p, double c, double* tmin) {
+  if (m.njnt > 0) k_limit_ccd<<<blocks(m.njnt), kThreads>>>(m, q, p, c, tmin);
+}
+
+void launch_fill(double* p, double v) { k_fill<<<1, 1>>>(p, v); }
+
+void launch_max_displacement(const double* Xa, const double* Xb, int n, double* out) {
+  if (n > 0) k_max_displacement<<<blocks(n), kThreads>>>(Xa, Xb, n, out);
+}
+
+}  // namespace rcipc::gpu

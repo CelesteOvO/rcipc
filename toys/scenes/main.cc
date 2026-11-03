@@ -2,7 +2,9 @@
 //
 // 用法（参数都可以省略，写成 名字=值）：
 //   scene_demo model=ragdoll.xml [T=2] [h=..] [dhat=..] [mu=..] [eps_v=..] [tol=..] [semi=0|1] [adapt=0|1] [ldlt=0|1]
-//              [check=0|1] [debug=0|1] [out=traj.csv]
+//              [check=0|1] [debug=0|1] [gpu=0|1] [timing=0|1] [pcg_tol=..] [out=traj.csv]
+//   gpu=1：用 GPU 版（阶段 11，需要编译时打开了 CUDA）。check 在 GPU 上不支持。
+//   timing=0：GPU 版不做分段计时（分段计时每段都要等 GPU，会拖慢整步；量墙钟时间时关掉）。
 //
 //   model：models/ 下的文件名（或绝对路径）。有的场景：ragdoll.xml、ragdoll_pile.xml、chain.xml、stack.xml、ledge.xml。
 //   check=1：每次接受的 Newton 迭代都沿真实轨迹采样最小距离（慢，但验证的是 CCD 真正保证的东西）。
@@ -15,6 +17,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -23,6 +26,9 @@
 #include "rcipc/limits.h"
 #include "rcipc/model.h"
 #include "rcipc/step.h"
+#ifdef RCIPC_HAVE_CUDA
+#include "rcipc/gpu.h"
+#endif
 
 namespace {
 
@@ -32,7 +38,8 @@ using Eigen::VectorXd;
 struct Args {
   std::string model = "ragdoll.xml", out;
   double T = 2.0, h = NAN, dhat = 1e-3, mu = 0.2, eps_v = 1e-3, tol = 1e-6;
-  int semi = 0, ldlt = 0, check = 0, debug = 0, adapt = 1;
+  int semi = 0, ldlt = 0, check = 0, debug = 0, adapt = 1, gpu = 0, timing = 1;
+  double pcg_tol = NAN;
 };
 
 Args parse(int argc, char** argv) {
@@ -53,6 +60,9 @@ Args parse(int argc, char** argv) {
     else if (k == "eps_v") a.eps_v = std::atof(v.c_str());
     else if (k == "tol") a.tol = std::atof(v.c_str());
     else if (k == "adapt") a.adapt = std::atoi(v.c_str());
+    else if (k == "gpu") a.gpu = std::atoi(v.c_str());
+    else if (k == "timing") a.timing = std::atoi(v.c_str());
+    else if (k == "pcg_tol") a.pcg_tol = std::atof(v.c_str());
     else if (k == "semi") a.semi = std::atoi(v.c_str());
     else if (k == "ldlt") a.ldlt = std::atoi(v.c_str());
     else if (k == "check") a.check = std::atoi(v.c_str());
@@ -81,12 +91,24 @@ int main(int argc, char** argv) {
     P.semi_implicit = a.semi != 0;
     P.solver = a.ldlt ? LinearSolver::kLdlt : LinearSolver::kPcg;
     P.check_iterates = a.check != 0;
+    if (!std::isnan(a.pcg_tol)) P.pcg_tol = a.pcg_tol;
     SolverState S;
+#ifdef RCIPC_HAVE_CUDA
+    std::unique_ptr<gpu::Stepper> G;
+    if (a.gpu) {
+      if (!gpu::available()) throw std::runtime_error("gpu=1 but no CUDA device");
+      G = std::make_unique<gpu::Stepper>(model);
+      G->set_timing(a.timing != 0);
+    }
+#else
+    if (a.gpu) throw std::runtime_error("gpu=1 but this build has no CUDA");
+#endif
 
     std::printf("%s: %d bodies, %d trees, nv %d, %d vertices, %d edges, %d faces; h %g, T %g, dhat %g, mu %g, eps_v %g, "
                 "tol %g m/s, %s%s%s\n",
                 a.model.c_str(), model.nbody() - 1, model.ntree, model.nv, model.nvertex(), model.nedge(), model.nface(),
-                P.h, a.T, P.dhat, P.mu, P.eps_v, P.tol, a.ldlt ? "LDLT" : "PCG", a.semi ? ", semi-implicit stop" : "",
+                P.h, a.T, P.dhat, P.mu, P.eps_v, P.tol, a.gpu ? "GPU" : (a.ldlt ? "LDLT" : "PCG"),
+                a.semi ? ", semi-implicit stop" : "",
                 model.filter_parent ? "" : ", parent-child contact on");
 
     VectorXd q = model.qpos0, v = VectorXd::Zero(model.nv);
@@ -94,12 +116,17 @@ int main(int argc, char** argv) {
     if (f) std::fprintf(f, "t,min_distance,min_limit,newton,pcg,qpos...\n");
     double t = 0, dmin_end = 1e300, dmin_iter = 1e300, lmin = 1e300, next_report = 0;
     int nmax = 0, capped = 0;
-    long nsum = 0, pcg_sum = 0, nstep = 0;
+    long nsum = 0, pcg_sum = 0, nstep = 0, last_step = 0;
     const auto t0 = std::chrono::steady_clock::now();
     auto last = t0;
     while (t < a.T - 1e-12) {
       std::vector<NewtonIterate> trace;
+#ifdef RCIPC_HAVE_CUDA
+      const StepResult r = G ? G->step(P, q, v, &S, a.debug ? &trace : nullptr)
+                             : step(model, P, q, v, &S, a.debug ? &trace : nullptr);
+#else
       const StepResult r = step(model, P, q, v, &S, a.debug ? &trace : nullptr);
+#endif
       if (a.debug && r.min_distance <= 0 && dmin_end > 0) {
         // 第一次出现穿模的那一步：打印最近的那一对和每次迭代的间隙、步长，帮助定位是 CCD 漏了还是别的。
         const Frames Fe = forward_kinematics(model, r.q);
@@ -133,9 +160,10 @@ int main(int argc, char** argv) {
         const auto now = std::chrono::steady_clock::now();
         const double ms = std::chrono::duration<double, std::milli>(now - last).count();
         std::printf("t %5.2f  gap %9.3e  limit %9.3e  newton %2d  pcg %3d  kappa %.2e  %6.1f ms/step%s\n", t,
-                    r.min_distance, r.min_limit_distance, r.newton, r.pcg, r.kappa, ms / std::max(1L, nstep % 50 == 0 ? 50L : nstep % 50),
+                    r.min_distance, r.min_limit_distance, r.newton, r.pcg, r.kappa, ms / std::max(1L, nstep - last_step),
                     r.min_distance <= 0 ? "  <-- PENETRATION" : "");
         last = now;
+        last_step = nstep;
         next_report += 0.1;
       }
     }
@@ -146,6 +174,21 @@ int main(int argc, char** argv) {
     if (a.check) std::printf(", along accepted iterates %.3e m%s", dmin_iter, dmin_iter > 0 ? "" : "  <-- PENETRATION");
     std::printf("\nmin joint-limit distance %.3e; Newton per step max %d mean %.2f (%d hit the cap); PCG per step mean %.2f\n",
                 lmin, nmax, double(nsum) / nstep, capped, double(pcg_sum) / nstep);
+#ifdef RCIPC_HAVE_CUDA
+    if (G) {
+      // GPU 各部分的耗时（每步平均，毫秒；timing=0 时没有分段计时）。
+      const gpu::Stepper::Timers& T = G->timers();
+      const double n = static_cast<double>(T.steps);
+      if (a.timing) std::printf("GPU per step (ms): prepare %.2f, update %.2f, assemble %.2f, solve %.2f, converge %.2f, ccd %.2f, "
+                  "line search %.2f, total %.2f; energy evaluations per step %.2f\n",
+                  T.prepare / n, T.update / n, T.assemble / n, T.solve / n, T.converge / n, T.ccd / n, T.line_search / n,
+                  T.total / n, T.energy_evals / n);
+      const double nn = std::max(1.0, static_cast<double>(T.newton));
+      std::printf("GPU per Newton iteration: %.0f contacts, %.0f rows, %.1f PCG iterations; %.0f body pairs per query\n",
+                  T.contacts / nn, T.rows / nn, T.pcg / nn,
+                  static_cast<double>(T.pair_sum) / std::max(1L, T.pair_calls));
+    }
+#endif
     if (f) std::printf("wrote %s (replay: python tools/replay.py %s %s)\n", a.out.c_str(), path.c_str(), a.out.c_str());
     return 0;
   } catch (const std::exception& e) {

@@ -35,6 +35,8 @@ ap.add_argument("--gamma", type=float, default=100.0, help="关节罚函数的�
 ap.add_argument("--full", action="store_true", help="关掉半隐式停止，完全收敛")
 ap.add_argument("--vel-tol", type=float, default=1e-3)
 ap.add_argument("--workspace", required=True)
+ap.add_argument("--no-timers", action="store_true",
+                help="不开 libuipc 的计时器（量墙钟时间用；这时数不出每步的 Newton 次数，记成 -1）")
 args = ap.parse_args()
 
 Logger.set_level(Logger.Level.Warn)
@@ -100,7 +102,8 @@ hm = linemesh(np.array(Vh, dtype=np.float32), np.array(Eh, dtype=np.int32))
 rev.apply_to(hm, ls, li, rs, ri, st)
 scene.objects().create("hinge_joints").geometries().create(hm)
 
-Timer.enable_all()
+if not args.no_timers:
+    Timer.enable_all()
 world.init(scene)
 assert world.is_valid()
 
@@ -129,7 +132,7 @@ for s in range(1, args.steps + 1):
     world.advance()
     world.retrieve()
     rec["step_s"].append(time.perf_counter() - t0)
-    rec["newton"].append(newton_count(Timer.report_as_json()))
+    rec["newton"].append(-1 if args.no_timers else newton_count(Timer.report_as_json()))
     if s % 10 == 0 or s == args.steps:
         m = metrics.measure(transforms(), "mesh")
         rec["samples"].append(dict(step=s, **m))

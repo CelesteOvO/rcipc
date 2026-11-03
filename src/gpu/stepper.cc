@@ -1,0 +1,860 @@
+// GPU 版的时间步：主机这一侧（阶段 11，笔记 notes/11_gpu.md 第 6 节）。
+//
+// 这个文件做两件事：
+//   1. 把 Model 摊平成 DModel 的数组，上传到显存（Upload）；
+//   2. 跑和 CPU 版 step()（src/step.cc）一行一行对应的 Newton 循环，每一项都调 kernels.h 里的内核。
+// 需要读回主机的只有几个标量（能量、步长、收敛量、PCG 的迭代次数、计数），所以显存和主机之间来回的数据很少。
+// 每次读回都要等 GPU 把前面的活做完，GPU 在主机发下一批内核之前是空着的；所以能一起读的尽量一起读
+// （组装的能量、PCG 的迭代次数、收敛判断的位移一次读回；限位 CCD 的结果跟着第一段 CCD 读回；
+// kappa 调整用的最小距离跟着线搜索的能量读回），往显存里写一个数也用小内核，不用同步的拷贝（笔记第 8 节）。
+#include "rcipc/gpu.h"
+
+#include <cuda_runtime.h>
+
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <limits>
+#include <stdexcept>
+#include <string>
+#include <utility>
+
+#include "device_model.h"
+#include "kernels.h"
+#include "rcipc/contact.h"
+#include "rcipc/limits.h"
+
+namespace rcipc::gpu {
+
+using Eigen::MatrixXd;
+using Eigen::VectorXd;
+
+namespace {
+
+void check(cudaError_t e, const char* what) {
+  if (e != cudaSuccess) throw std::runtime_error(std::string("CUDA error in ") + what + ": " + cudaGetErrorString(e));
+}
+
+// 一块显存。reserve 只增不减，增大时原来的内容不保留（这里的缓冲区都是每次重写的）。
+template <class T>
+class DBuf {
+ public:
+  DBuf() = default;
+  DBuf(const DBuf&) = delete;
+  DBuf& operator=(const DBuf&) = delete;
+  ~DBuf() {
+    if (p_) cudaFree(p_);
+  }
+  void reserve(size_t n) {
+    if (n <= n_ && p_) return;
+    if (p_) cudaFree(p_);
+    p_ = nullptr;
+    check(cudaMalloc(&p_, std::max<size_t>(n, 1) * sizeof(T)), "cudaMalloc");
+    n_ = std::max<size_t>(n, 1);
+  }
+  void upload(const T* src, size_t n) {
+    reserve(n);
+    if (n) check(cudaMemcpy(p_, src, n * sizeof(T), cudaMemcpyHostToDevice), "upload");
+  }
+  void upload(const std::vector<T>& v) { upload(v.data(), v.size()); }
+  void download(T* dst, size_t n) const {
+    if (n) check(cudaMemcpy(dst, p_, n * sizeof(T), cudaMemcpyDeviceToHost), "download");
+  }
+  T* get() const { return p_; }
+  size_t size() const { return n_; }
+  void swap(DBuf& o) {
+    std::swap(p_, o.p_);
+    std::swap(n_, o.n_);
+  }
+
+ private:
+  T* p_ = nullptr;
+  size_t n_ = 0;
+};
+
+// 一组正运动学的结果。
+struct FrameBufs {
+  DBuf<double> xpos, xquat, daxis, danchor, X;
+  void reserve(const DModel& m) {
+    xpos.reserve(3 * m.nbody);
+    xquat.reserve(4 * m.nbody);
+    daxis.reserve(3 * std::max(m.nv, 1));
+    danchor.reserve(3 * std::max(m.nv, 1));
+    X.reserve(3 * std::max(m.nvert, 1));
+  }
+  DFrames view() const { return DFrames{xpos.get(), xquat.get(), daxis.get(), danchor.get(), X.get()}; }
+  // 只交换指针，不拷贝（线搜索最后一次试探的 FK 直接拿来当新位置的 FK）。
+  void swap(FrameBufs& o) {
+    xpos.swap(o.xpos);
+    xquat.swap(o.xquat);
+    daxis.swap(o.daxis);
+    danchor.swap(o.danchor);
+    X.swap(o.X);
+  }
+};
+
+double host_max(const VectorXd& x) { return x.size() ? x.cwiseAbs().maxCoeff() : 0.0; }
+
+}  // namespace
+
+bool available() {
+  int n = 0;
+  return cudaGetDeviceCount(&n) == cudaSuccess && n > 0;
+}
+
+struct Stepper::Impl {
+  Model model;
+  DModel m;
+
+  // 模型的数组。
+  DBuf<int> i_parent, i_bjnt, i_btree, i_bsub_end, i_chain_dof, i_chain_n, i_bvert0, i_bnvert, i_bedge0, i_bnedge,
+      i_bface0, i_bnface, i_jtype, i_jqadr, i_jdadr, i_jbody, i_jlimited, i_dbody, i_drot, i_dtree, i_tdof0, i_tndof,
+      i_tbody0, i_tnbody, i_vbody, i_ev, i_ebody, i_fv, i_fbody;
+  DBuf<double> d_bpos, d_bquat, d_mass, d_ipos, d_inertia, d_S, d_radius, d_jpos, d_jaxis, d_jref, d_jrange, d_vlocal,
+      d_vradius, d_pn, d_poff;
+
+  // 状态和工作区。
+  FrameBufs F, F0, Fp, F1, Fa, Fb, Ft;
+  DBuf<double> q, q0, qprev, p, qtrial, g, ge0, gb, Hk, P, scale, work, scal, tc, tA, A, boxes, rhs;
+  DBuf<int> pairs, cnt;
+  DBuf<float> primbox;     // 每个图元的单精度盒子：顶点、边、三角形依次排，每个 6 个 float（narrow.cuh）
+  DBuf<double> primbox_d;  // 同样的盒子的双精度版（CCD 的精确复核用）
+  DBuf<float> xf;          // 顶点坐标的单精度版（窄相的单精度距离用）
+  DBuf<double> bdisp;      // CCD 每一段里每个刚体的最大位移
+  DBuf<DCand> cand;        // 窄相的候选图元对（个数在 cnt[2]）
+  int cand_cap = 0;
+  int pair_cap = 0;
+  DBuf<DContact> contacts;
+  int contact_cap = 0, nc = 0;
+  DBuf<DFriction> fric;
+  int nf = 0;
+  DBuf<int> row_body;
+  DBuf<double> row_w, row_D;
+  int row_cap = 0, nrow = 0;
+  int last_eval_n = 0;  // energy_at 最后一次检测到的接触个数（contacts 里放的就是这些）
+  // 协作内核版的 PCG（pcg_coop.cu）：acc 是每次迭代的点积，pcg_out 是迭代次数和是否收敛。
+  bool coop = false;
+  bool timing = true;  // 分段计时（每段结束同步一次）
+  double last_eval_dmin = 0;  // energy_at 最后一次检测到的接触里最小的距离
+  DBuf<double> pcg_acc;
+
+  Timers timers;
+
+  explicit Impl(const Model& model_in) : model(model_in) {
+    upload();
+    coop = pcg_coop_supported();
+  }
+
+  // ---------- 上传 ----------
+
+  void upload() {
+    const Model& M = model;
+    const int nb = M.nbody();
+    m.nbody = nb;
+    m.nv = M.nv;
+    m.nq = M.nq;
+    m.njnt = static_cast<int>(M.joints.size());
+    m.ntree = M.ntree;
+    m.nvert = M.nvertex();
+    m.nedge = M.nedge();
+    m.nface = M.nface();
+    m.nplane = static_cast<int>(M.planes.size());
+    for (int i = 0; i < 3; ++i) m.gravity[i] = M.gravity[i];
+    m.filter_parent = M.filter_parent ? 1 : 0;
+
+    // 刚体。
+    std::vector<int> parent(nb), bjnt(nb), btree(nb), sub_end(nb);
+    std::vector<double> bpos(3 * nb), bquat(4 * nb), mass(nb), ipos(3 * nb), inertia(9 * nb), S(9 * nb), radius(nb);
+    for (int b = 0; b < nb; ++b) {
+      const Body& B = M.bodies[b];
+      parent[b] = b == 0 ? 0 : B.parent;
+      bjnt[b] = B.joint;
+      btree[b] = M.body_tree[b];
+      for (int i = 0; i < 3; ++i) {
+        bpos[3 * b + i] = B.pos[i];
+        ipos[3 * b + i] = B.ipos[i];
+      }
+      bquat[4 * b] = B.quat.w();
+      bquat[4 * b + 1] = B.quat.x();
+      bquat[4 * b + 2] = B.quat.y();
+      bquat[4 * b + 3] = B.quat.z();
+      mass[b] = B.mass;
+      radius[b] = B.radius;
+      for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j) {
+          inertia[9 * b + 3 * i + j] = B.inertia(i, j);
+          S[9 * b + 3 * i + j] = B.S(i, j);
+        }
+    }
+    // 子树的范围：MuJoCo 的刚体按深度优先编号，子树是连续的一段 [b, sub_end[b])。顺便检查这一点。
+    for (int b = 0; b < nb; ++b) sub_end[b] = b + 1;
+    for (int b = nb - 1; b >= 1; --b) sub_end[parent[b]] = std::max(sub_end[parent[b]], sub_end[b]);
+    for (int b = 1; b < nb; ++b) {
+      for (int k = b + 1; k < sub_end[b]; ++k) {
+        int x = k;
+        while (x != 0 && x != b) x = parent[x];
+        if (x != b) throw std::runtime_error("gpu: bodies are not in depth-first order");
+      }
+    }
+    // 每个刚体的链上的自由度。
+    std::vector<std::vector<int>> chains(nb);
+    int CH = 1;
+    for (int b = 1; b < nb; ++b) {
+      for (int k = b; k != 0; k = parent[k]) {
+        const int j = bjnt[k];
+        if (j < 0) continue;
+        for (int d = M.joints[j].dadr; d < M.joints[j].dadr + M.joints[j].nv; ++d) chains[b].push_back(d);
+      }
+      CH = std::max(CH, static_cast<int>(chains[b].size()));
+    }
+    if (CH > 64) throw std::runtime_error("gpu: a chain has more than 64 dofs");
+    m.CH = CH;
+    std::vector<int> chain_dof(nb * CH, -1), chain_n(nb, 0);
+    for (int b = 0; b < nb; ++b) {
+      chain_n[b] = static_cast<int>(chains[b].size());
+      for (int k = 0; k < chain_n[b]; ++k) chain_dof[b * CH + k] = chains[b][k];
+    }
+    // 图元的范围：同一个刚体的顶点、边、三角形是连续的（geom 按刚体排序，model.cc 按 geom 的顺序追加）。
+    const auto ranges = [&](auto body_of, int n, std::vector<int>& first, std::vector<int>& count, const char* what) {
+      first.assign(nb, 0);
+      count.assign(nb, 0);
+      for (int i = 0; i < n; ++i) {
+        const int b = body_of(i);
+        if (count[b] == 0) first[b] = i;
+        else if (first[b] + count[b] != i) throw std::runtime_error(std::string("gpu: ") + what + " of a body are not contiguous");
+        ++count[b];
+      }
+    };
+    std::vector<int> bvert0, bnvert, bedge0, bnedge, bface0, bnface;
+    ranges([&](int i) { return M.vertices[i].body; }, m.nvert, bvert0, bnvert, "vertices");
+    ranges([&](int i) { return M.edges[i].body; }, m.nedge, bedge0, bnedge, "edges");
+    ranges([&](int i) { return M.faces[i].body; }, m.nface, bface0, bnface, "faces");
+
+    // 关节。
+    const int nj = m.njnt;
+    std::vector<int> jtype(nj), jqadr(nj), jdadr(nj), jbody(nj), jlimited(nj);
+    std::vector<double> jpos(3 * nj), jaxis(3 * nj), jref(nj), jrange(2 * nj);
+    for (int j = 0; j < nj; ++j) {
+      const Joint& J = M.joints[j];
+      jtype[j] = static_cast<int>(J.type);
+      jqadr[j] = J.qadr;
+      jdadr[j] = J.dadr;
+      jbody[j] = J.body;
+      jlimited[j] = J.limited ? 1 : 0;
+      for (int i = 0; i < 3; ++i) {
+        jpos[3 * j + i] = J.pos[i];
+        jaxis[3 * j + i] = J.axis[i];
+      }
+      jref[j] = J.ref;
+      jrange[2 * j] = J.range[0];
+      jrange[2 * j + 1] = J.range[1];
+    }
+    // 自由度和树（检查每棵树的自由度、刚体都是连续的一段）。
+    std::vector<int> dbody(M.nv), drot(M.nv), dtree(M.nv);
+    std::vector<int> tdof0(std::max(M.ntree, 1), 0), tndof(std::max(M.ntree, 1), 0), tbody0(std::max(M.ntree, 1), 0),
+        tnbody(std::max(M.ntree, 1), 0);
+    for (int d = 0; d < M.nv; ++d) {
+      dbody[d] = M.dof_body[d];
+      drot[d] = M.dof_rot[d] ? 1 : 0;
+      dtree[d] = M.dof_tree[d];
+      const int t = dtree[d];
+      if (tndof[t] == 0) tdof0[t] = d;
+      else if (tdof0[t] + tndof[t] != d) throw std::runtime_error("gpu: dofs of a tree are not contiguous");
+      ++tndof[t];
+    }
+    for (int b = 1; b < nb; ++b) {
+      const int t = btree[b];
+      if (tnbody[t] == 0) tbody0[t] = b;
+      else if (tbody0[t] + tnbody[t] != b) throw std::runtime_error("gpu: bodies of a tree are not contiguous");
+      ++tnbody[t];
+    }
+    m.TD = 1;
+    m.TB = 1;
+    for (int t = 0; t < M.ntree; ++t) {
+      m.TD = std::max(m.TD, tndof[t]);
+      m.TB = std::max(m.TB, tnbody[t]);
+    }
+
+    // 几何。
+    std::vector<int> vbody(m.nvert), ev(2 * m.nedge), ebody(m.nedge), fv(3 * m.nface), fbody(m.nface);
+    std::vector<double> vlocal(3 * m.nvert), vradius(m.nvert), pn(3 * m.nplane), poff(m.nplane);
+    for (int v = 0; v < m.nvert; ++v) {
+      vbody[v] = M.vertices[v].body;
+      for (int i = 0; i < 3; ++i) vlocal[3 * v + i] = M.vertices[v].local[i];
+      vradius[v] = M.vertices[v].radius;
+    }
+    for (int e = 0; e < m.nedge; ++e) {
+      ev[2 * e] = M.edges[e].v0;
+      ev[2 * e + 1] = M.edges[e].v1;
+      ebody[e] = M.edges[e].body;
+    }
+    for (int f = 0; f < m.nface; ++f) {
+      fv[3 * f] = M.faces[f].v0;
+      fv[3 * f + 1] = M.faces[f].v1;
+      fv[3 * f + 2] = M.faces[f].v2;
+      fbody[f] = M.faces[f].body;
+    }
+    for (int pl = 0; pl < m.nplane; ++pl) {
+      for (int i = 0; i < 3; ++i) pn[3 * pl + i] = M.planes[pl].normal[i];
+      poff[pl] = M.planes[pl].offset;
+    }
+
+    // 上传，并把指针填进 DModel。
+    const auto up_i = [](DBuf<int>& buf, const std::vector<int>& v) {
+      buf.upload(v);
+      return buf.get();
+    };
+    const auto up_d = [](DBuf<double>& buf, const std::vector<double>& v) {
+      buf.upload(v);
+      return buf.get();
+    };
+    m.parent = up_i(i_parent, parent);
+    m.bpos = up_d(d_bpos, bpos);
+    m.bquat = up_d(d_bquat, bquat);
+    m.bjnt = up_i(i_bjnt, bjnt);
+    m.mass = up_d(d_mass, mass);
+    m.ipos = up_d(d_ipos, ipos);
+    m.inertia = up_d(d_inertia, inertia);
+    m.S = up_d(d_S, S);
+    m.radius = up_d(d_radius, radius);
+    m.btree = up_i(i_btree, btree);
+    m.bsub_end = up_i(i_bsub_end, sub_end);
+    m.chain_dof = up_i(i_chain_dof, chain_dof);
+    m.chain_n = up_i(i_chain_n, chain_n);
+    m.bvert0 = up_i(i_bvert0, bvert0);
+    m.bnvert = up_i(i_bnvert, bnvert);
+    m.bedge0 = up_i(i_bedge0, bedge0);
+    m.bnedge = up_i(i_bnedge, bnedge);
+    m.bface0 = up_i(i_bface0, bface0);
+    m.bnface = up_i(i_bnface, bnface);
+    m.jtype = up_i(i_jtype, jtype);
+    m.jqadr = up_i(i_jqadr, jqadr);
+    m.jdadr = up_i(i_jdadr, jdadr);
+    m.jbody = up_i(i_jbody, jbody);
+    m.jlimited = up_i(i_jlimited, jlimited);
+    m.jpos = up_d(d_jpos, jpos);
+    m.jaxis = up_d(d_jaxis, jaxis);
+    m.jref = up_d(d_jref, jref);
+    m.jrange = up_d(d_jrange, jrange);
+    m.dbody = up_i(i_dbody, dbody);
+    m.drot = up_i(i_drot, drot);
+    m.dtree = up_i(i_dtree, dtree);
+    m.tdof0 = up_i(i_tdof0, tdof0);
+    m.tndof = up_i(i_tndof, tndof);
+    m.tbody0 = up_i(i_tbody0, tbody0);
+    m.tnbody = up_i(i_tnbody, tnbody);
+    m.vbody = up_i(i_vbody, vbody);
+    m.vlocal = up_d(d_vlocal, vlocal);
+    m.vradius = up_d(d_vradius, vradius);
+    m.ev = up_i(i_ev, ev);
+    m.ebody = up_i(i_ebody, ebody);
+    m.fv = up_i(i_fv, fv);
+    m.fbody = up_i(i_fbody, fbody);
+    m.pn = up_d(d_pn, pn);
+    m.poff = up_d(d_poff, poff);
+
+    // 工作区。
+    for (FrameBufs* f : {&F, &F0, &Fp, &F1, &Fa, &Fb, &Ft}) f->reserve(m);
+    const int nv = std::max(m.nv, 1), nq = std::max(m.nq, 1);
+    for (DBuf<double>* b : {&q, &q0, &qprev, &qtrial}) b->reserve(nq);
+    for (DBuf<double>* b : {&p, &g, &ge0, &gb, &scale, &rhs}) b->reserve(nv);
+    Hk.reserve(std::max(m.ntree, 1) * m.TD * m.TD);
+    P.reserve(2 * std::max(m.ntree, 1) * m.TD * m.TD);  // 逆 + 工作区（launch_precond_build）
+    work.reserve(4 * nv + 18 * nb);  // PCG：r、z、p、Ap，加上力旋量形式的行用的工作区（launch_matvec）
+    scal.reserve(16);
+    tc.reserve(3 * nb);
+    tA.reserve(9 * nb);
+    A.reserve(nb);
+    boxes.reserve(6 * nb);
+    primbox.reserve(6 * static_cast<size_t>(m.nvert + m.nedge + m.nface));
+    primbox_d.reserve(6 * static_cast<size_t>(m.nvert + m.nedge + m.nface));
+    xf.reserve(3 * static_cast<size_t>(std::max(m.nvert, 1)));
+    bdisp.reserve(nb);
+    grow_cands(1 << 16);
+    cnt.reserve(4);
+    grow_pairs(1024);
+    grow_contacts(1024);
+    grow_rows(3 * 1024);
+  }
+
+  void grow_pairs(int n) {
+    pair_cap = n;
+    pairs.reserve(2 * static_cast<size_t>(n));
+  }
+  void grow_contacts(int n) {
+    // 只扩接触的缓冲区。摩擦接触在步首冻结以后整步都要用，不能在这里跟着重新分配（重新分配会丢掉内容）。
+    contact_cap = n;
+    contacts.reserve(n);
+  }
+  void grow_cands(int n) {
+    cand_cap = n;
+    cand.reserve(n);
+  }
+  DCands cands() const { return DCands{cand.get(), cnt.get() + 2, cand_cap}; }
+  void grow_rows(int n) {
+    if (n <= row_cap) return;
+    row_cap = n;
+    row_body.reserve(2 * static_cast<size_t>(n));
+    row_w.reserve(12 * static_cast<size_t>(n));
+    row_D.reserve(n);
+  }
+  DRows rows_view() const { return DRows{row_body.get(), row_w.get(), row_D.get()}; }
+
+  // ---------- 计时 ----------
+
+  using Clock = std::chrono::steady_clock;
+  double ms_since(Clock::time_point t0) const {
+    if (!timing) return 0;
+    cudaDeviceSynchronize();
+    return std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
+  }
+
+  // ---------- 基本操作 ----------
+
+  void set_scalar(int i, double v) { launch_fill(scal.get() + i, v); }  // 不等 GPU
+  double get_scalar(int i) {
+    double v = 0;
+    check(cudaMemcpy(&v, scal.get() + i, sizeof(double), cudaMemcpyDeviceToHost), "get");
+    return v;
+  }
+
+  // 检测用的图元缓冲区不要双精度的盒子，CCD 用的要。
+  PrimBufs prims(bool with_dbox) const { return PrimBufs{primbox.get(), with_dbox ? primbox_d.get() : nullptr, xf.get()}; }
+
+  bool pairs_on() const { return m.nedge > 0 || m.nface > 0; }
+
+  // 接触检测（find_contacts，dmax = dhat）：结果放在 contacts 里，返回个数。
+  // 刚体对、候选、接触的个数都留在显存里，最后一次读回（cnt[0..2]）；哪个放不下就扩容重来。
+  int detect(const FrameBufs& Fr, double dmax) {
+    launch_body_boxes(m, Fr.X.get(), boxes.get());
+    int h[3];
+    for (;;) {
+      if (pairs_on()) {
+        launch_body_pairs(m, boxes.get(), dmax, nullptr, 0.0, pairs.get(), pair_cap, cnt.get());
+        launch_prim_boxes(m, Fr.X.get(), nullptr, prims(false));
+      } else {
+        cudaMemsetAsync(cnt.get(), 0, sizeof(int));
+      }
+      launch_detect(m, Fr.X.get(), boxes.get(), prims(false), pairs.get(), pairs_on() ? pair_cap : 0, dmax, cands(),
+                    contacts.get(), contact_cap, cnt.get(), h);
+      if (h[0] > pair_cap) grow_pairs(2 * h[0]);
+      else if (h[2] > cand_cap) grow_cands(2 * h[2]);
+      else if (h[1] > contact_cap) grow_contacts(2 * h[1]);
+      else break;
+    }
+    if (pairs_on()) {
+      ++timers.pair_calls;
+      timers.pair_sum += h[0];
+    }
+    return h[1];
+  }
+
+  void run_fk(const double* qd, const FrameBufs& Fr) { launch_fk(m, qd, Fr.view()); }
+
+  // 接触里最小的距离；没有接触时 +无穷。
+  double contact_dmin(int n) {
+    if (n == 0) return std::numeric_limits<double>::infinity();
+    set_scalar(4, std::numeric_limits<double>::infinity());
+    launch_min_distance(contacts.get(), n, scal.get() + 4);
+    return get_scalar(4);
+  }
+
+  // 步首（CPU 版 step 的“准备”）：倒推 q_{n-1}、惯性目标、步首的惯性梯度、滞后摩擦。
+  void prepare(const StepParams& Pm, const VectorXd& q0h, const VectorXd& v0h, double kappa) {
+    const auto t0 = Clock::now();
+    const double h = Pm.h;
+    q0.upload(q0h.data(), m.nq);
+    rhs.upload(v0h.data(), m.nv);  // 借 rhs 放 v0
+    launch_integrate(m, q0.get(), rhs.get(), -h, qprev.get());
+    run_fk(q0.get(), F0);
+    run_fk(qprev.get(), Fp);
+    launch_targets(m, F0.view(), Fp.view(), h, tc.get(), tA.get());
+    cudaMemsetAsync(ge0.get(), 0, sizeof(double) * m.nv);
+    launch_inertia_gradient(m, F0.view(), tc.get(), tA.get(), h, ge0.get());
+    nf = 0;
+    if (Pm.mu > 0 && kappa > 0) {
+      const int n0 = detect(F0, Pm.dhat);
+      fric.reserve(std::max(n0, 1));  // 冻结之前扩容
+      nf = launch_friction_lag(m, F0.X.get(), contacts.get(), n0, kappa, Pm.dhat, fric.get(), cnt.get());
+    }
+    timers.prepare += ms_since(t0);
+  }
+
+  // 在当前点（F 和 contacts 里的 nc 个接触）组装 Newton 系统：g、Hk、行，返回能量 e0。
+  void assemble(const StepParams& Pm, double kappa) {
+    const auto t0 = Clock::now();
+    const double h = Pm.h;
+    cudaMemsetAsync(scal.get(), 0, sizeof(double));
+    cudaMemsetAsync(g.get(), 0, sizeof(double) * m.nv);
+    launch_inertia_hessian(m, F.view(), h, Hk.get());
+    launch_inertia_energy(m, F.view(), tc.get(), tA.get(), h, scal.get());
+    launch_inertia_gradient(m, F.view(), tc.get(), tA.get(), h, g.get());
+    grow_rows(nc + 2 * nf);
+    launch_contact_terms(m, F.view(), q.get(), contacts.get(), nc, kappa, Pm.dhat, Pm.curv_scale, scal.get(), g.get(),
+                         Hk.get(), rows_view());
+    launch_friction_terms(m, F.view(), fric.get(), nf, h, Pm.mu, Pm.eps_v, scal.get(), g.get(), rows_view(), nc);
+    launch_limits(m, q.get(), Pm.limit_k, Pm.limit_dhat, scal.get(), g.get(), Hk.get());
+    nrow = nc + 2 * nf;
+    timers.contacts += nc;
+    timers.rows += nrow;
+    timers.assemble += ms_since(t0);
+    // 能量在 scal[0]，不在这里读：和 PCG、收敛判断的结果一起读回（step 的第 2 步）。
+  }
+
+  // 线搜索用的能量：在 qd 处做 FK、检测接触，再把各项能量加起来（会覆盖 contacts）。
+  double energy_at(const StepParams& Pm, const double* qd, double kappa) {
+    ++timers.energy_evals;
+    run_fk(qd, Ft);
+    const int n = detect(Ft, Pm.dhat);
+    cudaMemsetAsync(scal.get(), 0, sizeof(double));
+    launch_inertia_energy(m, Ft.view(), tc.get(), tA.get(), Pm.h, scal.get());
+    launch_contact_terms(m, Ft.view(), qd, contacts.get(), n, kappa, Pm.dhat, 0.0, scal.get(), nullptr, nullptr, DRows{});
+    launch_friction_terms(m, Ft.view(), fric.get(), nf, Pm.h, Pm.mu, Pm.eps_v, scal.get(), nullptr, DRows{}, 0);
+    launch_limits(m, qd, Pm.limit_k, Pm.limit_dhat, scal.get(), nullptr, nullptr);
+    // 顺便算接触里最小的距离（kappa 调整要用接受的那个点的，而接受的点就是最后一次试探的点），和能量一起读回。
+    set_scalar(4, std::numeric_limits<double>::infinity());
+    launch_min_distance(contacts.get(), n, scal.get() + 4);
+    double out[5];
+    check(cudaMemcpy(out, scal.get(), sizeof(out), cudaMemcpyDeviceToHost), "energy read");
+    last_eval_n = n;
+    last_eval_dmin = out[4];
+    return out[0];
+  }
+
+  // PCG 解 H x = rhs_d（rhs_d、x 都在显存）。
+  // 迭代次数：主机循环版直接返回；协作内核版不等，返回 -1，次数在 scal[12]（defer = false 时这里读回）。
+  int pcg_solve(const double* rhs_d, double* x, double tol, int max_iter, bool defer = false) {
+    const auto t0 = Clock::now();
+    launch_precond_build(m, F.view(), Hk.get(), rows_view(), nrow, P.get(), scale.get());
+    bool conv = false;
+    int it = -1;
+    if (coop) {
+      pcg_acc.reserve(2 * static_cast<size_t>(max_iter) + 4);
+      if (run_pcg_coop(m, F.view(), Hk.get(), rows_view(), nrow, P.get(), rhs_d, x, tol, max_iter, work.get(),
+                       pcg_acc.get(), scal.get() + 12) == 0) {
+        timers.solve += ms_since(t0);
+        if (defer) return -1;
+        it = static_cast<int>(get_scalar(12));
+        timers.pcg += it;
+        return it;
+      }
+    }
+    // 没用协作内核（关掉了，或者树太大放不进共享内存）
+    it = run_pcg(m, F.view(), Hk.get(), rows_view(), nrow, P.get(), rhs_d, x, tol, max_iter, work.get(), scal.get() + 8,
+                 &conv);
+    timers.solve += ms_since(t0);
+    timers.pcg += it;
+    return it;
+  }
+
+  // CCD（curved_ccd + limit_ccd），从 F（q 处的 FK）出发沿 p。
+  double ccd(const StepParams& Pm, const double* qd, const double* pd) {
+    const auto t0 = Clock::now();
+    launch_accel_bounds(m, qd, pd, A.get());
+    std::vector<double> Ah(m.nbody);
+    A.download(Ah.data(), m.nbody);
+    const double A_max = Ah.empty() ? 0.0 : *std::max_element(Ah.begin(), Ah.end());
+    const bool pairs_on = m.nedge > 0 || m.nface > 0;
+    double ds = A_max > 0 ? std::min(1.0, std::sqrt(8 * Pm.dhat / A_max)) : 1.0;
+    double s0 = 0, result = -1, limit_t = 1.0;
+    const double* Xa = F.X.get();
+    // 限位的 CCD 和分段无关，先发出去；结果在 scal[3]，跟着每一段的结果一起读回。
+    set_scalar(3, 1.0);
+    launch_limit_ccd(m, qd, pd, Pm.c, scal.get() + 3);
+    for (int guard = 0; guard < 10000 && s0 < 1.0; ++guard) {
+      const double s1 = std::min(1.0, s0 + ds);
+      const double len = s1 - s0;
+      launch_integrate(m, qd, pd, s1, qtrial.get());
+      launch_fk(m, qtrial.get(), Fb.view());
+      // scal[1] 截断位置，scal[2] 需要的段长，scal[9..10] 候选、刚体对的个数。这一段只在最后读回一次。
+      launch_ccd_init(scal.get() + 1, scal.get() + 2, scal.get() + 9, len);
+      launch_ground_ccd(m, Xa, Fb.X.get(), A.get(), len, Pm.c, scal.get() + 1, scal.get() + 2);
+      if (pairs_on) {
+        launch_swept_boxes(m, Xa, Fb.X.get(), boxes.get());
+        launch_body_pairs(m, boxes.get(), 0.0, A.get(), len, pairs.get(), pair_cap, cnt.get());
+        launch_prim_boxes(m, Xa, Fb.X.get(), prims(true));
+        launch_body_disp(m, Xa, Fb.X.get(), bdisp.get());
+        launch_pair_ccd(m, Xa, Fb.X.get(), boxes.get(), prims(true), bdisp.get(), A.get(), len, Pm.c, pairs.get(),
+                        cnt.get(), pair_cap, cands(), scal.get() + 1, scal.get() + 2, scal.get() + 9);
+      }
+      double out[10];  // scal[1..10]
+      check(cudaMemcpy(out, scal.get() + 1, 10 * sizeof(double), cudaMemcpyDeviceToHost), "ccd read");
+      limit_t = out[2];
+      if (out[9] > pair_cap) {  // 刚体对放不下：扩容，这一段重做
+        grow_pairs(static_cast<int>(2 * out[9]));
+        continue;
+      }
+      if (out[8] > cand_cap) {  // 候选数组放不下：扩容，这一段重做
+        grow_cands(static_cast<int>(2 * out[8]));
+        continue;
+      }
+      if (pairs_on) {
+        ++timers.pair_calls;
+        timers.pair_sum += static_cast<long>(out[9]);
+      }
+      const double t_min = out[0], ds_need = out[1];
+      if (ds_need < len) {
+        ds = std::min(0.5 * len, ds_need);
+        continue;
+      }
+      if (t_min < 1.0) {
+        result = s0 + t_min * len;
+        break;
+      }
+      s0 = s1;
+      Fa.swap(Fb);  // 这一段的终点是下一段的起点（Fb 下一段会被 FK 覆盖）
+      Xa = Fa.X.get();
+    }
+    if (result < 0) result = std::min(s0, 1.0);
+    result = std::min(result, limit_t);
+    timers.ccd += ms_since(t0);
+    return result;
+  }
+
+  // kappa 的初值（initial_kappa）：g_b 是 kappa = 1 时的接触梯度，g_e 是步首的惯性梯度。
+  double initial_kappa(const StepParams& Pm) {
+    const KappaRange range = kappa_range(model, Pm.dhat);
+    cudaMemsetAsync(gb.get(), 0, sizeof(double) * m.nv);
+    launch_contact_terms(m, F.view(), q.get(), contacts.get(), nc, 1.0, Pm.dhat, 0.0, nullptr, gb.get(), nullptr,
+                         DRows{});
+    cudaMemsetAsync(scal.get() + 5, 0, 2 * sizeof(double));
+    launch_dot(gb.get(), ge0.get(), m.nv, scal.get() + 5);
+    launch_dot(gb.get(), gb.get(), m.nv, scal.get() + 6);
+    const double gbge = get_scalar(5), gb2 = get_scalar(6);
+    double kappa = range.ref;
+    if (gb2 > 0) {
+      const double balance = -gbge / gb2;
+      if (balance > 0) kappa = balance;
+    }
+    return std::min(std::max(kappa, range.min), range.max);
+  }
+
+  // ---------- 一个时间步：和 src/step.cc 的 step() 一行一行对应 ----------
+
+  StepResult step(const StepParams& Pm, const VectorXd& q0h, const VectorXd& v0h, SolverState* state,
+                  std::vector<NewtonIterate>* trace) {
+    const auto t_step = Clock::now();
+    const double h = Pm.h;
+    SolverState local;
+    if (state == nullptr) state = &local;
+    const KappaRange krange = kappa_range(model, Pm.dhat);
+
+    prepare(Pm, q0h, v0h, state->kappa);
+    auto t_up = Clock::now();
+    check(cudaMemcpy(q.get(), q0.get(), sizeof(double) * m.nq, cudaMemcpyDeviceToDevice), "q = q0");
+    run_fk(q.get(), F);
+    nc = detect(F, Pm.dhat);
+    timers.update += ms_since(t_up);
+
+    int newton = 0, pcg_total = 0;
+    bool semi_stopped = false;
+    double beta = 1.0;
+    for (int it = 1; it <= Pm.max_newton; ++it) {
+      newton = it;
+      // 第 0 步：第一次出现接触时初始化 kappa。
+      if (nc > 0 && state->kappa == 0) {
+        const auto t0 = Clock::now();
+        state->kappa = initial_kappa(Pm);
+        state->dmin_prev = contact_dmin(nc);
+        timers.assemble += ms_since(t0);
+      }
+      const double kappa = state->kappa;
+
+      // 第 1 步：组装，PCG 解 H p = -g。
+      const double dmin_here = trace ? contact_dmin(nc) : 0.0;
+      assemble(Pm, kappa);
+      int iters = pcg_solve(g.get(), p.get(), Pm.pcg_tol, Pm.pcg_max, true);
+      launch_scale(p.get(), m.nv, -1.0);
+
+      // 第 2 步：收敛判断（整步里顶点的最大位移 / h）。组装的能量 scal[0]、最大位移 scal[7]、
+      // PCG 的迭代次数 scal[12] 到这里才一起读回：从组装到这里 GPU 不用停下来等主机。
+      const auto t_conv = Clock::now();
+      launch_integrate(m, q.get(), p.get(), 1.0, qtrial.get());
+      launch_fk(m, qtrial.get(), F1.view());
+      set_scalar(7, 0.0);
+      if (m.nvert > 0) launch_max_displacement(F.X.get(), F1.X.get(), m.nvert, scal.get() + 7);
+      double rb[13];
+      check(cudaMemcpy(rb, scal.get(), sizeof(rb), cudaMemcpyDeviceToHost), "newton read");
+      const double e0 = rb[0];
+      if (iters < 0) {
+        iters = static_cast<int>(rb[12]);
+        timers.pcg += iters;
+      }
+      pcg_total += iters;
+      double size;
+      if (m.nvert > 0) {
+        size = rb[7] / h;
+      } else {
+        VectorXd ph(m.nv);
+        p.download(ph.data(), m.nv);
+        size = host_max(ph) / h;
+      }
+      timers.converge += ms_since(t_conv);
+      if (size < Pm.tol) break;
+
+      // 第 3 步：CCD。
+      const double alpha_max = ccd(Pm, q.get(), p.get());
+
+      // 第 4 步：回溯线搜索。
+      const auto t_ls = Clock::now();
+      double alpha = alpha_max;
+      for (;;) {
+        launch_integrate(m, q.get(), p.get(), alpha, qtrial.get());
+        if (!(energy_at(Pm, qtrial.get(), kappa) > e0 && alpha > 1e-12)) break;
+        alpha *= 0.5;
+      }
+      timers.line_search += ms_since(t_ls);
+
+      // 第 5 步：记录，更新。下一次迭代、kappa 调整都要新位置上的 FK 和接触。线搜索最后一次试探的正是
+      // 接受的 alpha：qtrial = q + alpha p，Ft 是它的 FK，contacts 里是它的 last_eval_n 个接触。
+      // 所以直接接过来（交换 F 和 Ft 的指针），不用再做一遍 FK 和检测。CPU 版重新算，结果一样。
+      if (trace) trace->push_back({e0, size, alpha_max, alpha, dmin_here, iters});
+      t_up = Clock::now();
+      check(cudaMemcpyAsync(q.get(), qtrial.get(), sizeof(double) * m.nq, cudaMemcpyDeviceToDevice), "q update");
+      F.swap(Ft);
+      nc = last_eval_n;
+      timers.update += ms_since(t_up);
+
+      // 第 6 步：kappa 调整。
+      if (Pm.adapt_kappa && state->kappa > 0) {
+        const double dmin = last_eval_dmin;  // 接受的点上的最小距离（energy_at 顺便算的）
+        if (dmin < 1e-3 * Pm.dhat && dmin < state->dmin_prev) {
+          state->kappa = std::min(2 * state->kappa, krange.max);
+        } else if (dmin > 1e-2 * Pm.dhat) {
+          state->kappa = std::max(0.5 * state->kappa, krange.min);
+        }
+        state->dmin_prev = dmin;
+      }
+
+      // 第 7 步：半隐式提前停止。
+      if (Pm.semi_implicit && it >= Pm.semi_kmin) {
+        beta *= (1 - alpha_max);
+        if (beta <= Pm.semi_beta_tol && alpha == alpha_max) {
+          semi_stopped = true;
+          break;
+        }
+      }
+    }
+
+    StepResult r;
+    VectorXd qh(m.nq);
+    q.download(qh.data(), m.nq);
+    r.q = qh;
+    r.v = differentiate(model, q0h, qh) / h;
+    r.newton = newton;
+    r.pcg = pcg_total;
+    r.semi_stopped = semi_stopped;
+    r.kappa = state->kappa;
+    r.min_distance = contact_dmin(nc);
+    r.iterate_min_distance = std::numeric_limits<double>::infinity();
+    r.min_limit_distance = min_limit_distance(model, qh);
+    timers.newton += newton;
+    ++timers.steps;
+    timers.total += ms_since(t_step);
+    return r;
+  }
+};
+
+Stepper::Stepper(const Model& model) : impl_(std::make_unique<Impl>(model)) {}
+Stepper::~Stepper() = default;
+
+StepResult Stepper::step(const StepParams& P, const VectorXd& q0, const VectorXd& v0, SolverState* state,
+                         std::vector<NewtonIterate>* trace) {
+  return impl_->step(P, q0, v0, state, trace);
+}
+
+const Stepper::Timers& Stepper::timers() const { return impl_->timers; }
+bool Stepper::set_cooperative_pcg(bool on) {
+  impl_->coop = on && pcg_coop_supported();
+  return impl_->coop;
+}
+void Stepper::reset_timers() { impl_->timers = Timers(); }
+void Stepper::set_timing(bool on) { impl_->timing = on; }
+
+Frames Stepper::fk(const VectorXd& qh) {
+  Impl& I = *impl_;
+  I.q.upload(qh.data(), I.m.nq);
+  I.run_fk(I.q.get(), I.F);
+  Frames out;
+  std::vector<double> xpos(3 * I.m.nbody), xquat(4 * I.m.nbody), ax(3 * I.m.nv), an(3 * I.m.nv);
+  I.F.xpos.download(xpos.data(), xpos.size());
+  I.F.xquat.download(xquat.data(), xquat.size());
+  I.F.daxis.download(ax.data(), ax.size());
+  I.F.danchor.download(an.data(), an.size());
+  for (int b = 0; b < I.m.nbody; ++b) {
+    out.xpos.emplace_back(xpos[3 * b], xpos[3 * b + 1], xpos[3 * b + 2]);
+    out.xquat.emplace_back(xquat[4 * b], xquat[4 * b + 1], xquat[4 * b + 2], xquat[4 * b + 3]);
+  }
+  for (int d = 0; d < I.m.nv; ++d) {
+    out.dof_axis.emplace_back(ax[3 * d], ax[3 * d + 1], ax[3 * d + 2]);
+    out.dof_anchor.emplace_back(an[3 * d], an[3 * d + 1], an[3 * d + 2]);
+  }
+  return out;
+}
+
+Stepper::Terms Stepper::terms(const StepParams& P, const VectorXd& q0h, const VectorXd& v0h, double kappa,
+                              const VectorXd& qh) {
+  Impl& I = *impl_;
+  I.prepare(P, q0h, v0h, kappa);
+  I.q.upload(qh.data(), I.m.nq);
+  I.run_fk(I.q.get(), I.F);
+  I.nc = I.detect(I.F, P.dhat);
+  Terms out;
+  I.assemble(P, kappa);
+  out.energy = I.get_scalar(0);
+  out.ncontact = I.nc;
+  out.nfriction = I.nf;
+  const int nv = I.m.nv, TD = I.m.TD, RW = 2 * I.m.CH;
+  out.g.resize(nv);
+  I.g.download(out.g.data(), nv);
+  // 稠密的 H：树块放回对角块，再加每一行的外积。
+  std::vector<double> Hk(static_cast<size_t>(std::max(I.m.ntree, 1)) * TD * TD);
+  I.Hk.download(Hk.data(), Hk.size());
+  out.H = MatrixXd::Zero(nv, nv);
+  for (int d = 0; d < nv; ++d) {
+    const int t = I.model.dof_tree[d];
+    int d0 = d;
+    while (d0 > 0 && I.model.dof_tree[d0 - 1] == t) --d0;
+    for (int e = 0; e < nv; ++e) {
+      if (I.model.dof_tree[e] != t) continue;
+      out.H(d, e) = Hk[static_cast<size_t>(t) * TD * TD + (d - d0) * TD + (e - d0)];
+    }
+  }
+  // 行先在显存里展开成逐个自由度的值（launch_rows_expand），再下载。
+  std::vector<int> idx(static_cast<size_t>(I.nrow) * RW);
+  std::vector<double> val(static_cast<size_t>(I.nrow) * RW), D(I.nrow);
+  DBuf<int> d_idx;
+  DBuf<double> d_val;
+  d_idx.reserve(idx.size());
+  d_val.reserve(val.size());
+  launch_rows_expand(I.m, I.F.view(), I.rows_view(), I.nrow, d_idx.get(), d_val.get());
+  d_idx.download(idx.data(), idx.size());
+  d_val.download(val.data(), val.size());
+  I.row_D.download(D.data(), D.size());
+  for (int r = 0; r < I.nrow; ++r) {
+    VectorXd row = VectorXd::Zero(nv);
+    for (int k = 0; k < RW && idx[r * RW + k] >= 0; ++k) row[idx[r * RW + k]] += val[r * RW + k];
+    out.H += D[r] * row * row.transpose();
+  }
+  return out;
+}
+
+VectorXd Stepper::solve(const VectorXd& rhs_h, double tol, int* iterations) {
+  Impl& I = *impl_;
+  I.rhs.upload(rhs_h.data(), I.m.nv);
+  const int it = I.pcg_solve(I.rhs.get(), I.p.get(), tol, 1000);
+  if (iterations) *iterations = it;
+  VectorXd x(I.m.nv);
+  I.p.download(x.data(), I.m.nv);
+  return x;
+}
+
+double Stepper::ccd(const StepParams& P, const VectorXd& qh, const VectorXd& ph) {
+  Impl& I = *impl_;
+  I.q.upload(qh.data(), I.m.nq);
+  I.p.upload(ph.data(), I.m.nv);
+  I.run_fk(I.q.get(), I.F);
+  return I.ccd(P, I.q.get(), I.p.get());
+}
+
+}  // namespace rcipc::gpu

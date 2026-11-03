@@ -21,11 +21,18 @@ build\Release\scene_demo.exe model=ragdoll_pile.xml T=2 check=1 out=pile.csv
 python tools/replay.py models/ragdoll_pile.xml pile.csv
 ```
 
+GPU 版（阶段 11）：配置时找到 CUDA 编译器就会编译库 `rcipc_gpu` 和测试 `test_gpu`（在 CUDA 12.6、RTX 4060 Ti 上测过；`-DRCIPC_CUDA=OFF` 关掉）。场景程序加 `gpu=1` 就用 GPU 版，`timing=0` 关掉分段计时：
+
+```
+build\Release\scene_demo.exe model=<仓库>/compare/libuipc/ragdolls_60_mesh.xml T=3 dhat=0.01 mu=0.2 eps_v=0.01 tol=0.05 semi=1 gpu=1 timing=0
+```
+
 ## 目录
 
 | 目录 | 内容 |
 |---|---|
 | `include/rcipc/`、`src/` | 库 `rcipc`：后面各阶段都会复用的代码（障碍函数、四元数、模型、运动学、惯性项、接触、CCD、时间步） |
+| `src/gpu/`、`include/rcipc/gpu.h` | 库 `rcipc_gpu`（阶段 11）：同一个时间步的 CUDA 版 |
 | `toys/` | 演示程序和练习用的小模型（阶段 1：`toys/ipc1d/`，小球落地；阶段 3：`toys/dynamics/`，双摆和旋转的盒子；阶段 4、5、7、8：`toys/contact/`，落地的盒子、甩过地面的杆、堆叠、台阶、斜面；阶段 6：`toys/curvature/`，逐次迭代看间隙；阶段 10：`toys/scenes/`，跑任意场景并写出轨迹） |
 | `tests/` | GoogleTest 测试，一个主题一个文件 |
 | `models/` | MJCF 模型（阶段 2 起），可以用 MuJoCo 的 `simulate.exe` 打开看 |

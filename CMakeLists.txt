@@ -12,10 +12,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 if(MSVC)
   # /utf-8：源文件按 UTF-8 读（注释里有中文；不加的话 MSVC 按 GBK 读，会报警告甚至读错）。
   # /W4：较高的警告级别。/permissive-：按标准 C++ 严格检查。
-  add_compile_options(/utf-8 /W4 /permissive-)
+  # 只给 C++ 源文件（阶段 11 的 .cu 文件由 nvcc 编译，它不认这些选项，见下面的 CUDA 部分）。
+  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/utf-8> $<$<COMPILE_LANGUAGE:CXX>:/W4> $<$<COMPILE_LANGUAGE:CXX>:/permissive->)
   add_compile_definitions(_CRT_SECURE_NO_WARNINGS)  # 允许用 fopen 等函数，不必换成 fopen_s
 else()
-  add_compile_options(-Wall -Wextra)
+  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wall> $<$<COMPILE_LANGUAGE:CXX>:-Wextra>)
 endif()
 
 # 第三方依赖：Eigen、GoogleTest、MuJoCo。
@@ -72,6 +73,34 @@ rcipc_copy_dlls(curvature_demo)
 add_executable(scene_demo toys/scenes/main.cc)
 target_link_libraries(scene_demo PRIVATE rcipc)
 rcipc_copy_dlls(scene_demo)
+
+# 阶段 11：GPU 版（CUDA）。机器上没有 CUDA 编译器时跳过，CPU 版照常编译；也可以 -DRCIPC_CUDA=OFF 关掉。
+#   CMAKE_CUDA_ARCHITECTURES 默认 native：为这台机器的显卡编译（RTX 4060 Ti 是 sm_89）。
+#   设备代码只在 src/gpu/*.cu 里，主机代码（stepper.cc）是普通 C++，和 Eigen、库 rcipc 一起编译。
+option(RCIPC_CUDA "Build the GPU version (stage 11)" ON)
+include(CheckLanguage)
+check_language(CUDA)
+if(RCIPC_CUDA AND CMAKE_CUDA_COMPILER)
+  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+    set(CMAKE_CUDA_ARCHITECTURES native)
+  endif()
+  enable_language(CUDA)
+  find_package(CUDAToolkit REQUIRED)
+  set(CMAKE_CUDA_STANDARD 17)
+  add_library(rcipc_gpu
+    src/gpu/stepper.cc   # 主机：上传模型、Newton 循环
+    src/gpu/kin.cu       # 正运动学、惯性项、关节限位
+    src/gpu/contact.cu   # 接触检测、接触行、摩擦
+    src/gpu/ccd.cu       # 曲线 CCD
+    src/gpu/solver.cu    # PCG 和树块预条件器
+    src/gpu/pcg_coop.cu  # 协作内核版的 PCG（整个循环一个内核）
+  )
+  target_link_libraries(rcipc_gpu PUBLIC rcipc CUDA::cudart)
+  target_compile_definitions(rcipc_gpu PUBLIC RCIPC_HAVE_CUDA)
+  # nvcc 把主机部分交给 MSVC 编译：一样要 /utf-8。
+  target_compile_options(rcipc_gpu PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/utf-8>)
+  target_link_libraries(scene_demo PRIVATE rcipc_gpu)
+endif()
 
 # 测试，定义在 tests/CMakeLists.txt。
 enable_testing()
