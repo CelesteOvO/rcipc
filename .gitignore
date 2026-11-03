@@ -7,3 +7,6 @@ out/
 __pycache__/
 .idea/
 cmake-build-*/
+
+# tools/render.py 的输出（轨迹和视频，可以重新生成）
+media/
