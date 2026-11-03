@@ -97,6 +97,25 @@ TEST(Mesh, BoxesSpheresAndCapsules) {
   EXPECT_EQ(degenerate, 2);
 }
 
+// 三角网格（和 libuipc 同一套胶囊网格，compare/libuipc/ragdolls_1_mesh.xml）：一个布娃娃 11 个刚体，
+// 10 个胶囊网格各 34 个顶点、64 个三角形，头（球）26 个顶点、48 个三角形；每个闭合网格 V - E + F = 2。
+TEST(Mesh, TriangleMeshesFromMjcf) {
+  const Model M = from_mujoco(load_mjcf(RCIPC_MODEL_DIR "/../compare/libuipc/ragdolls_1_mesh.xml").get());
+  EXPECT_EQ(M.nvertex(), 10 * 34 + 26);
+  EXPECT_EQ(M.nface(), 10 * 64 + 48);
+  EXPECT_EQ(M.nedge(), 3 * M.nface() / 2);
+  for (int b = 1; b < M.nbody(); ++b) {
+    int nv = 0, ne = 0, nf = 0;
+    for (const Vertex& v : M.vertices) nv += v.body == b;
+    for (const Edge& e : M.edges) ne += e.body == b;
+    for (const Face& f : M.faces) nf += f.body == b;
+    EXPECT_EQ(nv - ne + nf, 2) << "body " << b;
+  }
+  for (const Vertex& v : M.vertices) EXPECT_EQ(v.radius, 0.0);
+  // 静止姿态下不相交，最近的一对至少隔开关节处的 1.5 cm 减去网格的离散误差。
+  EXPECT_GT(min_distance(M, forward_kinematics(M, M.qpos0)), 0.01);
+}
+
 // 世界上的静态盒子：顶点在 0 号刚体上，接触行里它那一侧为 0；父子不检测但世界和它的子刚体要检测。
 TEST(Mesh, StaticBoxOnTheWorld) {
   const Model L = load("ledge.xml");

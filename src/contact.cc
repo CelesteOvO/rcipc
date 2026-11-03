@@ -1,6 +1,7 @@
 #include "rcipc/contact.h"
 
 #include <cmath>
+#include <initializer_list>
 #include <limits>
 
 #include "rcipc/barrier.h"
@@ -159,9 +160,22 @@ void for_each_candidate(const Model& model, const Frames& frames, double dmax, V
       if (!model.collide(a, b) || !box[a].overlaps(box[b], margin)) continue;
       Contact c;
       // a 的顶点对 b 的三角形，b 的顶点对 a 的三角形。
+      //   第二层（阶段 11 前加的）：离对方整个刚体的包围盒超过 dmax 的顶点、边先剔掉。这是精确的（d < dmax 的对一个都不会漏），
+      //   只是省掉网格上成千上万次注定失败的最近点计算。
+      Aabb pbox;
+      const auto near = [&](const Aabb& other, std::initializer_list<int> ids) {
+        pbox = Aabb();
+        for (int v : ids) {
+          const double r = model.vertices[v].radius;
+          pbox.lo = pbox.lo.cwiseMin(X[v] - Vector3d::Constant(r));
+          pbox.hi = pbox.hi.cwiseMax(X[v] + Vector3d::Constant(r));
+        }
+        return pbox.overlaps(other, margin);
+      };
       for (int v = 0; v < model.nvertex(); ++v) {
         const int bv = model.vertices[v].body;
         if (bv != a && bv != b) continue;
+        if (!near(box[bv == a ? b : a], {v})) continue;
         for (int f = 0; f < model.nface(); ++f) {
           if (model.faces[f].body != (bv == a ? b : a)) continue;
           if (make_pt(model, X, v, f, dmax, c)) visit(c);
@@ -170,6 +184,7 @@ void for_each_candidate(const Model& model, const Frames& frames, double dmax, V
       // a 的边对 b 的边。
       for (int e1 = 0; e1 < model.nedge(); ++e1) {
         if (model.edges[e1].body != a) continue;
+        if (!near(box[b], {model.edges[e1].v0, model.edges[e1].v1})) continue;
         for (int e2 = 0; e2 < model.nedge(); ++e2) {
           if (model.edges[e2].body != b) continue;
           if (make_ee(model, X, e1, e2, dmax, c)) visit(c);

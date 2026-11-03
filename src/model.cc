@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "rcipc/quat.h"
 
@@ -147,8 +149,34 @@ Model from_mujoco(const mjModel* m) {
         M.vertices.push_back({b, pos - quat * Eigen::Vector3d(0, 0, size[1]), size[0]});
         M.edges.push_back({M.nvertex() - 2, M.nvertex() - 1, b});
         break;
+      case mjGEOM_MESH: {
+        // 三角网格（阶段 11 前加的，为了和 libuipc 用同一套几何）：顶点半径 0，三角形照抄，边从三角形里去重得到。
+        //   MuJoCo 编译时会把网格挪到它自己的质心、转到主轴上（mesh_vert 在这个网格坐标系里），
+        //   并把这个变换并进 geom_pos、geom_quat，所以 pos + quat * mesh_vert 就是刚体坐标系里的位置。
+        const int mid = m->geom_dataid[gi];
+        const int nv_mesh = m->mesh_vertnum[mid], vadr = m->mesh_vertadr[mid];
+        const int nf_mesh = m->mesh_facenum[mid], fadr = m->mesh_faceadr[mid];
+        const int v0 = M.nvertex();
+        for (int k = 0; k < nv_mesh; ++k) {
+          const float* p = m->mesh_vert + 3 * (vadr + k);
+          M.vertices.push_back({b, pos + quat * Eigen::Vector3d(p[0], p[1], p[2]), 0.0});
+        }
+        std::vector<std::pair<int, int>> edges;
+        for (int f = 0; f < nf_mesh; ++f) {
+          const int* tri = m->mesh_face + 3 * (fadr + f);
+          M.faces.push_back({v0 + tri[0], v0 + tri[1], v0 + tri[2], b});
+          for (int e = 0; e < 3; ++e) {
+            const int a = tri[e], c = tri[(e + 1) % 3];
+            edges.push_back({std::min(a, c), std::max(a, c)});
+          }
+        }
+        std::sort(edges.begin(), edges.end());
+        edges.erase(std::unique(edges.begin(), edges.end()), edges.end());
+        for (const auto& e : edges) M.edges.push_back({v0 + e.first, v0 + e.second, b});
+        break;
+      }
       default:
-        throw std::runtime_error("geom " + name + ": only plane, box, sphere and capsule are supported");
+        throw std::runtime_error("geom " + name + ": only plane, box, sphere, capsule and mesh are supported");
     }
   }
 

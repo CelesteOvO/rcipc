@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <initializer_list>
 #include <limits>
 #include <vector>
 
@@ -194,14 +195,29 @@ double curved_ccd(const Model& model, const VectorXd& q, const VectorXd& p, doub
       }
     }
 
-    // 刚体之间：宽相（两端包围盒按矢高放大）加逐对 ACCD。
+    // 刚体之间：宽相加逐对 ACCD。宽相两层（书 §9.7）：
+    //   1. 刚体对：两端的包围盒（扫掠盒）按矢高放大后不重叠的，跳过；
+    //   2. 图元对（阶段 11 前加的）：两个图元各自的扫掠盒（顶点在段两端的位置）按矢高放大后不重叠的，跳过。
+    //      理由和第 1 层一样：盒子沿某根轴隔开超过 xi，弦上的点就隔开超过 xi，弧线上的点（离弦不超过各自的矢高）就不会碰。
+    //      网格的刚体有上万个图元对，绝大多数离得远，这一层省掉了它们的 ACCD。GPU 版用同样的规则，两边的 alpha_max 才一致。
     if (pairs) {
-      std::vector<Aabb> box(model.nbody());
+      std::vector<Aabb> box(model.nbody()), vbox(model.nvertex());
       for (int v = 0; v < model.nvertex(); ++v) {
         const Vertex& V = model.vertices[v];
+        vbox[v].add(Xa[v], V.radius);
+        vbox[v].add(Xb[v], V.radius);
         box[V.body].add(Xa[v], V.radius);
         box[V.body].add(Xb[v], V.radius);
       }
+      // 图元的扫掠盒 = 它的顶点的扫掠盒的并。
+      const auto merge = [&](std::initializer_list<int> ids) {
+        Aabb out;
+        for (int v : ids) {
+          out.lo = out.lo.cwiseMin(vbox[v].lo);
+          out.hi = out.hi.cwiseMax(vbox[v].hi);
+        }
+        return out;
+      };
       for (int a = 0; a < model.nbody(); ++a) {
         for (int b = a + 1; b < model.nbody(); ++b) {
           if (!model.collide(a, b)) continue;
@@ -213,9 +229,11 @@ double curved_ccd(const Model& model, const VectorXd& q, const VectorXd& p, doub
           for (int v = 0; v < model.nvertex(); ++v) {
             const int bv = model.vertices[v].body;
             if (bv != a && bv != b) continue;
+            if (!vbox[v].overlaps(box[bv == a ? b : a], xi)) continue;  // 顶点离对方整个刚体都远
             for (int f = 0; f < model.nface(); ++f) {
               const Face& F = model.faces[f];
               if (F.body != (bv == a ? b : a)) continue;
+              if (!vbox[v].overlaps(merge({F.v0, F.v1, F.v2}), xi)) continue;
               ids[0] = v;
               ids[1] = F.v0;
               ids[2] = F.v1;
@@ -227,8 +245,11 @@ double curved_ccd(const Model& model, const VectorXd& q, const VectorXd& p, doub
           // 边–边。
           for (int e1 = 0; e1 < model.nedge(); ++e1) {
             if (model.edges[e1].body != a) continue;
+            const Aabb b1 = merge({model.edges[e1].v0, model.edges[e1].v1});
+            if (!b1.overlaps(box[b], xi)) continue;
             for (int e2 = 0; e2 < model.nedge(); ++e2) {
               if (model.edges[e2].body != b) continue;
+              if (!b1.overlaps(merge({model.edges[e2].v0, model.edges[e2].v1}), xi)) continue;
               ids[0] = model.edges[e1].v0;
               ids[1] = model.edges[e1].v1;
               ids[2] = model.edges[e2].v0;

@@ -1,7 +1,11 @@
 """把 ragdoll_scene.py 的布娃娃堆写成 MJCF，给 RC-IPC 用（和 libuipc 对比，笔记 notes/compare_libuipc.md）。
 
 用法（在仓库根目录）：
-    python compare/libuipc/make_mjcf.py 8          # 写出 compare/libuipc/ragdolls_8.xml
+    python compare/libuipc/make_mjcf.py 8          # 写出 compare/libuipc/ragdolls_8.xml（精确胶囊）
+    python compare/libuipc/make_mjcf.py 60 --mesh  # 写出 compare/libuipc/ragdolls_60_mesh.xml（和 libuipc 同一套胶囊网格）
+
+--mesh：每个刚体用 ragdoll_scene.capsule_mesh 的三角网格（libuipc 模拟的就是它），而不是精确胶囊。
+比速度时必须用它：精确胶囊每个只有 2 个顶点和 1 条边，接触检测的工作量比网格小两个数量级，那样比出来的加速比不公平。
 
 和 libuipc 那边保持一致的地方：
   - 同一组胶囊（端点、半径）、同一组关节（锚点、铰链轴）、同一个初始姿态（ragdoll_scene.placements(n)，种子 0）；
@@ -45,7 +49,7 @@ def fmt(v):
     return " ".join(f"{x:.9g}" for x in v)
 
 
-def make(n):
+def make(n, mesh=False):
     bodies = R.body_rest()
     centers = [(np.array(b[1]) + np.array(b[2])) / 2 for b in R.BODIES]
     masses = [mesh_volume(b["V"], b["F"]) * R.DENSITY for b in bodies]
@@ -73,7 +77,11 @@ def make(n):
             else:
                 out.append(f'{pad}  <joint type="hinge" pos="{jpos}" axis="{fmt(axis)}"/>')
         a, b = np.array(p0) - c, np.array(p1) - c
-        if np.linalg.norm(b - a) < 1e-12:
+        if mesh:
+            # 网格在 ragdoll_scene 的刚体坐标系里（局部 z 沿胶囊轴）；我们的刚体坐标系和世界轴对齐，差一个转动 R_b。
+            qm = quat_from_matrix(bodies[i]["T"][:3, :3])
+            out.append(f'{pad}  <geom type="mesh" mesh="{name}" quat="{fmt(qm)}" mass="{masses[i]:.9g}"/>')
+        elif np.linalg.norm(b - a) < 1e-12:
             out.append(f'{pad}  <geom type="sphere" size="{r}" mass="{masses[i]:.9g}"/>')
         else:
             out.append(f'{pad}  <geom type="capsule" fromto="{fmt(a)} {fmt(b)}" size="{r}" mass="{masses[i]:.9g}"/>')
@@ -85,13 +93,20 @@ def make(n):
     lines = [
         "<!--",
         f"  libuipc 对比用的布娃娃堆：{n} 个布娃娃（compare/libuipc/make_mjcf.py 从 ragdoll_scene.py 生成，不要手改）。",
-        "  y 轴朝上；没有关节限位；相邻刚体也检测接触。",
+        "  y 轴朝上；没有关节限位；相邻刚体也检测接触。" + ("几何是 libuipc 用的胶囊网格。" if mesh else "几何是精确胶囊。"),
         "-->",
-        f'<mujoco model="ragdolls_{n}">',
+        f'<mujoco model="ragdolls_{n}{"_mesh" if mesh else ""}">',
         '  <compiler angle="radian"/>',
         f'  <option gravity="0 -9.8 0" timestep="{R.DT}">',
         '    <flag filterparent="disable"/>',
         "  </option>",
+    ]
+    if mesh:
+        lines.append("  <asset>")
+        for (name, *_), b in zip(R.BODIES, bodies):
+            lines.append(f'    <mesh name="{name}" vertex="{fmt(b["V"].ravel())}" face="{" ".join(str(x) for x in b["F"].ravel())}"/>')
+        lines.append("  </asset>")
+    lines += [
         "  <worldbody>",
         '    <geom name="floor" type="plane" size="10 10 0.1" quat="0.70710678 -0.70710678 0 0"/>',
     ]
@@ -104,7 +119,8 @@ def make(n):
 
 if __name__ == "__main__":
     n = int(sys.argv[1]) if len(sys.argv) > 1 else 8
-    out = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"ragdolls_{n}.xml")
+    mesh = "--mesh" in sys.argv
+    out = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"ragdolls_{n}{'_mesh' if mesh else ''}.xml")
     with open(out, "w", encoding="utf-8", newline="\n") as f:
-        f.write(make(n))
+        f.write(make(n, mesh))
     print("wrote", out)
