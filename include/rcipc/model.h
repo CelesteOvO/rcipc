@@ -45,6 +45,9 @@ struct Body {
   Eigen::Vector3d ipos = Eigen::Vector3d::Zero();     // 质心的位置（body_ipos）
   Eigen::Matrix3d inertia = Eigen::Matrix3d::Zero();  // 绕质心的惯性张量 I_b（kg m^2）
   Eigen::Matrix3d S = Eigen::Matrix3d::Zero();        // 绕质心的二阶矩 S_b = sum m_p X_p X_p^T，I = tr(S) 1 - S
+
+  // 阶段 5：刚体半径，所有顶点到刚体原点的距离（加顶点半径）的最大值。CCD 的加速度界用它当力臂。
+  double radius = 0;
 };
 
 // 阶段 4：接触用的几何。

@@ -12,9 +12,14 @@
 //   x + alpha * p   ->  integrate(q, p, alpha)        （q ⊕ alpha p）
 //   p = -E' / E''   ->  解 H p = -g                    （H 是 nv x nv 的矩阵）
 //   (x - x0) / h    ->  differentiate(q0, q) / h      （(q ⊖ q0) / h）
-//   ccd_max_step    ->  chord_ccd_ground               （阶段 4；没有平面时步长上限是 1）
+//   ccd_max_step    ->  curved_ccd_ground              （阶段 5；阶段 4 是 chord_ccd_ground；没有平面时上限是 1）
 // 能量 E = 惯性项（含重力） + kappa * 障碍项。
 namespace rcipc {
+
+enum class CcdMode {
+  kChord,   // 阶段 4：只看弦。会漏掉弧线中间的穿透，留着做对比
+  kCurved,  // 阶段 5：弦加矢高（默认）
+};
 
 struct StepParams {
   double h = 0.002;     // 时间步长（s）
@@ -22,6 +27,7 @@ struct StepParams {
   int max_newton = 50;  // 最多迭代次数
   double dhat = 1e-3;   // 阶段 4：障碍激活距离（m）
   double c = 0.9;       // 阶段 4：CCD 的保守系数，一次迭代最多闭合当前距离的这个比例
+  CcdMode ccd = CcdMode::kCurved;  // 阶段 5：用哪种 CCD
 };
 
 // 跨时间步保留的求解器状态。kappa 在第一次出现接触时初始化，之后沿用（阶段 9 再按间隙调整）。

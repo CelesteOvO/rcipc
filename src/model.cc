@@ -1,5 +1,6 @@
 #include "rcipc/model.h"
 
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 
@@ -122,6 +123,12 @@ Model from_mujoco(const mjModel* m) {
       default:
         throw std::runtime_error("geom " + name + ": only plane, box, sphere and capsule are supported");
     }
+  }
+
+  // 阶段 5：刚体半径 = max（顶点到刚体原点的距离 + 顶点半径）。
+  for (const Vertex& v : M.vertices) {
+    Body& B = M.bodies[v.body];
+    B.radius = std::max(B.radius, v.local.norm() + v.radius);
   }
 
   // 自由度：每个属于哪个关节、哪个刚体，是转动还是平移。

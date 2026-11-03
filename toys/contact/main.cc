@@ -7,8 +7,9 @@
 //               每步沿真实轨迹采样 64 点检查最小距离；打印最小间隙、静止间隙、kappa、Newton 次数、力平衡。
 //               kappa 不给时由第一次接触的梯度平衡初始化；给了就固定用它（可以试试 kappa=2e9）。
 //               CSV 每行：t, z, vz, min_distance, newton, kappa。
-// flail：       models/flail.xml，杆以 w rad/s（默认 40）从地面上方 3 mm 处甩过正下方，一步。
-//               打印两端的距离和真实弧线的最低点：直弦 CCD 看不见弧线穿过地面（书 §9.1 的反例）。
+// flail：       models/flail.xml，杆以 w rad/s（默认 40）从地面上方 3 mm 处甩过正下方，一步，
+//               直弦 CCD（阶段 4）和曲线 CCD（阶段 5）各走一遍。打印终点和真实弧线最低点的离地距离：
+//               直弦看不见弧线穿过地面（书 §9.1 的反例），弦加矢高把这一步截在地面之前。
 //
 // 输出用英文，因为 Windows 控制台默认不是 UTF-8。
 #include <algorithm>
@@ -123,17 +124,23 @@ int flail(const Args& a) {
   q[0] = 1.5707963267948966 - phi - 0.05;
   v[0] = a.w;
   const double d0 = min_ground_distance(model, forward_kinematics(model, q));
-  std::vector<NewtonIterate> trace;
-  const StepResult r = step(model, P, q, v, nullptr, &trace);
-  const VectorXd p = differentiate(model, q, r.q);
-  const double dmin = trajectory_min_distance(model, q, p, 1.0, 64);
+  std::printf("flail, h %g s, w %g rad/s, dhat %g m: tip starts %+.3f mm above the floor\n", P.h, a.w, P.dhat,
+              d0 * 1e3);
+  std::printf("the arc dips below the floor for |angle - pi/2| < %.4f rad (lowest point %+.3f mm)\n", phi,
+              (H - rad - R) * 1e3);
 
-  std::printf("flail, h %g s, w %g rad/s, dhat %g m: rod tip sweeps %.4f rad in one step\n", P.h, a.w, P.dhat, p[0]);
-  std::printf("tip height above the floor: start %+.3f mm, end %+.3f mm, lowest point of the true arc %+.3f mm%s\n",
-              d0 * 1e3, r.min_distance * 1e3, dmin * 1e3, dmin < 0 ? "  <-- PENETRATION" : "");
-  std::printf("Newton %d, CCD alpha_max %.3f, line search alpha %.3f: the chord never came near the floor\n", r.newton,
-              trace.empty() ? 1.0 : trace[0].alpha_max, trace.empty() ? 1.0 : trace[0].alpha);
-  std::printf("the arc dips below the floor for |angle - pi/2| < %.4f rad; the step jumped over the whole dip\n", phi);
+  // 同一步分别用直弦 CCD（阶段 4）和曲线 CCD（阶段 5）走一遍。
+  for (CcdMode mode : {CcdMode::kChord, CcdMode::kCurved}) {
+    P.ccd = mode;
+    std::vector<NewtonIterate> trace;
+    const StepResult r = step(model, P, q, v, nullptr, &trace);
+    const VectorXd p = differentiate(model, q, r.q);
+    const double dmin = trajectory_min_distance(model, q, p, 1.0, 256);
+    std::printf("%s CCD: swept %.4f rad in %d Newton iterations, first alpha_max %.3f\n",
+                mode == CcdMode::kChord ? "chord " : "curved", p[0], r.newton, trace.empty() ? 1.0 : trace[0].alpha_max);
+    std::printf("  tip at the end %+.3f mm, lowest point of the true arc %+.3f mm%s\n", r.min_distance * 1e3, dmin * 1e3,
+                dmin < 0 ? "  <-- PENETRATION" : "");
+  }
   return 0;
 }
 

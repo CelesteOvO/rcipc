@@ -64,9 +64,13 @@ StepResult step(const Model& model, const StepParams& P, const VectorXd& q0, con
     const double size = p.lpNorm<Eigen::Infinity>() / h;
     if (size < P.tol) break;
 
-    // 第 3 步：CCD 定上限（阶段 4）。直弦 CCD 只看 s = 0 和 s = 1 两端的顶点位置，
-    //   保证沿弦走到 alpha_max 之前每个顶点离平面都还有 (1 - c) 倍的距离。没有平面时它返回 1。
-    const double alpha_max = chord_ccd_ground(model, F, forward_kinematics(model, integrate(model, q, p, 1.0)), P.c);
+    // 第 3 步：CCD 定上限。
+    //   阶段 4 的直弦 CCD 只看 s = 0 和 s = 1 两端的顶点位置，保证沿弦走到 alpha_max 之前每个顶点离平面
+    //   都还有 (1 - c) 倍的距离；阶段 5 的曲线 CCD 把弧线偏离弦的余量（矢高）也算进去。没有平面时都返回 1。
+    const double alpha_max =
+        P.ccd == CcdMode::kCurved
+            ? curved_ccd_ground(model, q, p, P.dhat, P.c)
+            : chord_ccd_ground(model, F, forward_kinematics(model, integrate(model, q, p, 1.0)), P.c);
 
     // 第 4 步：回溯线搜索。从 CCD 允许的最大步长开始试；能量比现在高就减半，直到能量不升。
     //   阶段 1 是 energy(x + alpha * p)；现在“加法”换成 integrate，算能量前先做 FK、找接触。
