@@ -4,6 +4,7 @@
 
 #include "rcipc/ccd.h"
 #include "rcipc/contact.h"
+#include "rcipc/friction.h"
 #include "rcipc/inertia.h"
 #include "rcipc/kinematics.h"
 
@@ -32,11 +33,18 @@ StepResult step(const Model& model, const StepParams& P, const VectorXd& q0, con
   // （笔记第 4 节）。不能用当前迭代点的惯性梯度：接触常常在一个已经收敛的迭代点上才第一次出现，那里它是 0。
   const VectorXd g_e0 = inertia_gradient(model, F0, T, h);
 
+  // 阶段 8：步首把活跃的接触冻结成摩擦接触（法向力、切向基、模板都取步首的值，这一步里当常数）。
+  //   kappa 还没初始化（第一次接触的那一步）时没有摩擦：这一步里新出现的接触要到下一步才有摩擦。
+  const std::vector<FrictionContact> FC =
+      P.mu > 0 ? lag_friction(model, F0, find_contacts(model, F0, P.dhat), state->kappa, P.dhat)
+               : std::vector<FrictionContact>();
+
   // 能量作为 q 的函数：先做 FK，重新找活跃的接触（换了位置，活跃的接触可能变了），再把两项加起来。
   // 线搜索里反复用。
   const auto energy_at = [&](const VectorXd& q, double kappa) {
     const Frames F = forward_kinematics(model, q);
-    return inertia_energy(model, F, T, h) + contact_energy(model, find_contacts(model, F, P.dhat), kappa, P.dhat);
+    return inertia_energy(model, F, T, h) + contact_energy(model, find_contacts(model, F, P.dhat), kappa, P.dhat) +
+           friction_energy(model, F, FC, h, P.mu, P.eps_v);
   };
 
   // 从上一步结束的位置出发（它是不相交的）。newton 记录做了几次迭代，循环结束以后还要返回它。
@@ -56,8 +64,10 @@ StepResult step(const Model& model, const StepParams& P, const VectorXd& q0, con
     //   g = 惯性梯度 + 接触梯度，H = M(q) / h^2 + sum kappa b'' r^T r：两项都对称正定（半正定），
     //   LDLT 分解（一种 Cholesky 分解）解得又快又稳。
     //   阶段 6 再加上曲率上界（对角）：补回 Gauss-Newton 丢掉的轨迹曲率项的上界，不改梯度。
-    const VectorXd g = g_e + contact_gradient(model, F, C, kappa, P.dhat);
+    //   阶段 8 再加上摩擦的梯度和 Hessian（每个摩擦接触两条切向行，权重 c / h）。
+    const VectorXd g = g_e + contact_gradient(model, F, C, kappa, P.dhat) + friction_gradient(model, F, FC, h, P.mu, P.eps_v);
     const MatrixXd H = inertia_hessian(model, F, h) + contact_hessian(model, F, C, kappa, P.dhat) +
+                       friction_hessian(model, F, FC, h, P.mu, P.eps_v) +
                        contact_curvature(model, q, C, kappa, P.dhat, P.curv_scale);
     const VectorXd p = H.ldlt().solve(-g);
 
@@ -77,7 +87,8 @@ StepResult step(const Model& model, const StepParams& P, const VectorXd& q0, con
     // 第 4 步：回溯线搜索。从 CCD 允许的最大步长开始试；能量比现在高就减半，直到能量不升。
     //   阶段 1 是 energy(x + alpha * p)；现在“加法”换成 integrate，算能量前先做 FK、找接触。
     //   alpha > 1e-12 是保险，防止无限循环。
-    const double e0 = inertia_energy(model, F, T, h) + contact_energy(model, C, kappa, P.dhat);
+    const double e0 = inertia_energy(model, F, T, h) + contact_energy(model, C, kappa, P.dhat) +
+                      friction_energy(model, F, FC, h, P.mu, P.eps_v);
     double alpha = alpha_max;
     while (energy_at(integrate(model, q, p, alpha), kappa) > e0 && alpha > 1e-12) {
       alpha *= 0.5;

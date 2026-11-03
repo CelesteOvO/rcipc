@@ -13,7 +13,7 @@
 //   p = -E' / E''   ->  解 H p = -g                    （H 是 nv x nv 的矩阵）
 //   (x - x0) / h    ->  differentiate(q0, q) / h      （(q ⊖ q0) / h）
 //   ccd_max_step    ->  curved_ccd_ground              （阶段 5；阶段 4 是 chord_ccd_ground；没有平面时上限是 1）
-// 能量 E = 惯性项（含重力） + kappa * 障碍项。
+// 能量 E = 惯性项（含重力） + kappa * 障碍项 + 滞后摩擦（阶段 8）。
 namespace rcipc {
 
 enum class CcdMode {
@@ -29,6 +29,8 @@ struct StepParams {
   double c = 0.9;       // 阶段 4：CCD 的保守系数，一次迭代最多闭合当前距离的这个比例
   CcdMode ccd = CcdMode::kCurved;  // 阶段 5：用哪种 CCD
   double curv_scale = 1.0;         // 阶段 6：曲率上界的缩放。1 是可证明的上界，0 是纯 Gauss-Newton（复现间隙塌缩）
+  double mu = 0.2;                 // 阶段 8：摩擦系数（所有接触同一个值；0 关掉摩擦）
+  double eps_v = 1e-3;             // 阶段 8：摩擦光滑化的速度（m/s），低于它的相对滑动按“静止”处理
 };
 
 // 跨时间步保留的求解器状态。kappa 在第一次出现接触时初始化，之后沿用（阶段 9 再按间隙调整）。

@@ -1,0 +1,18 @@
+<!--
+  阶段 8 的斜面：一个 0.2 m 的立方体（1 kg）放在地面上（离地 0.5 mm）。
+  斜面不转地面，而是转重力：测试和演示程序把 Model::gravity 设成 g (sin theta, 0, -cos theta)，
+  效果和把地面抬起 theta 一样（盒子沿 +x 下滑），但模型和检验都更简单。
+  检验：tan theta < mu 时盒子静止（只有 eps_v 量级的蠕动）；tan theta > mu 时以 g (sin theta - mu cos theta) 加速下滑。
+-->
+<mujoco model="slope">
+  <compiler angle="radian"/>
+  <option gravity="0 0 -9.81" timestep="0.002"/>
+
+  <worldbody>
+    <geom name="floor" type="plane" size="2 2 0.1"/>
+    <body name="box" pos="0 0 0.1005">
+      <freejoint/>
+      <geom type="box" size="0.1 0.1 0.1" mass="1"/>
+    </body>
+  </worldbody>
+</mujoco>

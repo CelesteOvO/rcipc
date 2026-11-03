@@ -1,7 +1,8 @@
 // 阶段 4 的演示程序：地面接触。
 //
 // 用法（参数都可以省略，写成 名字=值）：
-//   contact_demo [drop|flail|stack|ledge] [h=..] [T=..] [dhat=..] [w=..] [kappa=..] [trace=0|1] [out=..]
+//   contact_demo [drop|flail|stack|ledge|slope] [h=..] [T=..] [dhat=..] [w=..] [kappa=..] [mu=..] [theta=..] [eps_v=..]
+//                [trace=0|1] [out=..]
 //
 // drop（默认）：models/drop.xml，盒子从 0.5 m 静止落到地面，模拟 T 秒（默认 1.5）。
 //               每步沿真实轨迹采样 64 点检查最小距离；打印最小间隙、静止间隙、kappa、Newton 次数、力平衡。
@@ -12,6 +13,7 @@
 //               直弦看不见弧线穿过地面（书 §9.1 的反例），弦加矢高把这一步截在地面之前。
 // stack：       阶段 7，models/stack.xml，转了 45 度的盒子落到另一个盒子上，模拟 T 秒（默认 1.5）。
 // ledge：       阶段 7，models/ledge.xml，盒子落在世界上的静态台阶的边缘，翻下去掉到地面。
+// slope：       阶段 8，models/slope.xml，斜面（坡度 tan theta，默认 0.3）上的盒子：mu 大于坡度时静止，否则匀加速下滑。
 //
 // 输出用英文，因为 Windows 控制台默认不是 UTF-8。
 #include <algorithm>
@@ -36,6 +38,7 @@ using Eigen::VectorXd;
 struct Args {
   std::string mode = "drop";
   double h = NAN, T = NAN, dhat = 1e-3, w = 40.0, kappa = 0;  // kappa = 0：由梯度平衡初始化
+  double mu = 0.2, theta = 0.3, eps_v = 1e-3;  // 阶段 8：摩擦系数；斜面的坡度（tan theta）；摩擦光滑化的速度
   int trace = 0;
   std::string out;
 };
@@ -56,6 +59,9 @@ Args parse(int argc, char** argv) {
     else if (k == "w") a.w = std::atof(v.c_str());
     else if (k == "kappa") a.kappa = std::atof(v.c_str());
     else if (k == "trace") a.trace = std::atoi(v.c_str());
+    else if (k == "mu") a.mu = std::atof(v.c_str());
+    else if (k == "theta") a.theta = std::atof(v.c_str());
+    else if (k == "eps_v") a.eps_v = std::atof(v.c_str());
     else if (k == "out") a.out = v;
     else std::fprintf(stderr, "unknown option %s\n", k.c_str());
   }
@@ -119,8 +125,18 @@ int drop(const Args& a) {
 // 阶段 7 的场景：stack（两个盒子堆叠）、ledge（盒子落在台阶边缘）。每步沿真实轨迹采样检查最小距离；
 // 打印最小距离、Newton 次数；Newton 跑满上限的步把每次迭代打出来（trace=1 时所有步都打）。
 int scene(const Args& a, const char* file) {
-  const Model model = load(file);
+  Model model = load(file);
   StepParams P;
+  P.mu = a.mu;
+  P.eps_v = a.eps_v;
+  if (std::string(file) == "slope.xml") {
+    // 斜面：转重力而不是转地面，盒子沿 +x 下滑（见 slope.xml 的说明）。
+    const double th = std::atan(a.theta);
+    model.gravity = 9.81 * Eigen::Vector3d(std::sin(th), 0, -std::cos(th));
+    std::printf("slope tan(theta) = %g, mu = %g: %s; frictionless acceleration %.3f m/s^2, with friction %.3f m/s^2\n",
+                a.theta, a.mu, a.theta < a.mu ? "should stick (creep below eps_v)" : "should slide",
+                9.81 * std::sin(th), std::max(0.0, 9.81 * (std::sin(th) - a.mu * std::cos(th))));
+  }
   P.h = std::isnan(a.h) ? model.timestep : a.h;
   P.dhat = a.dhat;
   const double T = std::isnan(a.T) ? 1.5 : a.T;
@@ -138,8 +154,11 @@ int scene(const Args& a, const char* file) {
     const StepResult r = step(model, P, q, v, &S, &trace);
     const double d = trajectory_min_distance(model, q, differentiate(model, q, r.q), 1.0, 16);
     if (r.newton >= P.max_newton || a.trace) {
-      std::printf("step %ld (t = %.3f): newton %d, min distance %.3e, %zu contacts\n", nstep, t, r.newton,
-                  r.min_distance, find_contacts(model, forward_kinematics(model, r.q), P.dhat).size());
+      const std::vector<Contact> Cend = find_contacts(model, forward_kinematics(model, r.q), P.dhat);
+      std::printf("step %ld (t = %.3f): newton %d, min distance %.3e, %zu contacts:", nstep, t, r.newton,
+                  r.min_distance, Cend.size());
+      for (const Contact& c : Cend) std::printf(" [type %d d %.2e m %.3f]", int(c.type), c.d, c.moll);
+      std::printf("\n");
       for (size_t k = 0; k < trace.size() && k < 12; ++k) {
         std::printf("    it %2zu: gap %.3e |p|/h %.3e alpha_max %.4f alpha %.4f E %.8e\n", k + 1,
                     trace[k].min_distance, trace[k].step, trace[k].alpha_max, trace[k].alpha, trace[k].energy);
@@ -164,7 +183,9 @@ int scene(const Args& a, const char* file) {
               dmin > 0 ? "" : "  <-- PENETRATION");
   std::printf("Newton iterations per step: max %d, mean %.2f, %d steps hit the cap\n", nmax, double(nsum) / nstep,
               capped);
-  std::printf("final q:");
+  std::printf("final v:");
+  for (int i = 0; i < model.nv; ++i) std::printf(" %.4f", v[i]);
+  std::printf("\nfinal q:");
   for (int i = 0; i < model.nq; ++i) std::printf(" %.4f", q[i]);
   std::printf("\n");
   return 0;
@@ -211,7 +232,8 @@ int main(int argc, char** argv) {
     if (a.mode == "flail") return flail(a);
     if (a.mode == "stack") return scene(a, "stack.xml");
     if (a.mode == "ledge") return scene(a, "ledge.xml");
-    std::fprintf(stderr, "unknown mode %s (drop, flail, stack or ledge)\n", a.mode.c_str());
+    if (a.mode == "slope") return scene(a, "slope.xml");
+    std::fprintf(stderr, "unknown mode %s (drop, flail, stack, ledge or slope)\n", a.mode.c_str());
     return 2;
   } catch (const std::exception& e) {
     std::fprintf(stderr, "%s\n", e.what());

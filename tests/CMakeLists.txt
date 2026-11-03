@@ -23,3 +23,4 @@ rcipc_test(test_ccd rcipc)         # 阶段 4：直弦 CCD 和它漏掉的反例
 rcipc_test(test_curvature rcipc)   # 阶段 6：曲率上界
 rcipc_test(test_distance rcipc)    # 阶段 7：最近点
 rcipc_test(test_pairs rcipc)       # 阶段 7：刚体之间的接触、CCD、堆叠
+rcipc_test(test_friction rcipc)    # 阶段 8：摩擦
