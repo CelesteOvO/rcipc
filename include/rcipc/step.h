@@ -46,6 +46,9 @@ struct StepParams {
   int semi_kmin = 6;               // 半隐式：从第几次迭代起累积 beta
   double semi_beta_tol = 1e-3;     // 半隐式：beta <= 它且这次取满 alpha_max 时停
   bool check_iterates = false;     // 调试：每次接受的迭代沿真实轨迹采样最小距离，写进 StepResult::iterate_min_distance
+  // 阶段 10：关节限位的障碍（limits.h）。limit_k 是刚度（J/rad^2 或 J/m^2），limit_dhat 是激活距离（rad 或 m）。
+  double limit_k = 10.0;
+  double limit_dhat = 0.1;
 };
 
 // 跨时间步保留的求解器状态。kappa 在第一次出现接触时初始化，之后沿用并按间隙调整。
@@ -73,6 +76,7 @@ struct StepResult {
   double kappa = 0;         // 这一步结束时的 kappa（没有接触时是 0）
   double min_distance = 0;  // 结束位置上所有候选对的最小距离；没有障碍时是 +无穷
   double iterate_min_distance = 0;  // check_iterates 时：所有接受的迭代轨迹（采样）上的最小距离，否则 +无穷
+  double min_limit_distance = 0;    // 阶段 10：结束位置上到最近的关节限位的距离；没有限位时 +无穷
 };
 
 // 从 (q0, v0) 走一个时间步。state 为空时用一个临时状态（kappa 每步重新初始化）。

@@ -11,6 +11,7 @@
 #include "rcipc/friction.h"
 #include "rcipc/inertia.h"
 #include "rcipc/kinematics.h"
+#include "rcipc/limits.h"
 #include "rcipc/solver.h"
 
 // 关节坐标里的时间步。推导见 notes/03_inertia.md 第 5 节（惯性）、notes/04_ground.md 第 6 节（接触）、
@@ -63,7 +64,7 @@ StepResult step(const Model& model, const StepParams& P, const VectorXd& q0, con
   const auto energy_at = [&](const VectorXd& q, double kappa) {
     const Frames F = forward_kinematics(model, q);
     return inertia_energy(model, F, T, h) + contact_energy(model, find_contacts(model, F, P.dhat), kappa, P.dhat) +
-           friction_energy(model, F, FC, h, P.mu, P.eps_v);
+           friction_energy(model, F, FC, h, P.mu, P.eps_v) + limit_energy(model, q, P.limit_k, P.limit_dhat);
   };
 
   // 从上一步结束的位置出发（它是不相交的）。newton 记录做了几次迭代，循环结束以后还要返回它。
@@ -89,10 +90,12 @@ StepResult step(const Model& model, const StepParams& P, const VectorXd& q0, con
     //   H = H_k + sum_r D_r r_r^T r_r：树块 H_k = M(q) / h^2 + 曲率上界的对角（阶段 3、6），
     //       行 = 障碍行（D = kappa b''，阶段 4）和摩擦行（阶段 8）。
     //   阶段 9 起用树块预条件的 PCG 解它（不组装 H）；LDLT 留着做参照（solver 参数）。
+    //   阶段 10：关节限位的梯度和对角 Hessian（进树块）。
     const VectorXd g = inertia_gradient(model, F, T, h) + contact_gradient(model, F, C, kappa, P.dhat) +
-                       friction_gradient(model, F, FC, h, P.mu, P.eps_v);
+                       friction_gradient(model, F, FC, h, P.mu, P.eps_v) + limit_gradient(model, q, P.limit_k, P.limit_dhat);
     NewtonSystem sys;
     sys.Hk = inertia_hessian(model, F, h) + contact_curvature(model, q, C, kappa, P.dhat, P.curv_scale);
+    sys.Hk.diagonal() += limit_hessian_diagonal(model, q, P.limit_k, P.limit_dhat);
     sys.rows = contact_rows(model, F, C, kappa, P.dhat);
     const std::vector<Row> frows = friction_rows(model, F, FC, h, P.mu, P.eps_v);
     sys.rows.insert(sys.rows.end(), frows.begin(), frows.end());
@@ -119,14 +122,16 @@ StepResult step(const Model& model, const StepParams& P, const VectorXd& q0, con
     // 第 3 步：CCD 定上限。
     //   阶段 4 的直弦 CCD 只看 s = 0 和 s = 1 两端的顶点位置，保证沿弦走到 alpha_max 之前每个顶点离平面
     //   都还有 (1 - c) 倍的距离；阶段 5 的曲线 CCD 把弧线偏离弦的余量（矢高）也算进去。没有障碍时都返回 1。
+    //   阶段 10：关节限位也要 CCD（q 沿 p 是直线，闭式解），取两者的较小值。
     const double alpha_max =
-        P.ccd == CcdMode::kCurved ? curved_ccd(model, q, p, P.dhat, P.c) : chord_ccd_ground(model, F, F1, P.c);
+        std::min(P.ccd == CcdMode::kCurved ? curved_ccd(model, q, p, P.dhat, P.c) : chord_ccd_ground(model, F, F1, P.c),
+                 limit_ccd(model, q, p, P.c));
 
     // 第 4 步：回溯线搜索。从 CCD 允许的最大步长开始试；能量比现在高就减半，直到能量不升。
     //   阶段 1 是 energy(x + alpha * p)；现在“加法”换成 integrate，算能量前先做 FK、找接触。
     //   alpha > 1e-12 是保险，防止无限循环。
     const double e0 = inertia_energy(model, F, T, h) + contact_energy(model, C, kappa, P.dhat) +
-                      friction_energy(model, F, FC, h, P.mu, P.eps_v);
+                      friction_energy(model, F, FC, h, P.mu, P.eps_v) + limit_energy(model, q, P.limit_k, P.limit_dhat);
     double alpha = alpha_max;
     while (energy_at(integrate(model, q, p, alpha), kappa) > e0 && alpha > 1e-12) {
       alpha *= 0.5;
@@ -171,6 +176,7 @@ StepResult step(const Model& model, const StepParams& P, const VectorXd& q0, con
   r.kappa = state->kappa;
   r.min_distance = min_distance(model, forward_kinematics(model, q));
   r.iterate_min_distance = iterate_min;
+  r.min_limit_distance = min_limit_distance(model, q);
   return r;
 }
 

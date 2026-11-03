@@ -32,6 +32,10 @@ struct Joint {
   Eigen::Vector3d pos;   // 锚点，在刚体自己的坐标系里（jnt_pos）
   Eigen::Vector3d axis;  // 铰链和滑动的轴，刚体坐标系，单位向量（jnt_axis）
   double ref;            // 铰链和滑动的参考值（qpos0）：q = ref 时，刚体就在 MJCF 里写的位置。其余类型为 0
+  // 阶段 10：关节限位（MJCF 的 limited="true" range="lo hi"），只支持铰链和滑动。q 必须保持在 (lo, hi) 里，
+  // 用和接触一样的障碍函数（limits.h）。
+  bool limited = false;
+  double range[2] = {0, 0};
 };
 
 struct Body {

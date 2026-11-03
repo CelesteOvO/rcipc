@@ -1,0 +1,138 @@
+<!--
+  阶段 10 的布娃娃堆：三个 ragdoll.xml 的布娃娃（tools/make_pile.py 从 ragdoll.xml 复制，刚体和关节名加后缀），
+  错开高度和朝向落下，叠在一起。三棵树、30 个刚体、75 个自由度。
+  检验：每一步结束时所有候选对的距离都 > 0；关节都在限位里。
+-->
+<mujoco model="ragdoll_pile">
+  <compiler angle="radian"/>
+  <option gravity="0 0 -9.81" timestep="0.002"/>
+
+  <default>
+    <geom type="capsule"/>
+    <joint type="hinge"/>
+  </default>
+
+  <worldbody>
+    <geom name="floor" type="plane" size="3 3 0.1"/>
+    <body name="torso_1" pos="0 0 1.2" quat="0.96 0.2 0.15 0">
+      <freejoint/>
+      <geom type="box" size="0.12 0.07 0.18" mass="10"/>
+      <body name="head_1" pos="0 0 0.28">
+        <joint name="neck_1" type="ball" pos="0 0 -0.08"/>
+        <geom type="sphere" size="0.08" mass="2"/>
+      </body>
+      <body name="upper_arm_l_1" pos="0.19 0 0.12">
+        <joint name="shoulder_l_1" type="ball"/>
+        <geom fromto="0.04 0 0 0.26 0 0" size="0.04" mass="1.5"/>
+        <body name="lower_arm_l_1" pos="0.28 0 0">
+          <joint name="elbow_l_1" axis="0 0 1" limited="true" range="-2.4 0.05"/>
+          <geom fromto="0.02 0 0 0.24 0 0" size="0.035" mass="1"/>
+        </body>
+      </body>
+      <body name="upper_arm_r_1" pos="-0.19 0 0.12">
+        <joint name="shoulder_r_1" type="ball"/>
+        <geom fromto="-0.04 0 0 -0.26 0 0" size="0.04" mass="1.5"/>
+        <body name="lower_arm_r_1" pos="-0.28 0 0">
+          <joint name="elbow_r_1" axis="0 0 1" limited="true" range="-0.05 2.4"/>
+          <geom fromto="-0.02 0 0 -0.24 0 0" size="0.035" mass="1"/>
+        </body>
+      </body>
+      <body name="thigh_l_1" pos="0.08 0 -0.2">
+        <joint name="hip_l_1" type="ball"/>
+        <geom fromto="0 0 -0.04 0 0 -0.32" size="0.05" mass="4"/>
+        <body name="shin_l_1" pos="0 0 -0.36">
+          <joint name="knee_l_1" axis="1 0 0" limited="true" range="-0.05 2.4"/>
+          <geom fromto="0 0 -0.02 0 0 -0.32" size="0.045" mass="2.5"/>
+        </body>
+      </body>
+      <body name="thigh_r_1" pos="-0.08 0 -0.2">
+        <joint name="hip_r_1" type="ball"/>
+        <geom fromto="0 0 -0.04 0 0 -0.32" size="0.05" mass="4"/>
+        <body name="shin_r_1" pos="0 0 -0.36">
+          <joint name="knee_r_1" axis="1 0 0" limited="true" range="-0.05 2.4"/>
+          <geom fromto="0 0 -0.02 0 0 -0.32" size="0.045" mass="2.5"/>
+        </body>
+      </body>
+    </body>
+    <body name="torso_2" pos="0.15 0.1 2.1" quat="0.7 0.1 0.7 0.1">
+      <freejoint/>
+      <geom type="box" size="0.12 0.07 0.18" mass="10"/>
+      <body name="head_2" pos="0 0 0.28">
+        <joint name="neck_2" type="ball" pos="0 0 -0.08"/>
+        <geom type="sphere" size="0.08" mass="2"/>
+      </body>
+      <body name="upper_arm_l_2" pos="0.19 0 0.12">
+        <joint name="shoulder_l_2" type="ball"/>
+        <geom fromto="0.04 0 0 0.26 0 0" size="0.04" mass="1.5"/>
+        <body name="lower_arm_l_2" pos="0.28 0 0">
+          <joint name="elbow_l_2" axis="0 0 1" limited="true" range="-2.4 0.05"/>
+          <geom fromto="0.02 0 0 0.24 0 0" size="0.035" mass="1"/>
+        </body>
+      </body>
+      <body name="upper_arm_r_2" pos="-0.19 0 0.12">
+        <joint name="shoulder_r_2" type="ball"/>
+        <geom fromto="-0.04 0 0 -0.26 0 0" size="0.04" mass="1.5"/>
+        <body name="lower_arm_r_2" pos="-0.28 0 0">
+          <joint name="elbow_r_2" axis="0 0 1" limited="true" range="-0.05 2.4"/>
+          <geom fromto="-0.02 0 0 -0.24 0 0" size="0.035" mass="1"/>
+        </body>
+      </body>
+      <body name="thigh_l_2" pos="0.08 0 -0.2">
+        <joint name="hip_l_2" type="ball"/>
+        <geom fromto="0 0 -0.04 0 0 -0.32" size="0.05" mass="4"/>
+        <body name="shin_l_2" pos="0 0 -0.36">
+          <joint name="knee_l_2" axis="1 0 0" limited="true" range="-0.05 2.4"/>
+          <geom fromto="0 0 -0.02 0 0 -0.32" size="0.045" mass="2.5"/>
+        </body>
+      </body>
+      <body name="thigh_r_2" pos="-0.08 0 -0.2">
+        <joint name="hip_r_2" type="ball"/>
+        <geom fromto="0 0 -0.04 0 0 -0.32" size="0.05" mass="4"/>
+        <body name="shin_r_2" pos="0 0 -0.36">
+          <joint name="knee_r_2" axis="1 0 0" limited="true" range="-0.05 2.4"/>
+          <geom fromto="0 0 -0.02 0 0 -0.32" size="0.045" mass="2.5"/>
+        </body>
+      </body>
+    </body>
+    <body name="torso_3" pos="-0.1 -0.15 3.0" quat="0.5 0.5 0.5 -0.5">
+      <freejoint/>
+      <geom type="box" size="0.12 0.07 0.18" mass="10"/>
+      <body name="head_3" pos="0 0 0.28">
+        <joint name="neck_3" type="ball" pos="0 0 -0.08"/>
+        <geom type="sphere" size="0.08" mass="2"/>
+      </body>
+      <body name="upper_arm_l_3" pos="0.19 0 0.12">
+        <joint name="shoulder_l_3" type="ball"/>
+        <geom fromto="0.04 0 0 0.26 0 0" size="0.04" mass="1.5"/>
+        <body name="lower_arm_l_3" pos="0.28 0 0">
+          <joint name="elbow_l_3" axis="0 0 1" limited="true" range="-2.4 0.05"/>
+          <geom fromto="0.02 0 0 0.24 0 0" size="0.035" mass="1"/>
+        </body>
+      </body>
+      <body name="upper_arm_r_3" pos="-0.19 0 0.12">
+        <joint name="shoulder_r_3" type="ball"/>
+        <geom fromto="-0.04 0 0 -0.26 0 0" size="0.04" mass="1.5"/>
+        <body name="lower_arm_r_3" pos="-0.28 0 0">
+          <joint name="elbow_r_3" axis="0 0 1" limited="true" range="-0.05 2.4"/>
+          <geom fromto="-0.02 0 0 -0.24 0 0" size="0.035" mass="1"/>
+        </body>
+      </body>
+      <body name="thigh_l_3" pos="0.08 0 -0.2">
+        <joint name="hip_l_3" type="ball"/>
+        <geom fromto="0 0 -0.04 0 0 -0.32" size="0.05" mass="4"/>
+        <body name="shin_l_3" pos="0 0 -0.36">
+          <joint name="knee_l_3" axis="1 0 0" limited="true" range="-0.05 2.4"/>
+          <geom fromto="0 0 -0.02 0 0 -0.32" size="0.045" mass="2.5"/>
+        </body>
+      </body>
+      <body name="thigh_r_3" pos="-0.08 0 -0.2">
+        <joint name="hip_r_3" type="ball"/>
+        <geom fromto="0 0 -0.04 0 0 -0.32" size="0.05" mass="4"/>
+        <body name="shin_r_3" pos="0 0 -0.36">
+          <joint name="knee_r_3" axis="1 0 0" limited="true" range="-0.05 2.4"/>
+          <geom fromto="0 0 -0.02 0 0 -0.32" size="0.045" mass="2.5"/>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>

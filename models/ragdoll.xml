@@ -1,0 +1,60 @@
+<!--
+  阶段 10 的布娃娃：躯干（盒子，自由关节）+ 头（球，球关节）+ 两条手臂（上臂球关节、肘铰链）+ 两条腿（髋球关节、膝铰链）。
+  一棵树，1 + 1 + 2 x 2 + 2 x 2 = 10 个刚体，6 + 3 + 2 x (3 + 1) + 2 x (3 + 1) = 25 个自由度。
+  肘和膝有限位（limited + range；范围给起始姿态留了 0.05 rad 的余量，障碍在 0 处是无穷大），球关节没有（阶段 10 只支持铰链和滑动的限位）。
+  相邻的刚体（父子）不检测接触，其余都检测：手臂和躯干、小腿和大腿之间的接触都在。
+  从 1.2 m 高、带一点倾斜落到地面上。
+-->
+<mujoco model="ragdoll">
+  <compiler angle="radian"/>
+  <option gravity="0 0 -9.81" timestep="0.002"/>
+
+  <default>
+    <geom type="capsule"/>
+    <joint type="hinge"/>
+  </default>
+
+  <worldbody>
+    <geom name="floor" type="plane" size="3 3 0.1"/>
+    <body name="torso" pos="0 0 1.2" quat="0.96 0.2 0.15 0">
+      <freejoint/>
+      <geom type="box" size="0.12 0.07 0.18" mass="10"/>
+      <body name="head" pos="0 0 0.28">
+        <joint name="neck" type="ball" pos="0 0 -0.08"/>
+        <geom type="sphere" size="0.08" mass="2"/>
+      </body>
+      <body name="upper_arm_l" pos="0.19 0 0.12">
+        <joint name="shoulder_l" type="ball"/>
+        <geom fromto="0.04 0 0 0.26 0 0" size="0.04" mass="1.5"/>
+        <body name="lower_arm_l" pos="0.28 0 0">
+          <joint name="elbow_l" axis="0 0 1" limited="true" range="-2.4 0.05"/>
+          <geom fromto="0.02 0 0 0.24 0 0" size="0.035" mass="1"/>
+        </body>
+      </body>
+      <body name="upper_arm_r" pos="-0.19 0 0.12">
+        <joint name="shoulder_r" type="ball"/>
+        <geom fromto="-0.04 0 0 -0.26 0 0" size="0.04" mass="1.5"/>
+        <body name="lower_arm_r" pos="-0.28 0 0">
+          <joint name="elbow_r" axis="0 0 1" limited="true" range="-0.05 2.4"/>
+          <geom fromto="-0.02 0 0 -0.24 0 0" size="0.035" mass="1"/>
+        </body>
+      </body>
+      <body name="thigh_l" pos="0.08 0 -0.2">
+        <joint name="hip_l" type="ball"/>
+        <geom fromto="0 0 -0.04 0 0 -0.32" size="0.05" mass="4"/>
+        <body name="shin_l" pos="0 0 -0.36">
+          <joint name="knee_l" axis="1 0 0" limited="true" range="-0.05 2.4"/>
+          <geom fromto="0 0 -0.02 0 0 -0.32" size="0.045" mass="2.5"/>
+        </body>
+      </body>
+      <body name="thigh_r" pos="-0.08 0 -0.2">
+        <joint name="hip_r" type="ball"/>
+        <geom fromto="0 0 -0.04 0 0 -0.32" size="0.05" mass="4"/>
+        <body name="shin_r" pos="0 0 -0.36">
+          <joint name="knee_r" axis="1 0 0" limited="true" range="-0.05 2.4"/>
+          <geom fromto="0 0 -0.02 0 0 -0.32" size="0.045" mass="2.5"/>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>

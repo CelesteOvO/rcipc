@@ -36,6 +36,7 @@ add_library(rcipc
   src/distance.cc    # 阶段 7：点–三角形、线段–线段的最近点
   src/friction.cc    # 阶段 8：滞后的光滑化 Coulomb 摩擦
   src/solver.cc      # 阶段 9：PCG 和树块预条件器
+  src/limits.cc      # 阶段 10：关节限位
 )
 target_include_directories(rcipc PUBLIC include)
 target_link_libraries(rcipc PUBLIC Eigen3::Eigen mujoco::mujoco)
@@ -66,6 +67,11 @@ rcipc_copy_dlls(contact_demo)
 add_executable(curvature_demo toys/curvature/main.cc)
 target_link_libraries(curvature_demo PRIVATE rcipc)
 rcipc_copy_dlls(curvature_demo)
+
+# 阶段 10：跑任意场景、写出轨迹（tools/replay.py 回放）。
+add_executable(scene_demo toys/scenes/main.cc)
+target_link_libraries(scene_demo PRIVATE rcipc)
+rcipc_copy_dlls(scene_demo)
 
 # 测试，定义在 tests/CMakeLists.txt。
 enable_testing()

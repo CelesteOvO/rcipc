@@ -54,6 +54,11 @@ Model from_mujoco(const mjModel* m) {
     j.axis = Eigen::Vector3d(m->jnt_axis + 3 * i);  // MuJoCo 编译时已经归一化
     const bool scalar = j.type == JointType::kHinge || j.type == JointType::kSlide;
     j.ref = scalar ? m->qpos0[j.qadr] : 0.0;
+    // 阶段 10：限位。MuJoCo 的 jnt_range 对铰链是弧度（compiler angle="radian"）。球关节的限位是转角的上限，不支持。
+    j.limited = scalar && m->jnt_limited[i] != 0;
+    if (m->jnt_limited[i] && !scalar) throw std::runtime_error("joint " + std::to_string(i) + ": only hinge and slide limits are supported");
+    j.range[0] = m->jnt_range[2 * i];
+    j.range[1] = m->jnt_range[2 * i + 1];
   }
 
   // 刚体：父刚体、固定偏移、关节编号。顺便检查我们不支持的结构。
