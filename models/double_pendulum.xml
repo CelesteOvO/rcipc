@@ -1,0 +1,21 @@
+<!--
+  阶段 3 的双摆：两根 0.5 m 长、1 kg 的杆，用铰链串起来挂在世界上，都绕 y 轴转，在 xz 平面里摆。
+  q = (0, 0) 时两根杆都水平朝 +x 方向伸出；重力向下（-z）。
+  没有接触、没有阻尼，所以精确解的总能量（动能 + 重力势能）守恒。
+  用 MuJoCo 自带的 simulate.exe 打开就能看到它在摆（build/_deps/mujoco-src/bin/simulate.exe）。
+-->
+<mujoco model="double_pendulum">
+  <compiler angle="radian"/>
+  <option gravity="0 0 -9.81" timestep="0.002"/>
+
+  <worldbody>
+    <body name="link1" pos="0 0 1">
+      <joint name="j1" type="hinge" axis="0 1 0"/>
+      <geom type="capsule" fromto="0 0 0 0.5 0 0" size="0.03" mass="1"/>
+      <body name="link2" pos="0.5 0 0">
+        <joint name="j2" type="hinge" axis="0 1 0"/>
+        <geom type="capsule" fromto="0 0 0 0.5 0 0" size="0.03" mass="1"/>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>

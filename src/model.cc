@@ -38,6 +38,8 @@ Model from_mujoco(const mjModel* m) {
   M.nq = static_cast<int>(m->nq);  // mjtSize 是 64 位整数，我们的模型远小于 int 的范围
   M.nv = static_cast<int>(m->nv);
   M.qpos0 = Eigen::Map<const Eigen::VectorXd>(m->qpos0, m->nq);
+  M.gravity = Eigen::Vector3d(m->opt.gravity);
+  M.timestep = m->opt.timestep;
 
   // 关节：逐个抄出类型、地址、锚点和轴。
   M.joints.resize(m->njnt);
@@ -61,6 +63,18 @@ Model from_mujoco(const mjModel* m) {
     B.pos = Eigen::Vector3d(m->body_pos + 3 * b);
     B.quat = quat_load(m->body_quat + 4 * b);
     B.joint = m->body_jntnum[b] > 0 ? m->body_jntadr[b] : -1;
+    // 质量分布。MuJoCo 给的是主惯量 body_inertia（3 个数）和主轴的姿态 body_iquat（相对刚体坐标系）。
+    //   主轴坐标系里惯性张量是对角阵 diag(I1, I2, I3)，二阶矩也是对角阵：S_k = tr(I)/2 - I_k
+    //   （由 I = tr(S) 1 - S 两边取迹得 tr(I) = 2 tr(S)，再反解）。
+    //   然后用主轴的转动矩阵 Q 转到刚体坐标系：I_b = Q diag(I) Q^T，S_b = Q diag(S) Q^T。
+    B.mass = m->body_mass[b];
+    B.ipos = Eigen::Vector3d(m->body_ipos + 3 * b);
+    const Eigen::Vector3d Ip(m->body_inertia + 3 * b);
+    const Eigen::Vector3d Sp = Eigen::Vector3d::Constant(0.5 * Ip.sum()) - Ip;
+    const Eigen::Matrix3d Q = quat_load(m->body_iquat + 4 * b).normalized().toRotationMatrix();
+    B.inertia = Q * Ip.asDiagonal() * Q.transpose();
+    B.S = Q * Sp.asDiagonal() * Q.transpose();
+
     const std::string name = mj_id2name(m, mjOBJ_BODY, b) ? mj_id2name(m, mjOBJ_BODY, b) : std::to_string(b);
     if (m->body_jntnum[b] > 1) throw std::runtime_error("body " + name + " has more than one joint");
     if (m->body_mocapid[b] >= 0) throw std::runtime_error("body " + name + " is a mocap body");

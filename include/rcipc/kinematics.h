@@ -44,4 +44,10 @@ Eigen::VectorXd differentiate(const Model& model, const Eigen::VectorXd& q0, con
 // frames 必须是在当前 q 上算的 forward_kinematics。
 Eigen::Matrix3Xd point_jacobian(const Model& model, const Frames& frames, int body, const Eigen::Vector3d& x);
 
+// 刚体的角速度 Jacobian（阶段 3 加的），3 x nv：沿 q ⊕ s * delta 运动时，刚体 body 的角速度（世界系）= W * delta。
+//   第 d 列 = a_d   若 d 是链上的转动自由度；
+//           = 0     若 d 是平移自由度，或者不在链上。
+// 和 point_jacobian 一样沿父刚体往上走。它对应 mj_jac 的 jacr。
+Eigen::Matrix3Xd angular_jacobian(const Model& model, const Frames& frames, int body);
+
 }  // namespace rcipc

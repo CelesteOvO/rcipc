@@ -336,3 +336,19 @@ TEST(Jacobian, ColumnsOffTheChainAreZero) {
   }
   for (const char* on : {"root", "shoulder", "elbow", "knuckle"}) EXPECT_GT(J.col(z.dof(on)).norm(), 0.0) << on;
 }
+
+// 角速度 Jacobian（阶段 3 加的）和 mj_jac 的转动部分 jacr 一致。
+TEST(Jacobian, AngularMatchesMujoco) {
+  Zoo z;
+  std::mt19937 rng(33);
+  Eigen::Matrix<double, 3, Eigen::Dynamic, Eigen::RowMajor> expect(3, z.model.nv);
+  for (int i = 0; i < kPoses; ++i) {
+    const VectorXd q = random_q(z.model, rng);
+    z.mj_fk(q);
+    const Frames F = forward_kinematics(z.model, q);
+    for (int b = 1; b < z.model.nbody(); ++b) {
+      mj_jac(z.m.get(), z.d, nullptr, expect.data(), z.d->xpos + 3 * b, b);
+      EXPECT_LT((angular_jacobian(z.model, F, b) - expect).norm(), 1e-13) << "pose " << i << ", body " << b;
+    }
+  }
+}

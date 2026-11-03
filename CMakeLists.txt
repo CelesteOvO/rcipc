@@ -28,6 +28,8 @@ add_library(rcipc
   src/quat.cc        # 阶段 2：四元数的 exp 和 log
   src/model.cc       # 阶段 2：从 MuJoCo 读出树结构
   src/kinematics.cc  # 阶段 2：正运动学、q 的加减、点的 Jacobian
+  src/inertia.cc     # 阶段 3：body 形式的惯性项
+  src/step.cc        # 阶段 3：关节坐标里的时间步
 )
 target_include_directories(rcipc PUBLIC include)
 target_link_libraries(rcipc PUBLIC Eigen3::Eigen mujoco::mujoco)
@@ -43,6 +45,11 @@ target_link_libraries(ipc1d PUBLIC rcipc)
 add_executable(ipc1d_demo toys/ipc1d/main.cc)
 target_link_libraries(ipc1d_demo PRIVATE ipc1d)
 rcipc_copy_dlls(ipc1d_demo)
+
+# 阶段 3：关节坐标里的时间步（双摆、自由旋转的盒子）。只用库 rcipc，所以没有自己的库。
+add_executable(dynamics_demo toys/dynamics/main.cc)
+target_link_libraries(dynamics_demo PRIVATE rcipc)
+rcipc_copy_dlls(dynamics_demo)
 
 # 测试，定义在 tests/CMakeLists.txt。
 enable_testing()

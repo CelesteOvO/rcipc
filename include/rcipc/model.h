@@ -10,8 +10,8 @@
 
 // 关节树的模型（阶段 2，笔记 notes/02_kinematics.md 第 1 节）。
 //
-// 只保存正运动学需要的东西，从 MuJoCo 的 mjModel 里抄出来。之后的阶段会往这里加字段
-// （阶段 3：质量和惯量；阶段 4：顶点）。我们自己的代码只读这个结构，不再碰 mjModel。
+// 只保存我们需要的东西，从 MuJoCo 的 mjModel 里抄出来：阶段 2 的树结构，阶段 3 的质量和惯量。
+// 之后的阶段会继续往这里加字段（阶段 4：顶点）。我们自己的代码只读这个结构，不再碰 mjModel。
 namespace rcipc {
 
 // 四种关节。括号里是它在 q 和 v 里各占几个数。
@@ -39,6 +39,12 @@ struct Body {
   Eigen::Vector3d pos;      // 在父刚体坐标系里的固定偏移（body_pos）
   Eigen::Quaterniond quat;  // 在父刚体坐标系里的固定姿态（body_quat）
   int joint;                // 这个刚体的关节编号；没有关节（焊死在父刚体上）时为 -1
+
+  // 阶段 3：质量分布（笔记 notes/03_inertia.md 第 1 节）。下面三个量都在刚体自己的坐标系里。
+  double mass = 0;                                    // 质量 m_b（kg）
+  Eigen::Vector3d ipos = Eigen::Vector3d::Zero();     // 质心的位置（body_ipos）
+  Eigen::Matrix3d inertia = Eigen::Matrix3d::Zero();  // 绕质心的惯性张量 I_b（kg m^2）
+  Eigen::Matrix3d S = Eigen::Matrix3d::Zero();        // 绕质心的二阶矩 S_b = sum m_p X_p X_p^T，I = tr(S) 1 - S
 };
 
 struct Model {
@@ -50,6 +56,8 @@ struct Model {
   std::vector<int> dof_body;     // 每个自由度属于哪个刚体（长度 nv）
   std::vector<bool> dof_rot;     // 每个自由度是转动（true）还是平移（false）
   Eigen::VectorXd qpos0;         // 参考位置：MJCF 里写的姿态
+  Eigen::Vector3d gravity{0, 0, -9.81};  // 重力加速度（MJCF 的 option gravity），阶段 3 起用
+  double timestep = 0.002;       // MJCF 的 option timestep（s）
 
   int nbody() const { return static_cast<int>(bodies.size()); }
 };

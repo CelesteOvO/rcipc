@@ -239,4 +239,20 @@ Eigen::Matrix3Xd point_jacobian(const Model& model, const Frames& frames, int bo
   return jac;
 }
 
+Eigen::Matrix3Xd angular_jacobian(const Model& model, const Frames& frames, int body) {
+  // 刚体的角速度只来自链上的转动自由度：每个以速度 1 转动的自由度给刚体加上角速度 a_d。
+  // 平移自由度不改变姿态，那一列是 0。结构和 point_jacobian 完全一样。
+  Eigen::Matrix3Xd jac = Eigen::Matrix3Xd::Zero(3, model.nv);
+  for (int b = body; b != 0; b = model.bodies[b].parent) {
+    const int j = model.bodies[b].joint;
+    if (j < 0) continue;
+    const Joint& J = model.joints[j];
+    for (int k = 0; k < J.nv; ++k) {
+      const int d = J.dadr + k;
+      if (model.dof_rot[d]) jac.col(d) = frames.dof_axis[d];
+    }
+  }
+  return jac;
+}
+
 }  // namespace rcipc
