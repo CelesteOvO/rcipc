@@ -18,3 +18,5 @@ rcipc_test(test_quat rcipc)        # 阶段 2：四元数
 rcipc_test(test_kinematics rcipc)  # 阶段 2：正运动学、积分、Jacobian，和 MuJoCo 对比
 rcipc_test(test_inertia rcipc)     # 阶段 3：body 形式的惯性项，和 mj_fullM 对比
 rcipc_test(test_step rcipc)        # 阶段 3：关节坐标里的时间步
+rcipc_test(test_contact rcipc)     # 阶段 4：地面接触、kappa、落地
+rcipc_test(test_ccd rcipc)         # 阶段 4：直弦 CCD 和它漏掉的反例

@@ -1,0 +1,153 @@
+// 阶段 4 的演示程序：地面接触。
+//
+// 用法（参数都可以省略，写成 名字=值）：
+//   contact_demo [drop|flail] [h=..] [T=..] [dhat=..] [w=..] [kappa=..] [out=..]
+//
+// drop（默认）：models/drop.xml，盒子从 0.5 m 静止落到地面，模拟 T 秒（默认 1.5）。
+//               每步沿真实轨迹采样 64 点检查最小距离；打印最小间隙、静止间隙、kappa、Newton 次数、力平衡。
+//               kappa 不给时由第一次接触的梯度平衡初始化；给了就固定用它（可以试试 kappa=2e9）。
+//               CSV 每行：t, z, vz, min_distance, newton, kappa。
+// flail：       models/flail.xml，杆以 w rad/s（默认 40）从地面上方 3 mm 处甩过正下方，一步。
+//               打印两端的距离和真实弧线的最低点：直弦 CCD 看不见弧线穿过地面（书 §9.1 的反例）。
+//
+// 输出用英文，因为 Windows 控制台默认不是 UTF-8。
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <exception>
+#include <string>
+
+#include "rcipc/barrier.h"
+#include "rcipc/ccd.h"
+#include "rcipc/contact.h"
+#include "rcipc/kinematics.h"
+#include "rcipc/model.h"
+#include "rcipc/step.h"
+
+namespace {
+
+using namespace rcipc;
+using Eigen::VectorXd;
+
+struct Args {
+  std::string mode = "drop";
+  double h = NAN, T = NAN, dhat = 1e-3, w = 40.0, kappa = 0;  // kappa = 0：由梯度平衡初始化
+  std::string out;
+};
+
+Args parse(int argc, char** argv) {
+  Args a;
+  for (int i = 1; i < argc; ++i) {
+    std::string s = argv[i];
+    auto eq = s.find('=');
+    if (eq == std::string::npos) {
+      a.mode = s;
+      continue;
+    }
+    std::string k = s.substr(0, eq), v = s.substr(eq + 1);
+    if (k == "h") a.h = std::atof(v.c_str());
+    else if (k == "T") a.T = std::atof(v.c_str());
+    else if (k == "dhat") a.dhat = std::atof(v.c_str());
+    else if (k == "w") a.w = std::atof(v.c_str());
+    else if (k == "kappa") a.kappa = std::atof(v.c_str());
+    else if (k == "out") a.out = v;
+    else std::fprintf(stderr, "unknown option %s\n", k.c_str());
+  }
+  return a;
+}
+
+Model load(const char* file) { return from_mujoco(load_mjcf(std::string(RCIPC_MODEL_DIR "/") + file).get()); }
+
+int drop(const Args& a) {
+  const Model model = load("drop.xml");
+  StepParams P;
+  P.h = std::isnan(a.h) ? model.timestep : a.h;
+  P.dhat = a.dhat;
+  const double T = std::isnan(a.T) ? 1.5 : a.T;
+  SolverState S;
+  S.kappa = a.kappa;  // 0 表示第一次接触时按梯度平衡初始化
+
+  VectorXd q = model.qpos0, v = VectorXd::Zero(6);
+  double t = 0, dmin = 1e9, t_dmin = 0;
+  int nmax = 0;
+  long nsum = 0, nstep = 0;
+  FILE* f = std::fopen((a.out.empty() ? "drop.csv" : a.out).c_str(), "w");
+  if (f) std::fprintf(f, "t,z,vz,min_distance,newton,kappa\n");
+  while (t < T - 1e-12) {
+    const StepResult r = step(model, P, q, v, &S);
+    const double d = trajectory_min_distance(model, q, differentiate(model, q, r.q), 1.0, 64);
+    q = r.q;
+    v = r.v;
+    t += P.h;
+    if (d < dmin) {
+      dmin = d;
+      t_dmin = t;
+    }
+    nmax = std::max(nmax, r.newton);
+    nsum += r.newton;
+    ++nstep;
+    if (f) std::fprintf(f, "%.6f,%.17g,%.17g,%.17g,%d,%.6g\n", t, q[2], v[2], r.min_distance, r.newton, r.kappa);
+  }
+  if (f) std::fclose(f);
+
+  // 静止时的力平衡：4 个角的障碍力之和应当等于重力。
+  const Frames F = forward_kinematics(model, q);
+  double force = 0, gap = 0;
+  const std::vector<GroundContact> C = ground_contacts(model, F, P.dhat);
+  for (const GroundContact& c : C) {
+    force += S.kappa * std::abs(barrier(c.d * c.d, P.dhat * P.dhat).db) * 2 * c.d;
+    gap = c.d;
+  }
+  std::printf("box drop, h %g s, T %g s, dhat %g m\n", P.h, T, P.dhat);
+  std::printf("min distance along all trajectories: %.4f mm at t = %.3f s%s\n", dmin * 1e3, t_dmin,
+              dmin > 0 ? "" : "  <-- PENETRATION");
+  std::printf("at rest: gap %.4f mm, |v| %.2e, %zu active contacts, barrier force %.4f N vs weight %.4f N\n",
+              gap * 1e3, v.norm(), C.size(), force, model.bodies[1].mass * model.gravity.norm());
+  std::printf("kappa %.4g J/m^4 (range %.3g .. %.3g)\n", S.kappa, kappa_range(model, P.dhat).min,
+              kappa_range(model, P.dhat).max);
+  std::printf("Newton iterations per step: max %d, mean %.2f\n", nmax, double(nsum) / nstep);
+  if (f) std::printf("wrote %s\n", a.out.empty() ? "drop.csv" : a.out.c_str());
+  return 0;
+}
+
+int flail(const Args& a) {
+  const Model model = load("flail.xml");
+  StepParams P;
+  P.h = std::isnan(a.h) ? model.timestep : a.h;
+  P.dhat = a.dhat;
+  const double H = 0.5075, R = 0.5, rad = 0.01;  // 铰链高度、球心的转动半径、球的半径（见 flail.xml）
+  const double phi = std::acos((H - rad) / R);  // 杆端在地面以下的那段弧的半角
+
+  VectorXd q(1), v(1);
+  q[0] = 1.5707963267948966 - phi - 0.05;
+  v[0] = a.w;
+  const double d0 = min_ground_distance(model, forward_kinematics(model, q));
+  std::vector<NewtonIterate> trace;
+  const StepResult r = step(model, P, q, v, nullptr, &trace);
+  const VectorXd p = differentiate(model, q, r.q);
+  const double dmin = trajectory_min_distance(model, q, p, 1.0, 64);
+
+  std::printf("flail, h %g s, w %g rad/s, dhat %g m: rod tip sweeps %.4f rad in one step\n", P.h, a.w, P.dhat, p[0]);
+  std::printf("tip height above the floor: start %+.3f mm, end %+.3f mm, lowest point of the true arc %+.3f mm%s\n",
+              d0 * 1e3, r.min_distance * 1e3, dmin * 1e3, dmin < 0 ? "  <-- PENETRATION" : "");
+  std::printf("Newton %d, CCD alpha_max %.3f, line search alpha %.3f: the chord never came near the floor\n", r.newton,
+              trace.empty() ? 1.0 : trace[0].alpha_max, trace.empty() ? 1.0 : trace[0].alpha);
+  std::printf("the arc dips below the floor for |angle - pi/2| < %.4f rad; the step jumped over the whole dip\n", phi);
+  return 0;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+  Args a = parse(argc, argv);
+  try {
+    if (a.mode == "drop") return drop(a);
+    if (a.mode == "flail") return flail(a);
+    std::fprintf(stderr, "unknown mode %s (drop or flail)\n", a.mode.c_str());
+    return 2;
+  } catch (const std::exception& e) {
+    std::fprintf(stderr, "%s\n", e.what());
+    return 1;
+  }
+}

@@ -29,7 +29,9 @@ add_library(rcipc
   src/model.cc       # 阶段 2：从 MuJoCo 读出树结构
   src/kinematics.cc  # 阶段 2：正运动学、q 的加减、点的 Jacobian
   src/inertia.cc     # 阶段 3：body 形式的惯性项
-  src/step.cc        # 阶段 3：关节坐标里的时间步
+  src/step.cc        # 阶段 3：关节坐标里的时间步（阶段 4 加上接触和 CCD）
+  src/contact.cc     # 阶段 4：地面接触：距离、接触行、能量、梯度、Hessian、kappa
+  src/ccd.cc         # 阶段 4：直弦 CCD
 )
 target_include_directories(rcipc PUBLIC include)
 target_link_libraries(rcipc PUBLIC Eigen3::Eigen mujoco::mujoco)
@@ -50,6 +52,11 @@ rcipc_copy_dlls(ipc1d_demo)
 add_executable(dynamics_demo toys/dynamics/main.cc)
 target_link_libraries(dynamics_demo PRIVATE rcipc)
 rcipc_copy_dlls(dynamics_demo)
+
+# 阶段 4：地面接触（落地的盒子、甩过地面的杆）。
+add_executable(contact_demo toys/contact/main.cc)
+target_link_libraries(contact_demo PRIVATE rcipc)
+rcipc_copy_dlls(contact_demo)
 
 # 测试，定义在 tests/CMakeLists.txt。
 enable_testing()

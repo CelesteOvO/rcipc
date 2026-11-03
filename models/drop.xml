@@ -1,0 +1,17 @@
+<!--
+  阶段 4 的落地盒子：阶段 3 的盒子（0.1 x 0.2 x 0.4 m，1 kg）加一块地面。
+  盒子最长的边沿 z，从 0.5 m 高静止落下，用最大的那个面（0.1 x 0.2）着地：4 个角同时接触。
+  检验：轨迹上任何时刻都不穿透；静止时 4 个角的障碍力之和等于重力。
+-->
+<mujoco model="drop">
+  <compiler angle="radian"/>
+  <option gravity="0 0 -9.81" timestep="0.002"/>
+
+  <worldbody>
+    <geom name="floor" type="plane" size="2 2 0.1"/>
+    <body name="box" pos="0 0 0.7">
+      <freejoint name="root"/>
+      <geom type="box" size="0.05 0.1 0.2" mass="1"/>
+    </body>
+  </worldbody>
+</mujoco>

@@ -95,7 +95,7 @@ TEST(JointStep, EnergyDecreasesInEveryIteration) {
   StepParams P;
   P.h = 0.01;
   std::vector<NewtonIterate> trace;
-  const StepResult r = step(model, P, Eigen::Vector2d(0.5, 1.0), Eigen::Vector2d(-3.0, 4.0), &trace);
+  const StepResult r = step(model, P, Eigen::Vector2d(0.5, 1.0), Eigen::Vector2d(-3.0, 4.0), nullptr, &trace);
   ASSERT_GE(trace.size(), 2u);
   for (size_t i = 1; i < trace.size(); ++i) EXPECT_LE(trace[i].energy, trace[i - 1].energy) << "iteration " << i;
   EXPECT_LT(r.newton, P.max_newton);

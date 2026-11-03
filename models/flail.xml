@@ -1,0 +1,20 @@
+<!--
+  阶段 4 的甩杆（书 §9.1 的反例，改成只有地面）：一根 0.5 m 的杆绕铰链高速转动，铰链离地面 0.5075 m，
+  杆端的球心半径 0.01，所以杆端扫出的圆最低点在地面以下 2.5 mm（0.5075 - 0.5 - 0.01 = -0.0025）。
+  只有当杆指向正下方附近（±5.7 度，0.2 rad 的一段弧）时杆端才在地面以下。
+  以 40 rad/s 转、h = 0.01 时一步转约 0.34 rad，可以一步跨过这段弧：两端都在地面以上，中间穿过了地面。
+  直弦 CCD 只看两端，看不见这次穿透（阶段 4 故意复现）；阶段 5 的弦加矢高能抓到。
+  关节绕 y 轴转，q = 0 时杆沿 +x 水平，q = pi/2 时杆指向正下方。
+-->
+<mujoco model="flail">
+  <compiler angle="radian"/>
+  <option gravity="0 0 0" timestep="0.01"/>
+
+  <worldbody>
+    <geom name="floor" type="plane" size="2 2 0.1"/>
+    <body name="rod" pos="0 0 0.5075">
+      <joint name="hinge" type="hinge" axis="0 1 0"/>
+      <geom type="capsule" fromto="0 0 0 0.5 0 0" size="0.01" mass="1"/>
+    </body>
+  </worldbody>
+</mujoco>

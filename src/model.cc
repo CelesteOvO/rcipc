@@ -83,6 +83,47 @@ Model from_mujoco(const mjModel* m) {
     }
   }
 
+  // 阶段 4：接触几何。每个 geom 变成几个顶点（笔记 notes/04_ground.md 第 1 节），世界上的平面变成障碍。
+  //   MuJoCo 已经把 fromto、euler 等写法编译成了 geom_pos、geom_quat、geom_size（半尺寸）。
+  //   contype 和 conaffinity 都是 0 的 geom 不参与碰撞（只用来显示），跳过。
+  for (int gi = 0; gi < m->ngeom; ++gi) {
+    if (m->geom_contype[gi] == 0 && m->geom_conaffinity[gi] == 0) continue;
+    const int b = m->geom_bodyid[gi];
+    const Eigen::Vector3d pos(m->geom_pos + 3 * gi);
+    const Eigen::Quaterniond quat = quat_load(m->geom_quat + 4 * gi).normalized();
+    const double* size = m->geom_size + 3 * gi;
+    const std::string name = mj_id2name(m, mjOBJ_GEOM, gi) ? mj_id2name(m, mjOBJ_GEOM, gi) : std::to_string(gi);
+
+    switch (m->geom_type[gi]) {
+      case mjGEOM_PLANE: {
+        // 平面：geom 坐标系的 z 轴是法向，自由的一侧是 +z。只支持挂在世界上的平面（它不动）。
+        if (b != 0) throw std::runtime_error("plane " + name + " is not on the world body");
+        const Eigen::Vector3d n = quat * Eigen::Vector3d::UnitZ();
+        M.planes.push_back({n, n.dot(pos)});
+        break;
+      }
+      case mjGEOM_BOX:
+        // 盒子：8 个角，半径 0。size 是三个半边长。
+        for (int sx = -1; sx <= 1; sx += 2)
+          for (int sy = -1; sy <= 1; sy += 2)
+            for (int sz = -1; sz <= 1; sz += 2) {
+              M.vertices.push_back({b, pos + quat * Eigen::Vector3d(sx * size[0], sy * size[1], sz * size[2]), 0.0});
+            }
+        break;
+      case mjGEOM_SPHERE:
+        // 球：球心加半径。
+        M.vertices.push_back({b, pos, size[0]});
+        break;
+      case mjGEOM_CAPSULE:
+        // 胶囊：轴是 geom 坐标系的 z 轴，size[1] 是半长，size[0] 是半径。两个端点（球心）加半径。
+        M.vertices.push_back({b, pos + quat * Eigen::Vector3d(0, 0, size[1]), size[0]});
+        M.vertices.push_back({b, pos - quat * Eigen::Vector3d(0, 0, size[1]), size[0]});
+        break;
+      default:
+        throw std::runtime_error("geom " + name + ": only plane, box, sphere and capsule are supported");
+    }
+  }
+
   // 自由度：每个属于哪个关节、哪个刚体，是转动还是平移。
   M.dof_joint.resize(m->nv);
   M.dof_body.resize(m->nv);

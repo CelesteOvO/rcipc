@@ -47,6 +47,23 @@ struct Body {
   Eigen::Matrix3d S = Eigen::Matrix3d::Zero();        // 绕质心的二阶矩 S_b = sum m_p X_p X_p^T，I = tr(S) 1 - S
 };
 
+// 阶段 4：接触用的几何。
+//
+// 顶点：刚体上的一个点，外加一个半径（笔记 notes/04_ground.md 第 1 节）。
+//   盒子的 8 个角半径为 0；球是球心加半径；胶囊是两个端点加半径。
+//   到障碍的距离 = 点到障碍的距离 - 半径，所以球和胶囊的圆弧面也能正确处理。
+struct Vertex {
+  int body;               // 所在刚体
+  Eigen::Vector3d local;  // 刚体坐标系里的位置
+  double radius;          // 半径（m），盒子的角是 0
+};
+
+// 平面障碍（地面）：自由的一侧是 normal . x - offset > 0。只允许挂在世界（0 号刚体）上，不动。
+struct Plane {
+  Eigen::Vector3d normal;  // 单位法向，指向自由的一侧
+  double offset;           // normal . x = offset 是平面
+};
+
 struct Model {
   int nq = 0;                    // q 的长度
   int nv = 0;                    // 自由度个数，也就是 v 和 delta 的长度
@@ -58,14 +75,19 @@ struct Model {
   Eigen::VectorXd qpos0;         // 参考位置：MJCF 里写的姿态
   Eigen::Vector3d gravity{0, 0, -9.81};  // 重力加速度（MJCF 的 option gravity），阶段 3 起用
   double timestep = 0.002;       // MJCF 的 option timestep（s）
+  std::vector<Vertex> vertices;  // 阶段 4：所有刚体的顶点（从 MJCF 的 geom 读出）
+  std::vector<Plane> planes;     // 阶段 4：世界上的平面障碍（MJCF 里挂在 worldbody 上的 plane geom）
 
   int nbody() const { return static_cast<int>(bodies.size()); }
+  int nvertex() const { return static_cast<int>(vertices.size()); }
 };
 
 // 从 mjModel 抄出 Model。遇到不支持的结构时抛 std::runtime_error：
 //   - 一个刚体上有多个关节（书里也要求每个刚体至多一个关节）；
 //   - 自由关节不在顶层（父刚体不是世界）；
-//   - mocap 刚体。
+//   - mocap 刚体；
+//   - 阶段 4 起：刚体上的 geom 不是 box、sphere、capsule；plane 不在世界上。
+//     （MJCF 里 contype="0" conaffinity="0" 的 geom 只用来显示，会被跳过。）
 Model from_mujoco(const mjModel* m);
 
 // mjModel 的智能指针：离开作用域时自动调用 mj_deleteModel。
