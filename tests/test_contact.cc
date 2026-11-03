@@ -34,11 +34,13 @@ constexpr double kPi = 3.14159265358979323846;
 
 Model load(const char* file) { return from_mujoco(load_mjcf(std::string(RCIPC_MODEL_DIR "/") + file).get()); }
 
-// zoo.xml 的随机姿态，但躯干抬高到 1.2–1.8 m，保证所有顶点都在地面之上（能量在 d <= 0 处没有定义）。
+// zoo.xml 的随机姿态，但躯干抬高到 1.2–1.8 m，保证所有顶点都在地面之上（能量在 d <= 0 处没有定义）；
+// 阶段 7 起刚体之间也不能相交，所以相交的姿态重新抽。
 VectorXd random_q_above_floor(const Model& model, std::mt19937& rng) {
   std::uniform_real_distribution<double> u(-1, 1);
   std::normal_distribution<double> n;
   VectorXd q = model.qpos0;
+  for (int attempt = 0; attempt < 100; ++attempt) {
   for (const Joint& j : model.joints) {
     switch (j.type) {
       case JointType::kFree:
@@ -55,6 +57,8 @@ VectorXd random_q_above_floor(const Model& model, std::mt19937& rng) {
         q[j.qadr] = j.ref + 0.3 * u(rng);
         break;
     }
+  }
+  if (min_distance(model, forward_kinematics(model, q)) > 1e-3) break;
   }
   return q;
 }
@@ -110,9 +114,9 @@ TEST(Geometry, DistanceSubtractsTheRadius) {
   }
   EXPECT_EQ(low, 4);
   EXPECT_EQ(high, 4);
-  EXPECT_NEAR(min_ground_distance(M, F), 0.5, 1e-12);
-  EXPECT_TRUE(ground_contacts(M, F, 1e-3).empty());
-  EXPECT_EQ(ground_contacts(M, F, 0.6).size(), 4u);
+  EXPECT_NEAR(min_distance(M, F), 0.5, 1e-12);
+  EXPECT_TRUE(find_contacts(M, F, 1e-3).empty());
+  EXPECT_EQ(find_contacts(M, F, 0.6).size(), 4u);
 
   const Model Z = load("zoo.xml");
   const Frames FZ = forward_kinematics(Z, Z.qpos0);
@@ -133,18 +137,21 @@ TEST(Row, MatchesFiniteDifference) {
   for (int i = 0; i < 5; ++i) {
     const VectorXd q = random_q_above_floor(M, rng);
     const Frames F = forward_kinematics(M, q);
-    const std::vector<GroundContact> C = ground_contacts(M, F, 10.0);  // dhat 大到所有顶点都活跃
+    std::vector<Contact> C;  // dhat 大到所有顶点都活跃；这里只看顶点–平面（刚体之间的在 test_pairs.cc）
+    for (const Contact& c : find_contacts(M, F, 10.0)) {
+      if (c.type == ContactType::kGround) C.push_back(c);
+    }
     ASSERT_EQ(C.size(), static_cast<size_t>(M.nvertex()));
-    for (const GroundContact& c : C) {
+    for (const Contact& c : C) {
       const RowVectorXd r = contact_row(M, F, c);
       for (int d = 0; d < M.nv; ++d) {
         const VectorXd e = VectorXd::Unit(M.nv, d);
         const auto x2 = [&](double s) {
-          const double dist = ground_distance(M, forward_kinematics(M, integrate(M, q, e, s)), c.vertex, c.plane);
+          const double dist = ground_distance(M, forward_kinematics(M, integrate(M, q, e, s)), c.verts[0], c.plane);
           return dist * dist;
         };
         const double fd = (x2(eps) - x2(-eps)) / (2 * eps);
-        EXPECT_NEAR(r[d], fd, 1e-7 * (1 + std::abs(fd))) << "pose " << i << ", vertex " << c.vertex << ", dof " << d;
+        EXPECT_NEAR(r[d], fd, 1e-7 * (1 + std::abs(fd))) << "pose " << i << ", vertex " << c.verts[0] << ", dof " << d;
       }
     }
   }
@@ -154,7 +161,7 @@ TEST(Row, MatchesFiniteDifference) {
 TEST(Row, VerticalTranslationGivesTwoD) {
   const Model M = load("drop.xml");
   const Frames F = forward_kinematics(M, M.qpos0);
-  for (const GroundContact& c : ground_contacts(M, F, 0.6)) {
+  for (const Contact& c : find_contacts(M, F, 0.6)) {
     const RowVectorXd r = contact_row(M, F, c);
     EXPECT_NEAR(r[2], 2 * c.d, 1e-12);
     EXPECT_NEAR(r[0], 0.0, 1e-12);
@@ -172,12 +179,12 @@ TEST(Energy, GradientMatchesFiniteDifference) {
   for (int i = 0; i < 5; ++i) {
     const VectorXd q = random_q_above_floor(M, rng);
     const Frames F = forward_kinematics(M, q);
-    const std::vector<GroundContact> C = ground_contacts(M, F, dhat);
+    const std::vector<Contact> C = find_contacts(M, F, dhat);
     ASSERT_FALSE(C.empty());
     const VectorXd g = contact_gradient(M, F, C, kappa, dhat);
     const auto energy = [&](const VectorXd& qq) {
       const Frames FF = forward_kinematics(M, qq);
-      return contact_energy(M, ground_contacts(M, FF, dhat), kappa, dhat);
+      return contact_energy(M, find_contacts(M, FF, dhat), kappa, dhat);
     };
     for (int d = 0; d < M.nv; ++d) {
       const VectorXd e = VectorXd::Unit(M.nv, d);
@@ -193,7 +200,7 @@ TEST(Energy, HessianIsSymmetricPositiveSemidefinite) {
   std::mt19937 rng(52);
   const VectorXd q = random_q_above_floor(M, rng);
   const Frames F = forward_kinematics(M, q);
-  const std::vector<GroundContact> C = ground_contacts(M, F, 1.0);
+  const std::vector<Contact> C = find_contacts(M, F, 1.0);
   const MatrixXd H = contact_hessian(M, F, C, 3.0, 1.0);
   EXPECT_LT((H - H.transpose()).norm(), 1e-12 * (1 + H.norm()));
   const VectorXd eig = Eigen::SelfAdjointEigenSolver<MatrixXd>(H).eigenvalues();
@@ -204,13 +211,13 @@ TEST(Energy, HessianIsSymmetricPositiveSemidefinite) {
 TEST(Energy, InactiveContactsContributeNothing) {
   const Model M = load("drop.xml");
   const Frames F = forward_kinematics(M, M.qpos0);  // 下面 4 个角离地 0.5
-  const std::vector<GroundContact> none = ground_contacts(M, F, 0.49);
+  const std::vector<Contact> none = find_contacts(M, F, 0.49);
   EXPECT_TRUE(none.empty());
   EXPECT_EQ(contact_energy(M, none, 1e9, 0.49), 0.0);
   EXPECT_EQ(contact_gradient(M, F, none, 1e9, 0.49).norm(), 0.0);
   EXPECT_EQ(contact_hessian(M, F, none, 1e9, 0.49).norm(), 0.0);
-  EXPECT_EQ(ground_contacts(M, F, 0.51).size(), 4u);
-  EXPECT_EQ(ground_contacts(M, F, 0.91).size(), 8u);
+  EXPECT_EQ(find_contacts(M, F, 0.51).size(), 4u);
+  EXPECT_EQ(find_contacts(M, F, 0.91).size(), 8u);
 }
 
 // ---------- 第 4 节：kappa ----------
@@ -237,7 +244,7 @@ TEST(Kappa, InitialValueBalancesGravityOnTheBox) {
   const InertiaTargets T = inertia_targets(M, F, F, h);  // 静止：目标 = 当前 + g h^2（在下方）
   const VectorXd g_e = inertia_gradient(M, F, T, h);     // = (0, 0, +m g, 0, 0, 0)：往上走能量升高
   EXPECT_NEAR(g_e[2], 9.81, 1e-9);
-  const std::vector<GroundContact> C = ground_contacts(M, F, dhat);
+  const std::vector<Contact> C = find_contacts(M, F, dhat);
   ASSERT_EQ(C.size(), 4u);
   const double kappa = initial_kappa(M, F, C, g_e, dhat);
   const double d = 0.5 * dhat;
@@ -270,11 +277,11 @@ TEST(Drop, NeverPenetratesAndRestsInForceBalance) {
   EXPECT_LT(v.norm(), 1e-5);  // 静止
   // 力平衡：4 个角都在同一个距离 d 上。
   const Frames F = forward_kinematics(M, q);
-  const std::vector<GroundContact> C = ground_contacts(M, F, P.dhat);
+  const std::vector<Contact> C = find_contacts(M, F, P.dhat);
   ASSERT_EQ(C.size(), 4u);
   // 收敛容差 tol = 1e-6 m/s 对应的残余力是 m tol / h = 5e-4 N，所以比到 2e-3 N。
   double force = 0;
-  for (const GroundContact& c : C) force += S.kappa * std::abs(barrier(c.d * c.d, P.dhat * P.dhat).db) * 2 * c.d;
+  for (const Contact& c : C) force += S.kappa * std::abs(barrier(c.d * c.d, P.dhat * P.dhat).db) * 2 * c.d;
   EXPECT_NEAR(force, 9.81, 2e-3);
   // 这个场景里梯度平衡给出的值超过上限（接触第一次出现时 d 接近 dhat，b' 很小），被夹到上限（笔记第 4 节）。
   EXPECT_GE(S.kappa, kappa_range(M, P.dhat).min);

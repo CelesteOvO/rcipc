@@ -1,0 +1,23 @@
+<!--
+  阶段 7 的两个盒子：下面一个 0.2 m 的立方体（1 kg）贴着地面（离地 0.5 mm），
+  上面一个同样的立方体从 0.5 m 高落下，绕 z 轴转了 45 度：
+  落到下面那个盒子上时，上面盒子的 4 个底角压在下面盒子的顶面上（点–三角形），
+  下面盒子的 4 个顶角顶在上面盒子的底面上（点–三角形），两个盒子的边交叉（边–边）。
+  检验：两个盒子之间和盒子与地面之间的距离始终 > 0；最后上面的盒子停在下面的盒子上。
+-->
+<mujoco model="stack">
+  <compiler angle="radian"/>
+  <option gravity="0 0 -9.81" timestep="0.002"/>
+
+  <worldbody>
+    <geom name="floor" type="plane" size="2 2 0.1"/>
+    <body name="lower" pos="0 0 0.1005">
+      <freejoint/>
+      <geom type="box" size="0.1 0.1 0.1" mass="1"/>
+    </body>
+    <body name="upper" pos="0 0 0.5" quat="0.9238795 0 0 0.3826834">
+      <freejoint/>
+      <geom type="box" size="0.1 0.1 0.1" mass="1"/>
+    </body>
+  </worldbody>
+</mujoco>

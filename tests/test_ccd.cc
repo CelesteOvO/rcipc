@@ -49,6 +49,7 @@ VectorXd random_q(const Model& model, std::mt19937& rng) {
   std::uniform_real_distribution<double> u(-1, 1);
   std::normal_distribution<double> n;
   VectorXd q = model.qpos0;
+  for (int attempt = 0; attempt < 100; ++attempt) {  // 相交的姿态重新抽（阶段 7 起刚体之间也算）
   for (const Joint& j : model.joints) {
     switch (j.type) {
       case JointType::kFree:
@@ -65,6 +66,8 @@ VectorXd random_q(const Model& model, std::mt19937& rng) {
         q[j.qadr] = j.ref + 0.3 * u(rng);
         break;
     }
+  }
+  if (min_distance(model, forward_kinematics(model, q)) > 1e-3) break;
   }
   return q;
 }
@@ -110,7 +113,7 @@ TEST(ChordCcd, StopsAtOneMinusCOfTheGap) {
   ASSERT_LT(alpha, 1.0);
   // 平移是线性的，转动是弧线：弧线上的距离和弦上的距离略有不同，所以这里只要求数量级一致，
   // 并且真实轨迹上没有穿透（转得慢，矢高很小）。
-  const double d_end = min_ground_distance(M, forward_kinematics(M, integrate(M, q, p, alpha)));
+  const double d_end = min_distance(M, forward_kinematics(M, integrate(M, q, p, alpha)));
   EXPECT_NEAR(d_end, 0.1 * 0.5, 0.02);
   EXPECT_GT(trajectory_min_distance(M, q, p, alpha, 64), 0.0);
 }
@@ -121,7 +124,7 @@ TEST(ChordCcd, StopsAtOneMinusCOfTheGap) {
 TEST(Flail, ChordCcdMissesTheArcThroughTheFloor) {
   FlailSetup S;
   S.P.ccd = CcdMode::kChord;
-  const double d_start = min_ground_distance(S.M, forward_kinematics(S.M, S.q));
+  const double d_start = min_distance(S.M, forward_kinematics(S.M, S.q));
   EXPECT_NEAR(d_start, (S.H - S.rad) - S.R * std::cos(S.phi + 0.05), 1e-9);
   EXPECT_GT(d_start, S.P.dhat);
 
@@ -222,9 +225,9 @@ TEST(CurvedCcd, EqualsChordForPureTranslation) {
   VectorXd p = VectorXd::Zero(6);
   p[2] = -1.0;
   const double chord = chord_ccd_ground(M, forward_kinematics(M, q), forward_kinematics(M, integrate(M, q, p)), 0.9);
-  EXPECT_NEAR(curved_ccd_ground(M, q, p, 1e-3, 0.9), chord, 1e-12);
+  EXPECT_NEAR(curved_ccd(M, q, p, 1e-3, 0.9), chord, 1e-12);
   p[2] = 0.3;
-  EXPECT_EQ(curved_ccd_ground(M, q, p, 1e-3, 0.9), 1.0);
+  EXPECT_EQ(curved_ccd(M, q, p, 1e-3, 0.9), 1.0);
 }
 
 // 阶段 4 的反例，换成曲线 CCD：第一次迭代就被截断，整条真实轨迹都在地面之上。

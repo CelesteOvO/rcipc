@@ -34,6 +34,7 @@ VectorXd random_q(const Model& model, std::mt19937& rng) {
   std::uniform_real_distribution<double> u(-1, 1);
   std::normal_distribution<double> n;
   VectorXd q = model.qpos0;
+  for (int attempt = 0; attempt < 100; ++attempt) {  // 相交的姿态重新抽（阶段 7 起刚体之间也算）
   for (const Joint& j : model.joints) {
     switch (j.type) {
       case JointType::kFree:
@@ -50,6 +51,8 @@ VectorXd random_q(const Model& model, std::mt19937& rng) {
         q[j.qadr] = j.ref + 0.3 * u(rng);
         break;
     }
+  }
+  if (min_distance(model, forward_kinematics(model, q)) > 1e-3) break;
   }
   return q;
 }
@@ -105,7 +108,7 @@ TEST(Majoriser, DiagonalOnTheChainsRotations) {
   std::mt19937 rng(71);
   const VectorXd q = random_q(M, rng);
   const Frames F = forward_kinematics(M, q);
-  const std::vector<GroundContact> C = ground_contacts(M, F, 1.0);
+  const std::vector<Contact> C = find_contacts(M, F, 1.0);
   ASSERT_FALSE(C.empty());
   const MatrixXd H = contact_curvature(M, q, C, 3.0, 1.0, 1.0);
   EXPECT_LT((H - MatrixXd(H.diagonal().asDiagonal())).norm(), 1e-15);
@@ -127,7 +130,7 @@ TEST(Majoriser, BoundsTheTrueHessianAlongAnyDirection) {
   for (int i = 0; i < 5; ++i) {
     const VectorXd q = random_q(M, rng);
     const Frames F = forward_kinematics(M, q);
-    const std::vector<GroundContact> C = ground_contacts(M, F, dhat);
+    const std::vector<Contact> C = find_contacts(M, F, dhat);
     ASSERT_FALSE(C.empty());
     const MatrixXd Hgn = contact_hessian(M, F, C, kappa, dhat);
     const MatrixXd Hcurv = contact_curvature(M, q, C, kappa, dhat, 1.0);
@@ -141,7 +144,7 @@ TEST(Majoriser, BoundsTheTrueHessianAlongAnyDirection) {
       const auto grad = [&](double s) {
         const VectorXd qq = integrate(M, q, delta, s);
         const Frames FF = forward_kinematics(M, qq);
-        return contact_gradient(M, FF, ground_contacts(M, FF, dhat), kappa, dhat);
+        return contact_gradient(M, FF, find_contacts(M, FF, dhat), kappa, dhat);
       };
       const double exact = delta.dot(grad(eps) - grad(-eps)) / (2 * eps);
       const double model = delta.dot((Hgn + Hcurv) * delta);
@@ -163,7 +166,7 @@ TEST(Lever, GaussNewtonOvershootsTheGapAndTheMajoriserDoesNot) {
   P.h = 0.1;
   VectorXd q = VectorXd::Zero(1), v = VectorXd::Zero(1);
   v[0] = 1.0;
-  EXPECT_NEAR(min_ground_distance(M, forward_kinematics(M, q)), 0.5e-3, 1e-12);
+  EXPECT_NEAR(min_distance(M, forward_kinematics(M, q)), 0.5e-3, 1e-12);
 
   P.curv_scale = 0.0;
   std::vector<NewtonIterate> t0;

@@ -67,6 +67,18 @@ struct Plane {
   double offset;           // normal . x = offset 是平面
 };
 
+// 阶段 7：刚体之间的接触用的边和面（笔记 notes/07_contact.md 第 1 节）。下标都指向 Model::vertices。
+//   盒子：12 条边、12 个三角形；胶囊：1 条边（半径是端点的半径）；球：1 条退化的边（两端是同一个顶点）。
+//   边和面的半径就是它们顶点的半径（同一个 geom 的顶点半径相同）。
+struct Edge {
+  int v0, v1;
+  int body;
+};
+struct Face {
+  int v0, v1, v2;
+  int body;
+};
+
 struct Model {
   int nq = 0;                    // q 的长度
   int nv = 0;                    // 自由度个数，也就是 v 和 delta 的长度
@@ -80,17 +92,31 @@ struct Model {
   double timestep = 0.002;       // MJCF 的 option timestep（s）
   std::vector<Vertex> vertices;  // 阶段 4：所有刚体的顶点（从 MJCF 的 geom 读出）
   std::vector<Plane> planes;     // 阶段 4：世界上的平面障碍（MJCF 里挂在 worldbody 上的 plane geom）
+  std::vector<Edge> edges;       // 阶段 7：边
+  std::vector<Face> faces;       // 阶段 7：三角形
 
   int nbody() const { return static_cast<int>(bodies.size()); }
   int nvertex() const { return static_cast<int>(vertices.size()); }
+  int nedge() const { return static_cast<int>(edges.size()); }
+  int nface() const { return static_cast<int>(faces.size()); }
+
+  // 两个刚体之间要不要检测接触（阶段 7）：不同的刚体，而且不是父子（MuJoCo 的默认规则；世界除外，
+  // 挂在世界上的刚体和世界上的静态几何要检测）。
+  bool collide(int a, int b) const {
+    if (a == b) return false;
+    if (bodies[a].parent == b && b != 0) return false;
+    if (bodies[b].parent == a && a != 0) return false;
+    return true;
+  }
 };
 
 // 从 mjModel 抄出 Model。遇到不支持的结构时抛 std::runtime_error：
 //   - 一个刚体上有多个关节（书里也要求每个刚体至多一个关节）；
 //   - 自由关节不在顶层（父刚体不是世界）；
 //   - mocap 刚体；
-//   - 阶段 4 起：刚体上的 geom 不是 box、sphere、capsule；plane 不在世界上。
+//   - 阶段 4 起：geom 不是 plane、box、sphere、capsule；plane 不在世界上。
 //     （MJCF 里 contype="0" conaffinity="0" 的 geom 只用来显示，会被跳过。）
+//   阶段 7 起世界上也可以放 box、sphere、capsule，当作静止的障碍物。
 Model from_mujoco(const mjModel* m);
 
 // mjModel 的智能指针：离开作用域时自动调用 mj_deleteModel。

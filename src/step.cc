@@ -36,7 +36,7 @@ StepResult step(const Model& model, const StepParams& P, const VectorXd& q0, con
   // 线搜索里反复用。
   const auto energy_at = [&](const VectorXd& q, double kappa) {
     const Frames F = forward_kinematics(model, q);
-    return inertia_energy(model, F, T, h) + contact_energy(model, ground_contacts(model, F, P.dhat), kappa, P.dhat);
+    return inertia_energy(model, F, T, h) + contact_energy(model, find_contacts(model, F, P.dhat), kappa, P.dhat);
   };
 
   // 从上一步结束的位置出发（它是不相交的）。newton 记录做了几次迭代，循环结束以后还要返回它。
@@ -47,7 +47,7 @@ StepResult step(const Model& model, const StepParams& P, const VectorXd& q0, con
 
     // 第 0 步：当前点的 FK 和活跃接触。第一次出现接触时初始化 kappa（梯度平衡，笔记第 4 节）。
     const Frames F = forward_kinematics(model, q);
-    const std::vector<GroundContact> C = ground_contacts(model, F, P.dhat);
+    const std::vector<Contact> C = find_contacts(model, F, P.dhat);
     if (!C.empty() && state->kappa == 0) state->kappa = initial_kappa(model, F, C, g_e0, P.dhat);
     const double kappa = state->kappa;
     const VectorXd g_e = inertia_gradient(model, F, T, h);
@@ -71,7 +71,7 @@ StepResult step(const Model& model, const StepParams& P, const VectorXd& q0, con
     //   都还有 (1 - c) 倍的距离；阶段 5 的曲线 CCD 把弧线偏离弦的余量（矢高）也算进去。没有平面时都返回 1。
     const double alpha_max =
         P.ccd == CcdMode::kCurved
-            ? curved_ccd_ground(model, q, p, P.dhat, P.c)
+            ? curved_ccd(model, q, p, P.dhat, P.c)
             : chord_ccd_ground(model, F, forward_kinematics(model, integrate(model, q, p, 1.0)), P.c);
 
     // 第 4 步：回溯线搜索。从 CCD 允许的最大步长开始试；能量比现在高就减半，直到能量不升。
@@ -84,7 +84,7 @@ StepResult step(const Model& model, const StepParams& P, const VectorXd& q0, con
     }
 
     // 第 5 步：记录，然后更新。阶段 1 是 x = x + alpha * p。
-    if (trace != nullptr) trace->push_back({e0, size, alpha_max, alpha, min_ground_distance(model, F)});
+    if (trace != nullptr) trace->push_back({e0, size, alpha_max, alpha, min_distance(model, F)});
     q = integrate(model, q, p, alpha);
   }
 
@@ -94,7 +94,7 @@ StepResult step(const Model& model, const StepParams& P, const VectorXd& q0, con
   r.v = differentiate(model, q0, q) / h;
   r.newton = newton;
   r.kappa = state->kappa;
-  r.min_distance = min_ground_distance(model, forward_kinematics(model, q));
+  r.min_distance = min_distance(model, forward_kinematics(model, q));
   return r;
 }
 

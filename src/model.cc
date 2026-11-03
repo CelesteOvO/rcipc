@@ -103,22 +103,43 @@ Model from_mujoco(const mjModel* m) {
         M.planes.push_back({n, n.dot(pos)});
         break;
       }
-      case mjGEOM_BOX:
-        // 盒子：8 个角，半径 0。size 是三个半边长。
-        for (int sx = -1; sx <= 1; sx += 2)
-          for (int sy = -1; sy <= 1; sy += 2)
-            for (int sz = -1; sz <= 1; sz += 2) {
-              M.vertices.push_back({b, pos + quat * Eigen::Vector3d(sx * size[0], sy * size[1], sz * size[2]), 0.0});
-            }
+      case mjGEOM_BOX: {
+        // 盒子：8 个角（半径 0）、12 条边、12 个三角形（每个面两个）。size 是三个半边长。
+        // 角的编号：k = 4 ix + 2 iy + iz，i = 0 是负方向、1 是正方向。
+        const int v0 = M.nvertex();
+        for (int k = 0; k < 8; ++k) {
+          const double sx = (k & 4) ? 1 : -1, sy = (k & 2) ? 1 : -1, sz = (k & 1) ? 1 : -1;
+          M.vertices.push_back({b, pos + quat * Eigen::Vector3d(sx * size[0], sy * size[1], sz * size[2]), 0.0});
+        }
+        // 边：两个角只差一个坐标的符号。
+        for (int k = 0; k < 8; ++k) {
+          for (int bit : {1, 2, 4}) {
+            if (!(k & bit)) M.edges.push_back({v0 + k, v0 + (k | bit), b});
+          }
+        }
+        // 面：6 个面各两个三角形。每个面固定一个坐标，另两个坐标的 4 个角按 (00, 01, 11, 10) 绕一圈。
+        for (int axis = 0; axis < 3; ++axis) {
+          const int fixed = 4 >> axis;  // 固定的那一位：x 是 4，y 是 2，z 是 1
+          const int u = (fixed == 4) ? 2 : 4, w = (fixed == 1) ? 2 : 1;  // 另外两位
+          for (int side = 0; side < 2; ++side) {
+            const int base = side ? fixed : 0;
+            const int c00 = base, c01 = base | w, c11 = base | u | w, c10 = base | u;
+            M.faces.push_back({v0 + c00, v0 + c01, v0 + c11, b});
+            M.faces.push_back({v0 + c00, v0 + c11, v0 + c10, b});
+          }
+        }
         break;
+      }
       case mjGEOM_SPHERE:
-        // 球：球心加半径。
+        // 球：球心加半径；一条退化的边（两端是同一个顶点），让球和球、球和边都走边–边的最近点。
         M.vertices.push_back({b, pos, size[0]});
+        M.edges.push_back({M.nvertex() - 1, M.nvertex() - 1, b});
         break;
       case mjGEOM_CAPSULE:
-        // 胶囊：轴是 geom 坐标系的 z 轴，size[1] 是半长，size[0] 是半径。两个端点（球心）加半径。
+        // 胶囊：轴是 geom 坐标系的 z 轴，size[1] 是半长，size[0] 是半径。两个端点（球心）加半径，一条边。
         M.vertices.push_back({b, pos + quat * Eigen::Vector3d(0, 0, size[1]), size[0]});
         M.vertices.push_back({b, pos - quat * Eigen::Vector3d(0, 0, size[1]), size[0]});
+        M.edges.push_back({M.nvertex() - 2, M.nvertex() - 1, b});
         break;
       default:
         throw std::runtime_error("geom " + name + ": only plane, box, sphere and capsule are supported");

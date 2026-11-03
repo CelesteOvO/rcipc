@@ -1,7 +1,7 @@
 // 阶段 4 的演示程序：地面接触。
 //
 // 用法（参数都可以省略，写成 名字=值）：
-//   contact_demo [drop|flail] [h=..] [T=..] [dhat=..] [w=..] [kappa=..] [out=..]
+//   contact_demo [drop|flail|stack|ledge] [h=..] [T=..] [dhat=..] [w=..] [kappa=..] [trace=0|1] [out=..]
 //
 // drop（默认）：models/drop.xml，盒子从 0.5 m 静止落到地面，模拟 T 秒（默认 1.5）。
 //               每步沿真实轨迹采样 64 点检查最小距离；打印最小间隙、静止间隙、kappa、Newton 次数、力平衡。
@@ -10,6 +10,8 @@
 // flail：       models/flail.xml，杆以 w rad/s（默认 40）从地面上方 3 mm 处甩过正下方，一步，
 //               直弦 CCD（阶段 4）和曲线 CCD（阶段 5）各走一遍。打印终点和真实弧线最低点的离地距离：
 //               直弦看不见弧线穿过地面（书 §9.1 的反例），弦加矢高把这一步截在地面之前。
+// stack：       阶段 7，models/stack.xml，转了 45 度的盒子落到另一个盒子上，模拟 T 秒（默认 1.5）。
+// ledge：       阶段 7，models/ledge.xml，盒子落在世界上的静态台阶的边缘，翻下去掉到地面。
 //
 // 输出用英文，因为 Windows 控制台默认不是 UTF-8。
 #include <algorithm>
@@ -34,6 +36,7 @@ using Eigen::VectorXd;
 struct Args {
   std::string mode = "drop";
   double h = NAN, T = NAN, dhat = 1e-3, w = 40.0, kappa = 0;  // kappa = 0：由梯度平衡初始化
+  int trace = 0;
   std::string out;
 };
 
@@ -52,6 +55,7 @@ Args parse(int argc, char** argv) {
     else if (k == "dhat") a.dhat = std::atof(v.c_str());
     else if (k == "w") a.w = std::atof(v.c_str());
     else if (k == "kappa") a.kappa = std::atof(v.c_str());
+    else if (k == "trace") a.trace = std::atoi(v.c_str());
     else if (k == "out") a.out = v;
     else std::fprintf(stderr, "unknown option %s\n", k.c_str());
   }
@@ -95,8 +99,8 @@ int drop(const Args& a) {
   // 静止时的力平衡：4 个角的障碍力之和应当等于重力。
   const Frames F = forward_kinematics(model, q);
   double force = 0, gap = 0;
-  const std::vector<GroundContact> C = ground_contacts(model, F, P.dhat);
-  for (const GroundContact& c : C) {
+  const std::vector<Contact> C = find_contacts(model, F, P.dhat);
+  for (const Contact& c : C) {
     force += S.kappa * std::abs(barrier(c.d * c.d, P.dhat * P.dhat).db) * 2 * c.d;
     gap = c.d;
   }
@@ -112,6 +116,60 @@ int drop(const Args& a) {
   return 0;
 }
 
+// 阶段 7 的场景：stack（两个盒子堆叠）、ledge（盒子落在台阶边缘）。每步沿真实轨迹采样检查最小距离；
+// 打印最小距离、Newton 次数；Newton 跑满上限的步把每次迭代打出来（trace=1 时所有步都打）。
+int scene(const Args& a, const char* file) {
+  const Model model = load(file);
+  StepParams P;
+  P.h = std::isnan(a.h) ? model.timestep : a.h;
+  P.dhat = a.dhat;
+  const double T = std::isnan(a.T) ? 1.5 : a.T;
+  SolverState S;
+  S.kappa = a.kappa;
+
+  VectorXd q = model.qpos0, v = VectorXd::Zero(model.nv);
+  double t = 0, dmin = 1e9, t_dmin = 0;
+  int nmax = 0, capped = 0;
+  long nsum = 0, nstep = 0;
+  FILE* f = a.out.empty() ? nullptr : std::fopen(a.out.c_str(), "w");
+  if (f) std::fprintf(f, "t,min_distance,newton,kappa\n");
+  while (t < T - 1e-12) {
+    std::vector<NewtonIterate> trace;
+    const StepResult r = step(model, P, q, v, &S, &trace);
+    const double d = trajectory_min_distance(model, q, differentiate(model, q, r.q), 1.0, 16);
+    if (r.newton >= P.max_newton || a.trace) {
+      std::printf("step %ld (t = %.3f): newton %d, min distance %.3e, %zu contacts\n", nstep, t, r.newton,
+                  r.min_distance, find_contacts(model, forward_kinematics(model, r.q), P.dhat).size());
+      for (size_t k = 0; k < trace.size() && k < 12; ++k) {
+        std::printf("    it %2zu: gap %.3e |p|/h %.3e alpha_max %.4f alpha %.4f E %.8e\n", k + 1,
+                    trace[k].min_distance, trace[k].step, trace[k].alpha_max, trace[k].alpha, trace[k].energy);
+      }
+      if (r.newton >= P.max_newton) ++capped;
+    }
+    q = r.q;
+    v = r.v;
+    t += P.h;
+    if (d < dmin) {
+      dmin = d;
+      t_dmin = t;
+    }
+    nmax = std::max(nmax, r.newton);
+    nsum += r.newton;
+    ++nstep;
+    if (f) std::fprintf(f, "%.6f,%.17g,%d,%.6g\n", t, r.min_distance, r.newton, r.kappa);
+  }
+  if (f) std::fclose(f);
+  std::printf("%s, h %g s, T %g s, dhat %g m, kappa %.4g\n", file, P.h, T, P.dhat, S.kappa);
+  std::printf("min distance along all trajectories: %.4f mm at t = %.3f s%s\n", dmin * 1e3, t_dmin,
+              dmin > 0 ? "" : "  <-- PENETRATION");
+  std::printf("Newton iterations per step: max %d, mean %.2f, %d steps hit the cap\n", nmax, double(nsum) / nstep,
+              capped);
+  std::printf("final q:");
+  for (int i = 0; i < model.nq; ++i) std::printf(" %.4f", q[i]);
+  std::printf("\n");
+  return 0;
+}
+
 int flail(const Args& a) {
   const Model model = load("flail.xml");
   StepParams P;
@@ -123,7 +181,7 @@ int flail(const Args& a) {
   VectorXd q(1), v(1);
   q[0] = 1.5707963267948966 - phi - 0.05;
   v[0] = a.w;
-  const double d0 = min_ground_distance(model, forward_kinematics(model, q));
+  const double d0 = min_distance(model, forward_kinematics(model, q));
   std::printf("flail, h %g s, w %g rad/s, dhat %g m: tip starts %+.3f mm above the floor\n", P.h, a.w, P.dhat,
               d0 * 1e3);
   std::printf("the arc dips below the floor for |angle - pi/2| < %.4f rad (lowest point %+.3f mm)\n", phi,
@@ -151,7 +209,9 @@ int main(int argc, char** argv) {
   try {
     if (a.mode == "drop") return drop(a);
     if (a.mode == "flail") return flail(a);
-    std::fprintf(stderr, "unknown mode %s (drop or flail)\n", a.mode.c_str());
+    if (a.mode == "stack") return scene(a, "stack.xml");
+    if (a.mode == "ledge") return scene(a, "ledge.xml");
+    std::fprintf(stderr, "unknown mode %s (drop, flail, stack or ledge)\n", a.mode.c_str());
     return 2;
   } catch (const std::exception& e) {
     std::fprintf(stderr, "%s\n", e.what());

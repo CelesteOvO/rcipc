@@ -1,0 +1,19 @@
+<!--
+  阶段 7 的台阶：世界上一个静止的盒子（0.6 x 0.6 x 0.2 m，顶面在 z = 0.2），
+  一个 0.2 m 的立方体从它的边缘上方落下，质心在边缘外 3 cm：落到台阶上以后会绕台阶的边翻下去，掉到地面上。
+  世界上的 box 不动，只当障碍物（它的顶点、边、面都参与接触，Jacobian 为 0）。
+  检验：整个过程里盒子和台阶、盒子和地面都不穿透。
+-->
+<mujoco model="ledge">
+  <compiler angle="radian"/>
+  <option gravity="0 0 -9.81" timestep="0.002"/>
+
+  <worldbody>
+    <geom name="floor" type="plane" size="2 2 0.1"/>
+    <geom name="step" type="box" pos="0 0 0.1" size="0.3 0.3 0.1"/>
+    <body name="box" pos="0.33 0 0.45">
+      <freejoint/>
+      <geom type="box" size="0.1 0.1 0.1" mass="1"/>
+    </body>
+  </worldbody>
+</mujoco>

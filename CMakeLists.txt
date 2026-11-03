@@ -33,6 +33,7 @@ add_library(rcipc
   src/contact.cc     # 阶段 4：地面接触：距离、接触行、能量、梯度、Hessian、kappa（阶段 6 加曲率上界）
   src/ccd.cc         # 阶段 4：直弦 CCD；阶段 5：弦加矢高
   src/chain.cc       # 阶段 5：链上的关节和静态力臂
+  src/distance.cc    # 阶段 7：点–三角形、线段–线段的最近点
 )
 target_include_directories(rcipc PUBLIC include)
 target_link_libraries(rcipc PUBLIC Eigen3::Eigen mujoco::mujoco)
