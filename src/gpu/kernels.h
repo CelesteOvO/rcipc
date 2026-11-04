@@ -57,10 +57,10 @@ void launch_detect_async(const DModel& m, const DFrames& F, const double* boxes,
                          double dmax, DNarrow N, DCands C, DContact* out, int cap, int* d_cnt);
 // 窄相的剔除（narrow.cu）：候选刚体对里，在刚体坐标系里剔掉“距离一定不小于阈值”的图元对，剩下的写进 C。
 // 检测时 A 为空，阈值是 dmax；CCD 时阈值是 max(2 xi, xi + 4 Dmax / c)（A 是加速度界，D 是每个刚体的最大位移）。
-// 都再加上两个图元的半径。F 是剔除用的位置的 FK（CCD 时是段起点）。
+// 都再加上两个图元的半径。F 是剔除用的位置的 FK（CCD 时是段起点）。window 见 launch_ccd_cull。
 void launch_narrow(const DModel& m, const DFrames& F, const double* boxes, const int* pairs, const int* npairs_d,
                    int pair_cap, double dmax, const double* A, const double* D, DScalar len, double c, DNarrow N,
-                   DCands C);
+                   DCands C, bool window = false);
 // out[i] = (float) x[i]，i < n（CCD 的单精度扫掠盒用）。
 void launch_to_float(const double* x, int n, float* out);
 // 接触的各项（contact_energy、contact_gradient、contact_rows、contact_curvature）：
@@ -87,11 +87,20 @@ void launch_accel_bounds(const DModel& m, const double* q, const DFrames& F, con
 //   段内的截断位置 atomic_min 到 *tmin（调用者先设成 1），需要的更短段长 atomic_min 到 *ds_need（先设成 len）。
 void launch_ground_ccd(const DModel& m, const double* Xa, const double* Xb, const double* A, DScalar len, double c,
                        double* tmin, double* ds_need);
-// Fa 是段起点的 FK，Xb 是段终点的顶点，D 是 launch_body_disp 算的每个刚体的最大位移，npairs_d 是显存里的刚体对个数
-// （launch_body_pairs）。seen[0..2] 写候选、刚体对、工作项的总数（double），超过容量时调用者扩容后重做这一段。
-void launch_pair_ccd(const DModel& m, const DFrames& Fa, const double* Xb, const double* boxes, const double* D,
-                     const double* A, DScalar len, double c, const int* pairs, const int* npairs_d, int pair_cap,
-                     DNarrow N, DCands C, double* tmin, double* ds_need, double* seen);
+// 刚体之间的 CCD 分两步。
+// 1. 剔除（launch_narrow）：Fa 是段起点的 FK，boxes 是这一段每个刚体的扫掠盒，D 是 launch_body_disp 算的每个刚体的
+//    最大位移，npairs_d 是显存里的刚体对个数（launch_body_pairs）。window 时 [段起点, 段起点 + len] 当作窗口剔，
+//    候选盖住窗口里的任何一段（这时刚体对的余量也要放大：段长按 kWindowPairLen len 传给 launch_body_pairs，笔记第 13 节）。
+void launch_ccd_cull(const DModel& m, const DFrames& Fa, const double* boxes, const double* D, const double* A,
+                     DScalar len, double c, const int* pairs, const int* npairs_d, int pair_cap, DNarrow N, DCands C,
+                     bool window);
+// 窗口的刚体对：余量 2 xi 要求段长放大 sqrt(2) 倍，再多留一点盖住舍入。
+constexpr double kWindowPairLen = 1.42;
+// 2. 复核和 ACCD：C 里的候选（上一次剔除留下的，可以是窗口的）在这一段 [Xa, Xb] 上做，boxes 是这一段的扫掠盒。
+//    seen[0..2] 写候选、刚体对、工作项的总数（double），超过容量时调用者扩容后重做这一段。
+void launch_ccd_exact(const DModel& m, const double* Xa, const double* Xb, const double* boxes, const double* A,
+                      DScalar len, double c, const int* npairs_d, int pair_cap, DNarrow N, DCands C, double* tmin,
+                      double* ds_need, double* seen);
 // 一段 CCD 的初值：*tmin = 1，*ds_need = len，seen[0..1] = 0（一个小内核，不用同步的拷贝）。
 void launch_ccd_init(double* tmin, double* ds_need, double* seen, DScalar len);
 // 每个刚体的顶点从 Xa 到 Xb 的最大位移，写到 D（nbody 个，先清零）。

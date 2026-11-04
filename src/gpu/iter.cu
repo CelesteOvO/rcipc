@@ -22,7 +22,7 @@ __global__ void k_it_begin(DIter* it) {
   // 组装之前：行数 = 接触 + 2 x 摩擦，计数清零。
   it->nrow = it->nc + 2 * it->nf;
   it->status = kIterRunning;
-  it->segs = it->trials = 0;
+  it->segs = it->windows = it->trials = 0;
   it->adv = 0;
   for (int k = 0; k < 4; ++k) it->need[k] = 0;
   it->t_ccd = -1;
@@ -53,15 +53,26 @@ __global__ void k_ccd_setup(DIter* it, const double* A, int nbody, double dhat, 
   it->ds = A_max > 0 ? fmin(1.0, sqrt(8 * dhat / A_max)) : 1.0;
   it->s0 = 0;
   it->t_ccd = -1;
+  it->w1 = -1;
   scal[3] = 1.0;
   set_cont(it, h, it->status == kIterRunning ? 1 : 0);
 }
 
-__global__ void k_ccd_seg_begin(DIter* it) {
+__global__ void k_ccd_seg_begin(DIter* it, int reuse, double pair_len, cudaGraphConditionalHandle hf) {
   // 一段 [s0, s1]：s1 = min(1, s0 + ds)。integrate 读 it->s。
-  const double s1 = fmin(1.0, it->s0 + it->ds);
-  it->len = s1 - it->s0;
+  // 落在窗口 [w0, w1] 里的段直接用窗口的候选；不在的段自己当新的窗口，重新求候选（条件节点 hf 打开）。
+  // 和 ccd() 里 fresh 那几行一样。
+  const double s0 = it->s0, s1 = fmin(1.0, s0 + it->ds);
+  it->len = s1 - s0;
   it->s = s1;
+  const int fresh = !reuse || !(s0 >= it->w0 && s1 <= it->w1);
+  if (fresh) {
+    ++it->windows;
+    it->w0 = s0;
+    it->w1 = s1;
+    it->plen = pair_len * it->len;
+  }
+  if (hf) cudaGraphSetConditional(hf, fresh);
 }
 
 __global__ void k_ccd_seg_end(DIter* it, const double* scal, int pair_cap, int work_cap, int cand_cap,
@@ -181,7 +192,9 @@ void launch_it_converge(DIter* it, const double* scal, double h, double tol) {
 void launch_ccd_setup(DIter* it, const double* A, int nbody, double dhat, double* scal, cudaGraphConditionalHandle h) {
   k_ccd_setup<<<1, 256>>>(it, A, nbody, dhat, scal, h);
 }
-void launch_ccd_seg_begin(DIter* it) { k_ccd_seg_begin<<<1, 1>>>(it); }
+void launch_ccd_seg_begin(DIter* it, bool reuse, double pair_len, cudaGraphConditionalHandle hf) {
+  k_ccd_seg_begin<<<1, 1>>>(it, reuse ? 1 : 0, pair_len, hf);
+}
 void launch_ccd_seg_end(DIter* it, const double* scal, int pair_cap, int work_cap, int cand_cap,
                         cudaGraphConditionalHandle h) {
   k_ccd_seg_end<<<1, 1>>>(it, scal, pair_cap, work_cap, cand_cap, h);

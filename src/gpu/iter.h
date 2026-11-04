@@ -14,8 +14,9 @@ void launch_it_begin(DIter* it);
 void launch_it_converge(DIter* it, const double* scal, double h, double tol);
 // CCD 的开头：第一段的长度（A 是每个刚体的加速度界），scal[3] = 1；没收敛时让 CCD 的循环开始。
 void launch_ccd_setup(DIter* it, const double* A, int nbody, double dhat, double* scal, cudaGraphConditionalHandle h);
-// 一段的开始：it->s = 段终点，it->len = 段长。
-void launch_ccd_seg_begin(DIter* it);
+// 一段的开始：it->s = 段终点，it->len = 段长。reuse 时落在候选窗口里的段不重新求候选：hf（条件节点 IF）写 0；
+// 否则这一段是新的窗口，hf 写 1，it->plen = pair_len x 段长（求刚体对用，见 launch_ccd_cull）。
+void launch_ccd_seg_begin(DIter* it, bool reuse, double pair_len, cudaGraphConditionalHandle hf);
 // 一段的结束：缩短重做、截断、或者前进到下一段；放不下时标记溢出。
 void launch_ccd_seg_end(DIter* it, const double* scal, int pair_cap, int work_cap, int cand_cap,
                         cudaGraphConditionalHandle h);

@@ -38,7 +38,7 @@ using Eigen::VectorXd;
 struct Args {
   std::string model = "ragdoll.xml", out;
   double T = 2.0, h = NAN, dhat = 1e-3, mu = 0.2, eps_v = 1e-3, tol = 1e-6;
-  int semi = 0, ldlt = 0, check = 0, debug = 0, adapt = 1, gpu = 0, timing = 1, graph = 1, tight = 1;
+  int semi = 0, ldlt = 0, check = 0, debug = 0, adapt = 1, gpu = 0, timing = 1, graph = 1, tight = 1, reuse = 1;
   double pcg_tol = NAN;
 };
 
@@ -64,6 +64,7 @@ Args parse(int argc, char** argv) {
     else if (k == "timing") a.timing = std::atoi(v.c_str());
     else if (k == "graph") a.graph = std::atoi(v.c_str());
     else if (k == "tight") a.tight = std::atoi(v.c_str());
+    else if (k == "reuse") a.reuse = std::atoi(v.c_str());
     else if (k == "pcg_tol") a.pcg_tol = std::atof(v.c_str());
     else if (k == "semi") a.semi = std::atoi(v.c_str());
     else if (k == "ldlt") a.ldlt = std::atoi(v.c_str());
@@ -103,6 +104,7 @@ int main(int argc, char** argv) {
       G = std::make_unique<gpu::Stepper>(model);
       G->set_timing(a.timing != 0);
       G->set_graphs(a.graph != 0);
+      G->set_ccd_reuse(a.reuse != 0);
     }
 #else
     if (a.gpu) throw std::runtime_error("gpu=1 but this build has no CUDA");
@@ -188,9 +190,9 @@ int main(int argc, char** argv) {
                   T.prepare / n, T.update / n, T.assemble / n, T.solve / n, T.converge / n, T.ccd / n, T.line_search / n,
                   T.graph / n, T.total / n, T.energy_evals / n);
       const double nn = std::max(1.0, static_cast<double>(T.newton));
-      std::printf("GPU per Newton iteration: %.0f contacts, %.0f rows, %.1f PCG iterations, %.2f CCD segments; "
+      std::printf("GPU per Newton iteration: %.0f contacts, %.0f rows, %.1f PCG iterations, %.2f CCD segments (%.2f culls); "
                   "%.0f body pairs per query\n",
-                  T.contacts / nn, T.rows / nn, T.pcg / nn, T.ccd_segments / nn,
+                  T.contacts / nn, T.rows / nn, T.pcg / nn, T.ccd_segments / nn, T.ccd_windows / nn,
                   static_cast<double>(T.pair_sum) / std::max(1L, T.pair_calls));
     }
 #endif

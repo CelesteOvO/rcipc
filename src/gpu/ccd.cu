@@ -5,6 +5,7 @@
 //   - 刚体之间：先用扫掠盒找候选刚体对（launch_body_pairs，余量是两侧的矢高），
 //     再剔除（narrow.cu，在刚体坐标系里），剩下的候选图元对一个线程一对：先按 CPU 版的盒子规则用双精度复核，
 //     再做 ACCD（k_ccd_exact）。
+//     前两步可以按窗口做（launch_ccd_cull 的 window）：一批候选给窗口里的好几段用，每段只重做复核和 ACCD（笔记第 13 节）。
 // 截断位置和需要的更短段长都用原子 min 汇总。分段、缩短重做的循环在主机上（stepper.cc），和 CPU 版一样。
 #include <algorithm>
 #include <cfloat>
@@ -336,12 +337,17 @@ void launch_ccd_init(double* tmin, double* ds_need, double* seen, DScalar len) {
   k_ccd_init<<<1, 1>>>(tmin, ds_need, seen, len);
 }
 
-void launch_pair_ccd(const DModel& m, const DFrames& Fa, const double* Xb, const double* boxes, const double* D,
-                     const double* A, DScalar len, double c, const int* pairs, const int* npairs_d, int pair_cap,
-                     DNarrow N, DCands C, double* tmin, double* ds_need, double* seen) {
-  launch_narrow(m, Fa, boxes, pairs, npairs_d, pair_cap, 0.0, A, D, len, c, N, C);
+void launch_ccd_cull(const DModel& m, const DFrames& Fa, const double* boxes, const double* D, const double* A,
+                     DScalar len, double c, const int* pairs, const int* npairs_d, int pair_cap, DNarrow N, DCands C,
+                     bool window) {
+  launch_narrow(m, Fa, boxes, pairs, npairs_d, pair_cap, 0.0, A, D, len, c, N, C, window);
+}
+
+void launch_ccd_exact(const DModel& m, const double* Xa, const double* Xb, const double* boxes, const double* A,
+                      DScalar len, double c, const int* npairs_d, int pair_cap, DNarrow N, DCands C, double* tmin,
+                      double* ds_need, double* seen) {
   if (pair_cap > 0)
-    k_ccd_exact<<<std::min(blocks(C.cap), 1024), kThreads>>>(m, Fa.X, Xb, boxes, A, len, c, C, npairs_d, N.work_n, tmin,
+    k_ccd_exact<<<std::min(blocks(C.cap), 1024), kThreads>>>(m, Xa, Xb, boxes, A, len, c, C, npairs_d, N.work_n, tmin,
                                                            ds_need, seen);
 }
 

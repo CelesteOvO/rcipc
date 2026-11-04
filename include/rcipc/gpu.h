@@ -47,6 +47,7 @@ class Stepper {
     long contacts = 0, rows = 0;         // 每次组装时的接触数、行数（接触 + 2 x 摩擦）之和
     long pair_calls = 0, pair_sum = 0;   // 候选刚体对：求了几次、个数之和（检测和 CCD 都算）
     long ccd_segments = 0;               // CCD 一共检查了几段（缩短重做的也算）
+    long ccd_windows = 0;                // 其中重新求候选（刚体对和剔除）的段数，见 set_ccd_reuse
   };
   const Timers& timers() const;
   void reset_timers();
@@ -62,6 +63,9 @@ class Stepper {
   void set_graphs(bool on);
   // 上一步是不是用 CUDA graph 跑的（set_graphs 打开、设备支持、录图成功时）。
   bool used_graphs() const;
+  // CCD 的候选按窗口求（默认）：求候选的那一段当作窗口，余量放大到盖住窗口里的任何一段；之后落在窗口里的段
+  // （缩短重做的、缩短以后接着走的）只做复核和 ACCD。关掉时每一段都重新求。两者结果一样（笔记 notes/11_gpu.md 第 13 节）。
+  void set_ccd_reuse(bool on);
   // 测试用：把刚体对、接触、候选、工作项的容量改小，让“放不下、扩容、重来”的路径也走到。
   void set_capacities(int pairs, int contacts, int candidates, int work);
 

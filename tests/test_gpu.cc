@@ -250,12 +250,14 @@ TEST(Pcg, MatchesDenseSolve) {
 
 // ---------- CCD ----------
 
+// 两种求候选的方式（每段都求、按窗口求，set_ccd_reuse）都要和 CPU 版一样；按窗口求时确实有段用了窗口的候选。
 TEST(Ccd, MatchesCpu) {
   REQUIRE_GPU();
   struct Case {
     std::string file;
     double dhat;
   };
+  long segs = 0, windows = 0;  // 按窗口求时：总段数、其中重新求候选的段数
   for (const Case& cs : {Case{"flail.xml", 1e-3}, Case{"stack.xml", 1e-3}, Case{"ragdoll.xml", 1e-3},
                          Case{kMesh1, 0.01}}) {
     const Model M = load(cs.file);
@@ -271,11 +273,22 @@ TEST(Ccd, MatchesCpu) {
       for (int i = 0; i < M.nv; ++i) p[i] = u(rng);
       p *= 0.5;
       if (cs.file == "stack.xml") p[8] -= 1.0;  // 往下砸
-      const double a = G.ccd(P, q, p);
       const double b = std::min(curved_ccd(M, q, p, P.dhat, P.c), limit_ccd(M, q, p, P.c));
-      EXPECT_NEAR(a, b, 1e-12 * std::max(1.0, b)) << cs.file << " direction " << k;
+      for (bool reuse : {false, true}) {
+        G.set_ccd_reuse(reuse);
+        G.reset_timers();
+        const double a = G.ccd(P, q, p);
+        EXPECT_NEAR(a, b, 1e-12 * std::max(1.0, b)) << cs.file << " direction " << k << " reuse " << reuse;
+        if (!reuse) {
+          EXPECT_EQ(G.timers().ccd_windows, G.timers().ccd_segments);
+          continue;
+        }
+        segs += G.timers().ccd_segments;
+        windows += G.timers().ccd_windows;
+      }
     }
   }
+  EXPECT_LT(windows, segs);
 }
 
 // ---------- 整步 ----------

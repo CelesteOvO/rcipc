@@ -15,6 +15,8 @@
 //      再算单精度距离，减去余量还在阈值以内的写成候选。
 // 阈值：检测是 dmax；CCD 是 T = max(2 xi, xi + 4 Dmax / c)（再放大 1%）：段起点的距离不小于 T 的对，
 // ACCD 第一步就返回 1，什么也不改（笔记第 4 节）。两者都再加上两个图元的半径。
+// CCD 还可以按窗口剔（window）：剔一次，窗口里的每一段都用这批候选，阈值和盒子的余量放大到盖住窗口里的任何一段
+// （笔记第 13 节，推导在 k_pair_cull 里）。
 #include <algorithm>
 #include <cfloat>
 
@@ -79,18 +81,31 @@ __device__ inline int query_xf(int kind) { return kind == 1 ? 1 : 0; }
 
 __global__ void k_pair_cull(DModel m, DFrames F, const double* boxes, const int* pairs, const int* npairs_d,
                             int pair_cap, double dmax, const double* A, const double* D, DScalar lenp, double c,
-                            DNarrow N) {
+                            int window, DNarrow N) {
   const double len = lenp.get();
   const int lane = threadIdx.x & 31;
   const unsigned below = (1u << lane) - 1;
   const int pi = blockIdx.x * kPairWarps + (threadIdx.x >> 5);
   if (pi >= min(*npairs_d, pair_cap)) return;  // 刚体对的个数在显存里，按容量发线程块；整个 warp 一起退出
   const int body[2] = {pairs[2 * pi], pairs[2 * pi + 1]};
-  // 阈值和余量（整个 warp 一样）。
-  double T = dmax;
+  // 阈值 T 和盒子规则的余量 xm（整个 warp 一样）。
+  double T = dmax, xm = 0;
   if (A) {
-    const double xi = (A[body[0]] + A[body[1]]) * len * len / 8;
-    T = 1.01 * fmax(2 * xi, xi + 4 * fmax(D[body[0]], D[body[1]]) / c);
+    const double xa = A[body[0]] * len * len / 8, xb = A[body[1]] * len * len / 8, xi = xa + xb;
+    if (!window) {
+      T = 1.01 * fmax(2 * xi, xi + 4 * fmax(D[body[0]], D[body[1]]) / c);
+      xm = xi;
+    } else {
+      // 窗口 [w0, w1]（len 是窗口长 L，D 是窗口两端之间的位移，F 是 w0 处的 FK）里的任何一段 [s0, s1]：
+      //   顶点离窗口的弦不超过 xi_b = A_b L^2 / 8，所以它在窗口里离 w0 处的位置不超过 M_b = D_b + xi_b，
+      //   在一段里的位移不超过 D_b + 2 xi_b；段的矢高不超过 xi。
+      // 段的阈值 max(2 xi_s, xi_s + 4 D_s / c) 不超过下面的第一项；段起点的距离和 w0 处的距离差不超过 M_a + M_b。
+      // 所以 w0 处距离不小于 T 的对，在窗口里任何一段的起点上都不小于那一段的阈值，ACCD 第一步就返回 1。
+      // 盒子：一段的扫掠盒在窗口的扫掠盒放大 xi_b 以内，段的余量 xi_s <= xi，合起来余量 2 xi。
+      const double Ds = fmax(D[body[0]] + 2 * xa, D[body[1]] + 2 * xb);
+      T = 1.01 * (fmax(2 * xi, xi + 4 * Ds / c) + (D[body[0]] + xa) + (D[body[1]] + xb));
+      xm = 2 * xi;
+    }
   }
   double R = 0;
   for (int s = 0; s < 2; ++s)
@@ -99,7 +114,7 @@ __global__ void k_pair_cull(DModel m, DFrames F, const double* boxes, const int*
   if (lane == 0) {
     N.pT[pi] = T;
     N.ppad[pi] = pad;
-    if (A) N.pxm[pi] = __fadd_ru(__double2float_ru((A[body[0]] + A[body[1]]) * len * len / 8), pad);
+    if (A) N.pxm[pi] = __fadd_ru(__double2float_ru(xm), pad);
   }
   if (lane < 2) xf_store(F, body[lane], body[1 - lane], N.pxf + 24 * static_cast<size_t>(pi) + 12 * lane);
   __syncwarp();
@@ -207,12 +222,12 @@ __global__ void k_work_cull(DModel m, const double* boxes, const int* pairs, DNa
 
 void launch_narrow(const DModel& m, const DFrames& F, const double* boxes, const int* pairs, const int* npairs_d,
                    int pair_cap, double dmax, const double* A, const double* D, DScalar len, double c, DNarrow N,
-                   DCands C) {
+                   DCands C, bool window) {
   cudaMemsetAsync(N.work_n, 0, sizeof(int));
   cudaMemsetAsync(C.count, 0, sizeof(int));
   if (pair_cap <= 0) return;
   k_pair_cull<<<(pair_cap + kPairWarps - 1) / kPairWarps, 32 * kPairWarps>>>(m, F, boxes, pairs, npairs_d, pair_cap,
-                                                                            dmax, A, D, len, c, N);
+                                                                            dmax, A, D, len, c, window ? 1 : 0, N);
   k_work_cull<<<std::min((kLanes * N.work_cap + kThreads - 1) / kThreads, 4096), kThreads>>>(m, boxes, pairs, N, C);
 }
 

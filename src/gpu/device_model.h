@@ -202,6 +202,7 @@ struct DIter {
   int status = 0;   // IterStatus
   int pcg = 0;      // PCG 的迭代次数
   int segs = 0;     // CCD 的段数
+  int windows = 0;  // 其中重新求候选（刚体对和剔除）的段数
   int trials = 0;   // 线搜索试探了几次
   int adv = 0;      // CCD：这一段通过了，下一段从它的终点开始（Fb 拷到 Fa）
   int cont = 0;     // 循环要不要继续（逐个发射时主机读它；录图时同时写进条件节点）
@@ -209,6 +210,7 @@ struct DIter {
   double e0 = 0, size = 0;     // 组装时的能量、收敛量（整步里顶点的最大位移 / h）
   double s = 0;                // launch_integrate 的参数（段终点，或试探的 alpha）
   double s0 = 0, ds = 0, len = 0, t_ccd = -1;  // CCD：段起点、下一段的长度、这一段的长度、截断位置
+  double w0 = 0, w1 = -1, plen = 0;  // CCD：候选的窗口 [w0, w1]（w1 < 0 时没有）、求刚体对用的段长
   double alpha_max = 0, alpha = 0;
   double e_trial = 0, dmin = 0;  // 最后一次试探的能量、接触里最小的距离
 };

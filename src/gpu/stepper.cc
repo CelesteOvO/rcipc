@@ -260,6 +260,7 @@ struct Stepper::Impl {
   // 协作内核版的 PCG（pcg_coop.cu）：acc 是每次迭代的点积，pcg_out 是迭代次数和是否收敛。
   bool coop = false;
   bool timing = true;  // 分段计时（每段结束同步一次）
+  bool reuse = true;   // CCD 的段落在候选的窗口里时不重新求候选（set_ccd_reuse，笔记第 13 节）
   double last_eval_dmin = 0;  // energy_at 最后一次检测到的接触里最小的距离
   DBuf<double> pcg_acc;
 
@@ -276,11 +277,11 @@ struct Stepper::Impl {
     long gen = -1;
     double h = 0, dhat = 0, mu = 0, eps_v = 0, curv = 0, limit_k = 0, limit_dhat = 0, c = 0, tol = 0, pcg_tol = 0;
     int pcg_max = 0;
-    bool tight = true;
+    bool tight = true, reuse = true;
     bool operator==(const GraphKey& o) const {
       return gen == o.gen && h == o.h && dhat == o.dhat && mu == o.mu && eps_v == o.eps_v && curv == o.curv &&
              limit_k == o.limit_k && limit_dhat == o.limit_dhat && c == o.c && tol == o.tol && pcg_tol == o.pcg_tol &&
-             pcg_max == o.pcg_max && tight == o.tight;
+             pcg_max == o.pcg_max && tight == o.tight && reuse == o.reuse;
     }
   };
   GraphKey graph_key;
@@ -761,6 +762,9 @@ struct Stepper::Impl {
     double ds = A_max > 0 ? std::min(1.0, std::sqrt(8 * Pm.dhat / A_max)) : 1.0;
     double s0 = 0, result = -1, limit_t = 1.0;
     const FrameBufs* Fs = &F;  // 段起点的 FK
+    // 候选的窗口 [w0, w1]（笔记第 13 节）：最近一次求候选的那一段。落在窗口里的段（缩短重做的、缩短以后接着往前走的）
+    // 不再求刚体对、不再剔除，直接拿窗口的候选做复核和 ACCD。w1 < 0 表示还没有窗口。
+    double w0 = 0, w1 = -1;
     // 限位的 CCD 和分段无关，先发出去；结果在 scal[3]，跟着每一段的结果一起读回。
     set_scalar(3, 1.0);
     launch_limit_ccd(m, qd, pd, Pm.c, scal.get() + 3);
@@ -768,6 +772,12 @@ struct Stepper::Impl {
       ++timers.ccd_segments;
       const double s1 = std::min(1.0, s0 + ds);
       const double len = s1 - s0;
+      const bool fresh = !reuse || !(s0 >= w0 && s1 <= w1);
+      if (fresh) {
+        ++timers.ccd_windows;
+        w0 = s0;
+        w1 = s1;
+      }
       launch_integrate(m, qd, pd, s1, qtrial.get());
       launch_fk(m, qtrial.get(), Fb.view());
       // scal[1] 截断位置，scal[2] 需要的段长，scal[9..11] 候选、刚体对、工作项的个数。这一段只在最后读回一次。
@@ -775,30 +785,31 @@ struct Stepper::Impl {
       launch_ccd_init(scal.get() + 1, scal.get() + 2, scal.get() + 9, len);
       launch_ground_ccd(m, Xa, Fb.X.get(), A.get(), len, Pm.c, scal.get() + 1, scal.get() + 2);
       if (pairs_on) {
-        launch_swept_boxes(m, Xa, Fb.X.get(), boxes.get());
-        launch_body_pairs(m, boxes.get(), 0.0, A.get(), len, pairs.get(), pair_cap, cnt.get());
-        launch_body_disp(m, Xa, Fb.X.get(), bdisp.get());
-        launch_to_float(Xa, 3 * m.nvert, xfa.get());
-        launch_to_float(Fb.X.get(), 3 * m.nvert, xfb.get());
-        DNarrow N = narrow();
-        N.xa = xfa.get();
-        N.xb = xfb.get();
-        launch_pair_ccd(m, Fs->view(), Fb.X.get(), boxes.get(), bdisp.get(), A.get(), len, Pm.c, pairs.get(), cnt.get(),
-                        pair_cap, N, cands(), scal.get() + 1, scal.get() + 2, scal.get() + 9);
+        launch_swept_boxes(m, Xa, Fb.X.get(), boxes.get());  // 复核用这一段的盒子；新窗口的剔除也用它
+        if (fresh) {
+          launch_body_pairs(m, boxes.get(), 0.0, A.get(), reuse ? kWindowPairLen * len : len, pairs.get(), pair_cap,
+                            cnt.get());
+          launch_body_disp(m, Xa, Fb.X.get(), bdisp.get());
+          launch_to_float(Xa, 3 * m.nvert, xfa.get());
+          launch_to_float(Fb.X.get(), 3 * m.nvert, xfb.get());
+          DNarrow N = narrow();
+          N.xa = xfa.get();
+          N.xb = xfb.get();
+          launch_ccd_cull(m, Fs->view(), boxes.get(), bdisp.get(), A.get(), len, Pm.c, pairs.get(), cnt.get(), pair_cap,
+                          N, cands(), reuse);
+        }
+        launch_ccd_exact(m, Xa, Fb.X.get(), boxes.get(), A.get(), len, Pm.c, cnt.get(), pair_cap, narrow(), cands(),
+                         scal.get() + 1, scal.get() + 2, scal.get() + 9);
       }
       double out[11];  // scal[1..11]
       check(cudaMemcpy(out, scal.get() + 1, 11 * sizeof(double), cudaMemcpyDeviceToHost), "ccd read");
       limit_t = out[2];
-      if (out[9] > pair_cap) {  // 刚体对放不下：扩容，这一段重做
-        grow_pairs(static_cast<int>(2 * out[9]));
-        continue;
-      }
-      if (out[10] > work_cap) {  // 工作列表放不下：扩容，这一段重做
-        grow_work(static_cast<int>(2 * out[10]));
-        continue;
-      }
-      if (out[8] > cand_cap) {  // 候选数组放不下：扩容，这一段重做
-        grow_cands(static_cast<int>(2 * out[8]));
+      if (out[9] > pair_cap || out[10] > work_cap || out[8] > cand_cap) {
+        // 刚体对、工作列表或候选数组放不下：扩容，这一段重做（扩容丢了窗口的候选，重新求）
+        if (out[9] > pair_cap) grow_pairs(static_cast<int>(2 * out[9]));
+        if (out[10] > work_cap) grow_work(static_cast<int>(2 * out[10]));
+        if (out[8] > cand_cap) grow_cands(static_cast<int>(2 * out[8]));
+        w1 = -1;
         continue;
       }
       if (pairs_on) {
@@ -880,12 +891,13 @@ struct Stepper::Impl {
     deps = std::move(tail);
   }
 
-  // WHILE 节点接在 deps 后面（循环条件是句柄 h），返回循环体的图；deps 变成这个节点。
-  cudaGraph_t add_while(cudaGraph_t gr, std::vector<cudaGraphNode_t>& deps, cudaGraphConditionalHandle h) {
+  // 条件节点接在 deps 后面（句柄 h；WHILE 是循环，IF 是 h 不为 0 时跑一次），返回循环体的图；deps 变成这个节点。
+  cudaGraph_t add_cond(cudaGraph_t gr, std::vector<cudaGraphNode_t>& deps, cudaGraphConditionalHandle h,
+                        cudaGraphConditionalNodeType type = cudaGraphCondTypeWhile) {
     cudaGraphNodeParams np = {};
     np.type = cudaGraphNodeTypeConditional;
     np.conditional.handle = h;
-    np.conditional.type = cudaGraphCondTypeWhile;
+    np.conditional.type = type;
     np.conditional.size = 1;
     cudaGraphNode_t node;
     check(cudaGraphAddNode(&node, gr, deps.empty() ? nullptr : deps.data(), deps.size(), &np), "while node");
@@ -945,25 +957,40 @@ struct Stepper::Impl {
     });
 
     // 第 3 步：CCD 的分段（ccd()）。
-    cudaGraph_t body = add_while(graph, deps, hc);
+    // 求候选（刚体对和剔除）放在一个 IF 条件节点里：k_ccd_seg_begin 判断这一段落不落在候选的窗口里，
+    // 不落在里面才打开（和 ccd() 里的 fresh 一样）。
+    cudaGraph_t body = add_cond(graph, deps, hc);
+    cudaGraphConditionalHandle hf = 0;
+    if (pairs_on()) check(cudaGraphConditionalHandleCreate(&hf, body, 0, 0), "handle");
     std::vector<cudaGraphNode_t> bd;
     capture_into(body, bd, [&] {
-      launch_ccd_seg_begin(it);
+      launch_ccd_seg_begin(it, reuse, kWindowPairLen, hf);
       launch_integrate(m, q.get(), p.get(), s_d, qtrial.get());
       launch_fk(m, qtrial.get(), Fb.view());
       launch_ccd_init(sc + 1, sc + 2, sc + 9, len_d);
       launch_ground_ccd(m, Fa.X.get(), Fb.X.get(), A.get(), len_d, Pm.c, sc + 1, sc + 2);
-      if (pairs_on()) {
-        launch_swept_boxes(m, Fa.X.get(), Fb.X.get(), boxes.get());
-        launch_body_pairs(m, boxes.get(), 0.0, A.get(), len_d, pairs.get(), pair_cap, cnt.get());
+      if (pairs_on()) launch_swept_boxes(m, Fa.X.get(), Fb.X.get(), boxes.get());
+    });
+    if (pairs_on()) {
+      cudaGraph_t cull = add_cond(body, bd, hf, cudaGraphCondTypeIf);
+      std::vector<cudaGraphNode_t> cd;
+      const DScalar plen_d(0, reuse ? &it->plen : &it->len);
+      capture_into(cull, cd, [&] {
+        launch_body_pairs(m, boxes.get(), 0.0, A.get(), plen_d, pairs.get(), pair_cap, cnt.get());
         launch_body_disp(m, Fa.X.get(), Fb.X.get(), bdisp.get());
         launch_to_float(Fa.X.get(), 3 * m.nvert, xfa.get());
         launch_to_float(Fb.X.get(), 3 * m.nvert, xfb.get());
         DNarrow N = narrow();
         N.xa = xfa.get();
         N.xb = xfb.get();
-        launch_pair_ccd(m, Fa.view(), Fb.X.get(), boxes.get(), bdisp.get(), A.get(), len_d, Pm.c, pairs.get(),
-                        cnt.get(), pair_cap, N, cands(), sc + 1, sc + 2, sc + 9);
+        launch_ccd_cull(m, Fa.view(), boxes.get(), bdisp.get(), A.get(), len_d, Pm.c, pairs.get(), cnt.get(), pair_cap,
+                        N, cands(), reuse);
+      });
+    }
+    capture_into(body, bd, [&] {
+      if (pairs_on()) {
+        launch_ccd_exact(m, Fa.X.get(), Fb.X.get(), boxes.get(), A.get(), len_d, Pm.c, cnt.get(), pair_cap, narrow(),
+                         cands(), sc + 1, sc + 2, sc + 9);
       } else {
         launch_fill(sc + 9, 0.0);
         launch_fill(sc + 10, 0.0);
@@ -975,7 +1002,7 @@ struct Stepper::Impl {
 
     // 第 4 步：回溯线搜索（energy_at）。
     capture_into(graph, deps, [&] { launch_ls_setup(it, sc, hl); });
-    body = add_while(graph, deps, hl);
+    body = add_cond(graph, deps, hl);
     bd.clear();
     capture_into(body, bd, [&] {
       launch_integrate(m, q.get(), p.get(), s_d, qtrial.get());
@@ -1019,6 +1046,7 @@ struct Stepper::Impl {
     k.pcg_tol = Pm.pcg_tol;
     k.pcg_max = Pm.pcg_max;
     k.tight = Pm.tight_bound;
+    k.reuse = reuse;
     return k;
   }
 
@@ -1096,6 +1124,7 @@ struct Stepper::Impl {
       timers.pcg += r.pcg;
       timers.energy_evals += r.trials;
       timers.ccd_segments += r.segs;
+      timers.ccd_windows += r.windows;
       pcg_total += r.pcg;
       if (r.status == kIterConverged) break;
       nc = r.nc;
@@ -1266,6 +1295,7 @@ bool Stepper::set_cooperative_pcg(bool on) {
 }
 void Stepper::reset_timers() { impl_->timers = Timers(); }
 void Stepper::set_graphs(bool on) { impl_->graphs = on; }
+void Stepper::set_ccd_reuse(bool on) { impl_->reuse = on; }
 bool Stepper::used_graphs() const { return impl_->last_graph; }
 void Stepper::set_capacities(int pairs, int contacts, int candidates, int work) {
   impl_->grow_pairs(pairs);
