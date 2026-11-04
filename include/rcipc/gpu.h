@@ -46,6 +46,7 @@ class Stepper {
     long newton = 0, pcg = 0, energy_evals = 0, steps = 0;
     long contacts = 0, rows = 0;         // 每次组装时的接触数、行数（接触 + 2 x 摩擦）之和
     long pair_calls = 0, pair_sum = 0;   // 候选刚体对：求了几次、个数之和（检测和 CCD 都算）
+    long ccd_segments = 0;               // CCD 一共检查了几段（缩短重做的也算）
   };
   const Timers& timers() const;
   void reset_timers();

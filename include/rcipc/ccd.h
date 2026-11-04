@@ -30,6 +30,15 @@ double chord_ccd_ground(const Model& model, const Frames& a, const Frames& b, do
 // 单个铰链时 A = w^2 R，就是向心加速度。自由关节的平移是直线，不贡献。q 只用来算滑动关节的当前伸长。
 Eigen::VectorXd acceleration_bounds(const Model& model, const Eigen::VectorXd& q, const Eigen::VectorXd& p);
 
+// 紧的加速度界（阶段 5 笔记第 6 节，书 §9.3.2）：A_b = max_v |x_v''(0)| + T_b。s = 0 处的二阶导数沿链精确递推，
+// T_b 是整段上 |x'''| 的界（用现在姿态下的力臂：刚体原点到锚点、到铰链轴的距离，加刚体半径）。
+// F 是 q 处的 FK。链上有滑动关节的刚体不算，返回 +无穷。
+Eigen::VectorXd tight_acceleration_bounds(const Model& model, const Frames& F, const Eigen::VectorXd& p);
+
+// curved_ccd 用的界：静态界和紧界逐个刚体取较小的那个（两个都对整段成立）。F 是 q 处的 FK。
+Eigen::VectorXd ccd_acceleration_bounds(const Model& model, const Eigen::VectorXd& q, const Frames& F,
+                                        const Eigen::VectorXd& p);
+
 // 曲线 CCD（阶段 5、7）：弦加矢高。把 [0, 1] 切成若干段，每段长 ds，刚体 b 上的顶点在段内偏离弦不超过矢高
 //   xi_b = A_b ds^2 / 8，
 // 于是真实距离 >= 弦上的距离 - xi（一对接触的 xi 是两侧刚体的 xi 之和）。沿弦做保守推进，把“距离”换成
@@ -40,7 +49,9 @@ Eigen::VectorXd acceleration_bounds(const Model& model, const Eigen::VectorXd& q
 // 段长先取 s_end = min(1, sqrt(8 dhat / A_max))（最大矢高不超过 dhat，相当于一个信赖域）；
 // 某对的 xi 超过它当前距离的一半时，这段太长，缩短后重算。宽相：两侧刚体在段两端的包围盒按 xi 放大后不重叠的对跳过。
 // 返回 alpha_max ∈ (0, 1]。
-double curved_ccd(const Model& model, const Eigen::VectorXd& q, const Eigen::VectorXd& p, double dhat, double c);
+// tight = false 时只用静态界（acceleration_bounds），true 时用 ccd_acceleration_bounds。
+double curved_ccd(const Model& model, const Eigen::VectorXd& q, const Eigen::VectorXd& p, double dhat, double c,
+                  bool tight = true);
 
 // 沿 q ⊕ s p（s 从 0 到 alpha 等分 samples 段）做 FK，返回路上所有候选对的最小距离。
 // 它是独立于 CCD 的检查：CCD 说安全的那段路，真实轨迹是不是真的没碰到。测试和演示程序用它抓穿透。

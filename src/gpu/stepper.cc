@@ -276,10 +276,11 @@ struct Stepper::Impl {
     long gen = -1;
     double h = 0, dhat = 0, mu = 0, eps_v = 0, curv = 0, limit_k = 0, limit_dhat = 0, c = 0, tol = 0, pcg_tol = 0;
     int pcg_max = 0;
+    bool tight = true;
     bool operator==(const GraphKey& o) const {
       return gen == o.gen && h == o.h && dhat == o.dhat && mu == o.mu && eps_v == o.eps_v && curv == o.curv &&
              limit_k == o.limit_k && limit_dhat == o.limit_dhat && c == o.c && tol == o.tol && pcg_tol == o.pcg_tol &&
-             pcg_max == o.pcg_max;
+             pcg_max == o.pcg_max && tight == o.tight;
     }
   };
   GraphKey graph_key;
@@ -752,7 +753,7 @@ struct Stepper::Impl {
   // CCD（curved_ccd + limit_ccd），从 F（q 处的 FK）出发沿 p。
   double ccd(const StepParams& Pm, const double* qd, const double* pd) {
     const auto t0 = Clock::now();
-    launch_accel_bounds(m, qd, pd, A.get());
+    launch_accel_bounds(m, qd, F.view(), pd, Pm.tight_bound, A.get());
     std::vector<double> Ah(m.nbody);
     A.download(Ah.data(), m.nbody);
     const double A_max = Ah.empty() ? 0.0 : *std::max_element(Ah.begin(), Ah.end());
@@ -764,6 +765,7 @@ struct Stepper::Impl {
     set_scalar(3, 1.0);
     launch_limit_ccd(m, qd, pd, Pm.c, scal.get() + 3);
     for (int guard = 0; guard < 10000 && s0 < 1.0; ++guard) {
+      ++timers.ccd_segments;
       const double s1 = std::min(1.0, s0 + ds);
       const double len = s1 - s0;
       launch_integrate(m, qd, pd, s1, qtrial.get());
@@ -936,7 +938,7 @@ struct Stepper::Impl {
       launch_fill(sc + 7, 0.0);
       launch_max_displacement(F.X.get(), F1.X.get(), m.nvert, sc + 7);
       launch_it_converge(it, sc, h, Pm.tol);
-      launch_accel_bounds(m, q.get(), p.get(), A.get());
+      launch_accel_bounds(m, q.get(), F.view(), p.get(), Pm.tight_bound, A.get());
       launch_ccd_setup(it, A.get(), m.nbody, Pm.dhat, sc, hc);
       launch_limit_ccd(m, q.get(), p.get(), Pm.c, sc + 3);
       copy_frames(F, Fa);  // 第一段从当前点开始
@@ -1016,6 +1018,7 @@ struct Stepper::Impl {
     k.tol = Pm.tol;
     k.pcg_tol = Pm.pcg_tol;
     k.pcg_max = Pm.pcg_max;
+    k.tight = Pm.tight_bound;
     return k;
   }
 
@@ -1092,6 +1095,7 @@ struct Stepper::Impl {
       timers.rows += r.nrow;
       timers.pcg += r.pcg;
       timers.energy_evals += r.trials;
+      timers.ccd_segments += r.segs;
       pcg_total += r.pcg;
       if (r.status == kIterConverged) break;
       nc = r.nc;

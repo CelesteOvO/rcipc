@@ -124,7 +124,7 @@ StepResult step(const Model& model, const StepParams& P, const VectorXd& q0, con
     //   都还有 (1 - c) 倍的距离；阶段 5 的曲线 CCD 把弧线偏离弦的余量（矢高）也算进去。没有障碍时都返回 1。
     //   阶段 10：关节限位也要 CCD（q 沿 p 是直线，闭式解），取两者的较小值。
     const double alpha_max =
-        std::min(P.ccd == CcdMode::kCurved ? curved_ccd(model, q, p, P.dhat, P.c) : chord_ccd_ground(model, F, F1, P.c),
+        std::min(P.ccd == CcdMode::kCurved ? curved_ccd(model, q, p, P.dhat, P.c, P.tight_bound) : chord_ccd_ground(model, F, F1, P.c),
                  limit_ccd(model, q, p, P.c));
 
     // 第 4 步：回溯线搜索。从 CCD 允许的最大步长开始试；能量比现在高就减半，直到能量不升。

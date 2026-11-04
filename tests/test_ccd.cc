@@ -193,6 +193,62 @@ TEST(Acceleration, BoundsTheTrueSecondDerivative) {
   }
 }
 
+// 紧界（笔记第 6 节）也要对整段成立：四个模型、随机姿态和方向，真实的 |x''(s)| 在 s = 0, 0.25, ..., 1 处
+// 都不超过它（zoo.xml 里链上有滑动关节的刚体返回 +无穷，不比）。
+TEST(Acceleration, TightBoundsTheTrueSecondDerivative) {
+  std::mt19937 rng(61);
+  const double eps = 1e-4;
+  int checked = 0;
+  for (const char* file : {"zoo.xml", "ragdoll.xml", "chain.xml", "flail.xml"}) {
+    const Model M = load(file);
+    for (int i = 0; i < 4; ++i) {
+      const VectorXd q = random_q(M, rng);
+      const VectorXd p = random_p(M.nv, rng, 0.8);
+      const VectorXd A = tight_acceleration_bounds(M, forward_kinematics(M, q), p);
+      for (int v = 0; v < M.nvertex(); ++v) {
+        const Vertex& V = M.vertices[v];
+        if (V.body == 0 || !std::isfinite(A[V.body])) continue;
+        for (int k = 0; k <= 4; ++k) {
+          const double s = 0.25 * k;
+          const auto x = [&](double ss) {
+            return world_point(forward_kinematics(M, integrate(M, q, p, ss)), V.body, V.local);
+          };
+          const Vector3d xpp = (x(s + eps) - 2 * x(s) + x(s - eps)) / (eps * eps);
+          EXPECT_LE(xpp.norm(), A[V.body] * (1 + 1e-6) + 1e-6) << file << " pose " << i << ", vertex " << v << ", s " << s;
+          ++checked;
+        }
+      }
+    }
+  }
+  EXPECT_GT(checked, 500);
+}
+
+// 紧界松紧的两端：单个铰链时静态界就是精确的向心加速度，紧界还多一个三阶项，所以 CCD 取两者的较小值；
+// 12 节链条的末端，每个自由度转 0.01 rad 左右（布娃娃堆里一个 Newton 迭代的常见量级）时，静态界的力臂是沿整条链的
+// 路径长度，紧界用现在姿态下的真实距离，紧好几倍。转得多时反过来：紧界的余项是转速的三次方，静态界只是二次方，
+// 每个自由度转 0.2 rad 时两者取小总是静态界（笔记第 6 节的表）。
+TEST(Acceleration, TightIsTighterOnDeepChains) {
+  const Model H = load("flail.xml");
+  VectorXd ph(1);
+  ph[0] = 0.4;
+  const VectorXd Fs = acceleration_bounds(H, H.qpos0, ph);
+  const VectorXd Ft = tight_acceleration_bounds(H, forward_kinematics(H, H.qpos0), ph);
+  EXPECT_GT(Ft[1], Fs[1]);
+  EXPECT_EQ(ccd_acceleration_bounds(H, H.qpos0, forward_kinematics(H, H.qpos0), ph)[1], Fs[1]);
+
+  const Model C = load("chain.xml");
+  std::mt19937 rng(62);
+  double ratio = 0;
+  const int tries = 8;
+  for (int i = 0; i < tries; ++i) {
+    const VectorXd q = random_q(C, rng);
+    const VectorXd p = random_p(C.nv, rng, 0.01);
+    const int tip = C.nbody() - 1;
+    ratio += tight_acceleration_bounds(C, forward_kinematics(C, q), p)[tip] / acceleration_bounds(C, q, p)[tip];
+  }
+  EXPECT_LT(ratio / tries, 0.5) << "mean tight / static at the chain's tip";
+}
+
 // ---------- 阶段 5：矢高 ----------
 
 // 甩杆转 0.4 rad：弧线偏离弦最多 R (1 - cos(0.2)) ≈ R 0.4^2 / 8，不超过界 A / 8。

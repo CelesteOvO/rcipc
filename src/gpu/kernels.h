@@ -80,8 +80,9 @@ void launch_friction_terms(const DModel& m, const DFrames& F, const DFriction* f
 
 // ---------- ccd.cc 对应的部分：ccd.cu ----------
 
-// 每个刚体的加速度上界（acceleration_bounds），A 长度 nbody。
-void launch_accel_bounds(const DModel& m, const double* q, const double* p, double* A);
+// 每个刚体的加速度上界（ccd_acceleration_bounds：静态界和紧界取小），A 长度 nbody。F 是 q 处的 FK。
+// tight = false 时只用静态界。
+void launch_accel_bounds(const DModel& m, const double* q, const DFrames& F, const double* p, bool tight, double* A);
 // 一段 [s0, s0 + len] 里的 CCD（curved_ccd 的第 2 步）：顶点–平面的闭式解，和候选刚体对之间的逐对 ACCD。
 //   段内的截断位置 atomic_min 到 *tmin（调用者先设成 1），需要的更短段长 atomic_min 到 *ds_need（先设成 len）。
 void launch_ground_ccd(const DModel& m, const double* Xa, const double* Xb, const double* A, DScalar len, double c,

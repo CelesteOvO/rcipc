@@ -79,6 +79,113 @@ VectorXd acceleration_bounds(const Model& model, const VectorXd& q, const Vector
   return A;
 }
 
+VectorXd tight_acceleration_bounds(const Model& model, const Frames& F, const VectorXd& p) {
+  // 紧的加速度界（阶段 5 笔记第 6 节，书 §9.3.2，旧分支 rcipc_gpu/tightacc.py）。
+  //
+  // 静态界松在两处：力臂取了“任何姿态下最坏的路径长度”，而且把 x'' 在整段上的每一项都按最坏情况放大。
+  // 紧界换一个思路：s = 0 处的二阶导数可以精确算出来，只需要再给“从 0 到 s 它最多变多少”一个界（三阶导数的界 T）：
+  //   A_b = max_{v 在 b 上} |x_v''(0)| + T_b，    中值定理：|x''(s)| <= |x''(0)| + T_b s <= A_b，s 在 [0, 1] 上。
+  // 链上有滑动关节的刚体不算（推导只有转动），返回 +无穷，由调用者和静态界取较小的那个。
+  const double inf = std::numeric_limits<double>::infinity();
+  VectorXd A = VectorXd::Constant(model.nbody(), inf);
+  A[0] = 0;
+  std::vector<int> chain;  // 刚体到根的链上的关节，根在前
+  for (int b = 1; b < model.nbody(); ++b) {
+    chain.clear();
+    bool slide = false;
+    for (int k = b; k != 0; k = model.bodies[k].parent) {
+      const int j = model.bodies[k].joint;
+      if (j < 0) continue;
+      chain.push_back(j);
+      slide = slide || model.joints[j].type == JointType::kSlide;
+    }
+    if (slide) continue;
+    std::reverse(chain.begin(), chain.end());
+
+    // 第 1 部分：s = 0 处的二阶导数，沿链递推（都按单位 s 计）。W 角速度、Al 角加速度、O 参考点、AO 参考点的加速度。
+    //   自由关节：参考点是根的原点，它的平移对 s 是线性的（AO = 0），转速 W 在世界系里是常数（A = 0）；
+    //   铰链、球关节（锚点 P、转动向量 wr）：先把参考点移到 P（刚体运动学：a_P = a_O + A x r + W x (W x r)），
+    //   再叠上这个关节的转动：A <- A + W x wr（wr 被上游带着转），W <- W + wr。
+    Vector3d W = Vector3d::Zero(), Al = Vector3d::Zero(), O = Vector3d::Zero(), AO = Vector3d::Zero();
+    std::vector<double> rate(chain.size());  // 每个关节的转速 |wr|
+    for (size_t i = 0; i < chain.size(); ++i) {
+      const Joint& J = model.joints[chain[i]];
+      const int d0 = J.type == JointType::kFree ? J.dadr + 3 : J.dadr;
+      const int n = J.type == JointType::kHinge ? 1 : 3;
+      Vector3d wr = Vector3d::Zero();
+      for (int d = d0; d < d0 + n; ++d) wr += p[d] * F.dof_axis[d];
+      rate[i] = p.segment(d0, n).norm();
+      if (J.type == JointType::kFree) {
+        O = F.xpos[J.body];
+        AO.setZero();
+        W = wr;
+        Al.setZero();
+      } else {
+        const Vector3d P = F.dof_anchor[d0];
+        const Vector3d r = P - O;
+        AO += Al.cross(r) + W.cross(W.cross(r));
+        Al += W.cross(wr);
+        W += wr;
+        O = P;
+      }
+    }
+    double p2 = 0;  // 顶点上 |x''(0)| 的最大值（x'' 对 x 是仿射的，图元上的点不会更大）
+    for (int v = 0; v < model.nvertex(); ++v) {
+      if (model.vertices[v].body != b) continue;
+      const Vector3d r = world_point(F, b, model.vertices[v].local) - O;
+      p2 = std::max(p2, (AO + Al.cross(r) + W.cross(W.cross(r))).norm());
+    }
+
+    // 第 2 部分：整段上 |x'''| 的界 T（书 §9.3.2 的式子，推导在 cuda_mujoco 的 lyf/research/accd-bounds 分支）：
+    //   T = sum_j th_j ( 2 B_<j rho_j + 4 A_<j^2 rho_j + 4 A_<j M_>=j + R_>=j )
+    // th_j 是关节 j 的转速，A_<j = sum_{i<j} th_i（上游转速之和），B_<j = sum_{i<j} th_i A_<i，
+    // rho_j 是刚体上的点到 j 的锚点在整段上的距离上界（现在的距离 + 刚体半径 + 下游转动造成的增长 below），
+    // M_>=j 是点在 j 之前的坐标系里的速度上界，R_>=j 是 j 及以下子链在固定基座上的二阶导上界。
+    // 从刚体往根走（最深的关节先），below、M、R 一路累加；A_<j、B_<j 由根那一侧的和减出来。
+    const int n = static_cast<int>(chain.size());
+    double S = 0, TB = 0;
+    for (int k = 0; k < n; ++k) {
+      TB += rate[k] * S;
+      S += rate[k];
+    }
+    const Vector3d centre = F.xpos[b];
+    const double lever = model.bodies[b].radius;
+    double below = 0, sx = 0, sy = 0, Pth = 0, PthA = 0, T = 0;
+    for (int k = n - 1; k >= 0; --k) {
+      const double th = rate[k];
+      if (th == 0) continue;
+      const Joint& J = model.joints[chain[k]];
+      Pth += th;
+      const double above = S - Pth;  // A_<j
+      PthA += th * above;
+      const double Bv = TB - PthA;  // B_<j
+      const Vector3d anchor = J.type == JointType::kFree ? F.xpos[J.body] : F.dof_anchor[J.dadr];
+      const Vector3d off = centre - anchor;
+      const double full = off.norm();
+      double dist = full;  // 铰链：到轴的距离；球关节、自由关节：到锚点的距离
+      if (J.type == JointType::kHinge) {
+        const Vector3d ax = F.dof_axis[J.dadr].normalized();
+        dist = (off - ax * off.dot(ax)).norm();
+      }
+      const double cj = th * (dist + lever + below);
+      const double rho = full + lever + below;
+      const double M = below + cj;
+      below += cj;
+      sx += th * (2 * above * rho + M);
+      sy += th * 2 * rho;
+      const double Rge = sx - above * sy;
+      T += th * (2 * Bv * rho + 4 * above * above * rho + 4 * above * M + Rge);
+    }
+    A[b] = p2 + T;
+  }
+  return A;
+}
+
+VectorXd ccd_acceleration_bounds(const Model& model, const VectorXd& q, const Frames& F, const VectorXd& p) {
+  // 两个都是整段上的上界，取较小的那个。单个铰链时静态界就是精确的向心加速度，比紧界还紧；链深时紧界紧得多。
+  return acceleration_bounds(model, q, p).cwiseMin(tight_acceleration_bounds(model, F, p));
+}
+
 namespace {
 
 // 所有顶点的世界坐标。
@@ -154,9 +261,10 @@ struct Aabb {
 
 }  // namespace
 
-double curved_ccd(const Model& model, const VectorXd& q, const VectorXd& p, double dhat, double c) {
+double curved_ccd(const Model& model, const VectorXd& q, const VectorXd& p, double dhat, double c, bool tight) {
   // 弦加矢高（阶段 5 笔记第 3、4 节，书 §9.2、§9.5；刚体之间：阶段 7 笔记第 4 节）。
-  const VectorXd A = acceleration_bounds(model, q, p);
+  const Frames F0 = forward_kinematics(model, q);
+  const VectorXd A = tight ? ccd_acceleration_bounds(model, q, F0, p) : acceleration_bounds(model, q, p);
   const double A_max = A.size() > 0 ? A.maxCoeff() : 0.0;
   const bool pairs = model.nedge() > 0 || model.nface() > 0;
 
@@ -165,7 +273,7 @@ double curved_ccd(const Model& model, const VectorXd& q, const VectorXd& p, doub
 
   // 第 2 步：逐段推进。每段先在两端做 FK，然后对每个候选对做带余量的保守推进。
   double s0 = 0;
-  std::vector<Vector3d> Xa = world_vertices(model, forward_kinematics(model, q));
+  std::vector<Vector3d> Xa = world_vertices(model, F0);
   for (int guard = 0; guard < 10000 && s0 < 1.0; ++guard) {
     const double s1 = std::min(1.0, s0 + ds);
     const double len = s1 - s0;

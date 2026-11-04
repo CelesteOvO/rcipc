@@ -35,6 +35,7 @@ struct StepParams {
   double c = 0.9;       // 阶段 4：CCD 的保守系数，一次迭代最多闭合当前距离的这个比例
   CcdMode ccd = CcdMode::kCurved;  // 阶段 5：用哪种 CCD
   double curv_scale = 1.0;         // 阶段 6：曲率上界的缩放。1 是可证明的上界，0 是纯 Gauss-Newton（复现间隙塌缩）
+  bool tight_bound = true;         // 阶段 5（后加）：CCD 的加速度界用静态界和紧界的较小值；false 只用静态界（笔记 05 第 6 节）
   double mu = 0.2;                 // 阶段 8：摩擦系数（所有接触同一个值；0 关掉摩擦）
   double eps_v = 1e-3;             // 阶段 8：摩擦光滑化的速度（m/s），低于它的相对滑动按“静止”处理
   // 阶段 9。

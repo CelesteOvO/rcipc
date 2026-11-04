@@ -19,8 +19,75 @@ namespace {
 constexpr int kThreads = 128;
 inline int blocks(int n) { return (n + kThreads - 1) / kThreads; }
 
-__global__ void k_accel_bounds(DModel m, const double* q, const double* p, double* A) {
-  // acceleration_bounds：每个线程一个刚体。链上的关节（根在前）、静态力臂，然后套公式。
+// 紧界（ccd.cc 的 tight_acceleration_bounds，阶段 5 笔记第 6 节）：s = 0 处的二阶导数沿链递推，取刚体顶点上的最大值，
+// 再加整段上三阶导数的界 T。jid 是链上的关节（根在前），th 是它们的转速；链上没有滑动关节。
+__device__ double tight_bound(const DModel& m, const DFrames& F, const double* p, int b, const int* jid,
+                              const double* th, int n) {
+  V3 W = v3(0, 0, 0), Al = v3(0, 0, 0), O = v3(0, 0, 0), AO = v3(0, 0, 0);
+  for (int i = 0; i < n; ++i) {
+    const int j = jid[i], type = m.jtype[j];
+    const int d0 = type == kFree ? m.jdadr[j] + 3 : m.jdadr[j];
+    const int nd = type == kHinge ? 1 : 3;
+    V3 wr = v3(0, 0, 0);
+    for (int d = d0; d < d0 + nd; ++d) wr = wr + p[d] * v3load(F.daxis + 3 * d);
+    if (type == kFree) {
+      O = v3load(F.xpos + 3 * m.jbody[j]);
+      AO = v3(0, 0, 0);
+      W = wr;
+      Al = v3(0, 0, 0);
+    } else {
+      const V3 P = v3load(F.danchor + 3 * d0);
+      const V3 r = P - O;
+      AO = AO + cross(Al, r) + cross(W, cross(W, r));
+      Al = Al + cross(W, wr);
+      W = W + wr;
+      O = P;
+    }
+  }
+  double p2 = 0;
+  for (int v = m.bvert0[b]; v < m.bvert0[b] + m.bnvert[b]; ++v) {
+    const V3 r = v3load(F.X + 3 * v) - O;
+    p2 = fmax(p2, norm(AO + cross(Al, r) + cross(W, cross(W, r))));
+  }
+  double S = 0, TB = 0;
+  for (int k = 0; k < n; ++k) {
+    TB += th[k] * S;
+    S += th[k];
+  }
+  const V3 centre = v3load(F.xpos + 3 * b);
+  const double lever = m.radius[b];
+  double below = 0, sx = 0, sy = 0, Pth = 0, PthA = 0, T = 0;
+  for (int k = n - 1; k >= 0; --k) {
+    if (th[k] == 0) continue;
+    const int j = jid[k], type = m.jtype[j];
+    Pth += th[k];
+    const double above = S - Pth;
+    PthA += th[k] * above;
+    const double Bv = TB - PthA;
+    const V3 anchor = type == kFree ? v3load(F.xpos + 3 * m.jbody[j]) : v3load(F.danchor + 3 * m.jdadr[j]);
+    const V3 off = centre - anchor;
+    const double full = norm(off);
+    double dist = full;
+    if (type == kHinge) {
+      const V3 ax = v3load(F.daxis + 3 * m.jdadr[j]);
+      const V3 axn = (1.0 / norm(ax)) * ax;
+      dist = norm(off - dot(off, axn) * axn);
+    }
+    const double cj = th[k] * (dist + lever + below);
+    const double rho = full + lever + below;
+    const double M = below + cj;
+    below += cj;
+    sx += th[k] * (2 * above * rho + M);
+    sy += th[k] * 2 * rho;
+    const double Rge = sx - above * sy;
+    T += th[k] * (2 * Bv * rho + 4 * above * above * rho + 4 * above * M + Rge);
+  }
+  return p2 + T;
+}
+
+__global__ void k_accel_bounds(DModel m, const double* q, DFrames F, const double* p, int tight, double* A) {
+  // ccd_acceleration_bounds：每个线程一个刚体。静态界（acceleration_bounds）和紧界（tight_acceleration_bounds）
+  // 取较小的那个。F 是 q 处的 FK。
   const int b = blockIdx.x * blockDim.x + threadIdx.x;
   if (b >= m.nbody) return;
   if (b == 0) {
@@ -29,8 +96,9 @@ __global__ void k_accel_bounds(DModel m, const double* q, const double* p, doubl
   }
   // 第 1 步：沿链往上收集（和 chain_joints 一样，力臂里含滑动关节现在的伸长），再反过来变成根在前。
   double w[kMaxDepth], u[kMaxDepth], R[kMaxDepth];
-  int rot[kMaxDepth];
+  int rot[kMaxDepth], jid[kMaxDepth];
   int n = 0;
+  bool slide = false;
   double path = m.radius[b];
   for (int k = b; k != 0 && n < kMaxDepth; k = m.parent[k]) {
     const int j = m.bjnt[k];
@@ -43,6 +111,8 @@ __global__ void k_accel_bounds(DModel m, const double* q, const double* p, doubl
       for (int d = dadr; d < dadr + nvj; ++d) mag += p[d] * p[d];
       mag = sqrt(mag);
       rot[n] = type != kSlide;
+      jid[n] = j;
+      slide = slide || type == kSlide;
       w[n] = rot[n] ? mag : 0.0;
       u[n] = rot[n] ? 0.0 : mag;
       R[n] = path + norm(v3load(m.jpos + 3 * j));
@@ -63,6 +133,9 @@ __global__ void k_accel_bounds(DModel m, const double* q, const double* p, doubl
     const int r = rot[i];
     rot[i] = rot[n - 1 - i];
     rot[n - 1 - i] = r;
+    const int jj = jid[i];
+    jid[i] = jid[n - 1 - i];
+    jid[n - 1 - i] = jj;
   }
   // 滑动关节在这一步内最多再伸 u_s：它上游各关节的力臂都要加上这一段。
   for (int s = 0; s < n; ++s) {
@@ -77,6 +150,7 @@ __global__ void k_accel_bounds(DModel m, const double* q, const double* p, doubl
     a += w[j] * s + W_below * u[j];
     W_below += w[j];
   }
+  if (tight && !slide) a = fmin(a, tight_bound(m, F, p, b, jid, w, n));
   A[b] = a;
 }
 
@@ -244,8 +318,8 @@ __global__ void k_ccd_exact(DModel m, const double* Xa, const double* Xb, const 
 
 }  // namespace
 
-void launch_accel_bounds(const DModel& m, const double* q, const double* p, double* A) {
-  k_accel_bounds<<<blocks(m.nbody), kThreads>>>(m, q, p, A);
+void launch_accel_bounds(const DModel& m, const double* q, const DFrames& F, const double* p, bool tight, double* A) {
+  k_accel_bounds<<<blocks(m.nbody), kThreads>>>(m, q, F, p, tight ? 1 : 0, A);
 }
 
 void launch_ground_ccd(const DModel& m, const double* Xa, const double* Xb, const double* A, DScalar len, double c,
