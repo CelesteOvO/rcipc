@@ -55,8 +55,9 @@ __device__ inline bool collide(const DModel& m, int a, int b) {
   return true;
 }
 
-__global__ void k_body_pairs(DModel m, const double* boxes, double margin, const double* A, double len, int* pairs,
+__global__ void k_body_pairs(DModel m, const double* boxes, double margin, const double* A, DScalar lenp, int* pairs,
                              int cap, int* count) {
+  const double len = lenp.get();
   // 一个线程一对 (a, b)，a < b。A 不为空时（CCD）每个刚体的余量再加上它的矢高 A_b len^2 / 8。
   const long long idx = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x;
   if (idx >= static_cast<long long>(m.nbody) * m.nbody) return;
@@ -243,10 +244,12 @@ __device__ int chain_joints(const DModel& m, const double* q, int body, CJ* out)
   return n;
 }
 
-__global__ void k_contact_terms(DModel m, DFrames F, const double* q, const DContact* cs, int nc, double kappa,
+__global__ void k_contact_terms(DModel m, DFrames F, const double* q, const DContact* cs, DCount ncs, DScalar kp,
                                 double dhat, double curv_scale, double* e, double* g, double* Hk, DRows rows) {
   // 一个线程一个接触：contact_energy、contact_gradient、contact_rows、contact_curvature 里属于它的那一份。
   const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  const int nc = ncs.get();
+  const double kappa = kp.get();
   if (i >= nc) return;
   const DContact c = cs[i];
   const BV bv = barrier(c.d * c.d, dhat * dhat);
@@ -330,9 +333,9 @@ __global__ void k_rows_expand(DModel m, DFrames F, DRows rows, int nrow, int* id
   }
 }
 
-__global__ void k_min_distance(const DContact* cs, int n, double* out) {
+__global__ void k_min_distance(const DContact* cs, DCount n, double* out) {
   const int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < n) atomic_min(out, cs[i].d);
+  if (i < n.get()) atomic_min(out, cs[i].d);
 }
 
 // ---------- 摩擦 ----------
@@ -361,10 +364,11 @@ __global__ void k_friction_lag(DModel m, const double* X0, const DContact* cs, i
   out[atomicAdd(count, 1)] = f;
 }
 
-__global__ void k_friction_terms(DModel m, DFrames F, const DFriction* fs, int nf, double h, double mu, double eps_v,
-                                 double* e, double* g, DRows rows, int row0) {
+__global__ void k_friction_terms(DModel m, DFrames F, const DFriction* fs, DCount nfs, double h, double mu, double eps_v,
+                                 double* e, double* g, DRows rows, DCount row0s) {
   // friction_energy、friction_gradient、friction_rows 里属于这个摩擦接触的那一份。
   const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  const int nf = nfs.get(), row0 = row0s.get();
   if (i >= nf) return;
   const DFriction f = fs[i];
   const DContact& c = f.c;
@@ -434,7 +438,7 @@ void launch_swept_boxes(const DModel& m, const double* Xa, const double* Xb, dou
   k_body_boxes<<<blocks(m.nbody), kThreads>>>(m, Xa, Xb, boxes);
 }
 
-void launch_body_pairs(const DModel& m, const double* boxes, double margin, const double* A, double len, int* pairs,
+void launch_body_pairs(const DModel& m, const double* boxes, double margin, const double* A, DScalar len, int* pairs,
                        int cap, int* d_count) {
   cudaMemsetAsync(d_count, 0, sizeof(int));
   const long long total = static_cast<long long>(m.nbody) * m.nbody;
@@ -444,25 +448,30 @@ void launch_body_pairs(const DModel& m, const double* boxes, double margin, cons
 
 void launch_detect(const DModel& m, const DFrames& F, const double* boxes, const int* pairs, int pair_cap,
                    double dmax, DNarrow N, DCands C, DContact* out, int cap, int* d_cnt, int h_cnt[4]) {
+  launch_detect_async(m, F, boxes, pairs, pair_cap, dmax, N, C, out, cap, d_cnt);
+  cudaMemcpy(h_cnt, d_cnt, 4 * sizeof(int), cudaMemcpyDeviceToHost);  // 刚体对、接触、候选、工作项的个数，一次读回
+}
+
+void launch_detect_async(const DModel& m, const DFrames& F, const double* boxes, const int* pairs, int pair_cap,
+                         double dmax, DNarrow N, DCands C, DContact* out, int cap, int* d_cnt) {
   int* d_contacts = d_cnt + 1;
   cudaMemsetAsync(d_contacts, 0, sizeof(int));
   if (m.nplane > 0 && m.nvert > 0) k_ground_detect<<<blocks(m.nvert), kThreads>>>(m, F.X, dmax, out, cap, d_contacts);
   launch_narrow(m, F, boxes, pairs, d_cnt, pair_cap, dmax, nullptr, nullptr, 0.0, 0.0, N, C);
   if (pair_cap > 0) k_detect_exact<<<std::min(blocks(C.cap), 1024), kThreads>>>(m, F.X, C, dmax, out, cap, d_contacts);
-  cudaMemcpy(h_cnt, d_cnt, 4 * sizeof(int), cudaMemcpyDeviceToHost);  // 刚体对、接触、候选、工作项的个数，一次读回
 }
 
-void launch_contact_terms(const DModel& m, const DFrames& F, const double* q, const DContact* c, int n, double kappa,
+void launch_contact_terms(const DModel& m, const DFrames& F, const double* q, const DContact* c, DCount n, DScalar kappa,
                           double dhat, double curv_scale, double* e, double* g, double* Hk, DRows rows) {
-  if (n > 0) k_contact_terms<<<blocks(n), kThreads>>>(m, F, q, c, n, kappa, dhat, curv_scale, e, g, Hk, rows);
+  if (n.grid() > 0) k_contact_terms<<<blocks(n.grid()), kThreads>>>(m, F, q, c, n, kappa, dhat, curv_scale, e, g, Hk, rows);
 }
 
 void launch_rows_expand(const DModel& m, const DFrames& F, DRows rows, int nrow, int* idx, double* val) {
   if (nrow > 0) k_rows_expand<<<blocks(nrow), kThreads>>>(m, F, rows, nrow, idx, val);
 }
 
-void launch_min_distance(const DContact* c, int n, double* out) {
-  if (n > 0) k_min_distance<<<blocks(n), kThreads>>>(c, n, out);
+void launch_min_distance(const DContact* c, DCount n, double* out) {
+  if (n.grid() > 0) k_min_distance<<<blocks(n.grid()), kThreads>>>(c, n, out);
 }
 
 int launch_friction_lag(const DModel& m, const double* X0, const DContact* c, int n, double kappa, double dhat,
@@ -474,9 +483,9 @@ int launch_friction_lag(const DModel& m, const double* X0, const DContact* c, in
   return k;
 }
 
-void launch_friction_terms(const DModel& m, const DFrames& F, const DFriction* f, int nf, double h, double mu,
-                           double eps_v, double* e, double* g, DRows rows, int row0) {
-  if (nf > 0) k_friction_terms<<<blocks(nf), kThreads>>>(m, F, f, nf, h, mu, eps_v, e, g, rows, row0);
+void launch_friction_terms(const DModel& m, const DFrames& F, const DFriction* f, DCount nf, double h, double mu,
+                           double eps_v, double* e, double* g, DRows rows, DCount row0) {
+  if (nf.grid() > 0) k_friction_terms<<<blocks(nf.grid()), kThreads>>>(m, F, f, nf, h, mu, eps_v, e, g, rows, row0);
 }
 
 }  // namespace rcipc::gpu

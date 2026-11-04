@@ -78,8 +78,9 @@ __device__ inline double pair_radii(const DModel& m, int id1, int id2, bool ee) 
 __device__ inline int query_xf(int kind) { return kind == 1 ? 1 : 0; }
 
 __global__ void k_pair_cull(DModel m, DFrames F, const double* boxes, const int* pairs, const int* npairs_d,
-                            int pair_cap, double dmax, const double* A, const double* D, double len, double c,
+                            int pair_cap, double dmax, const double* A, const double* D, DScalar lenp, double c,
                             DNarrow N) {
+  const double len = lenp.get();
   const int lane = threadIdx.x & 31;
   const unsigned below = (1u << lane) - 1;
   const int pi = blockIdx.x * kPairWarps + (threadIdx.x >> 5);
@@ -205,7 +206,7 @@ __global__ void k_work_cull(DModel m, const double* boxes, const int* pairs, DNa
 }  // namespace
 
 void launch_narrow(const DModel& m, const DFrames& F, const double* boxes, const int* pairs, const int* npairs_d,
-                   int pair_cap, double dmax, const double* A, const double* D, double len, double c, DNarrow N,
+                   int pair_cap, double dmax, const double* A, const double* D, DScalar len, double c, DNarrow N,
                    DCands C) {
   cudaMemsetAsync(N.work_n, 0, sizeof(int));
   cudaMemsetAsync(C.count, 0, sizeof(int));

@@ -80,8 +80,9 @@ __global__ void k_accel_bounds(DModel m, const double* q, const double* p, doubl
   A[b] = a;
 }
 
-__global__ void k_ground_ccd(DModel m, const double* Xa, const double* Xb, const double* A, double len, double c,
+__global__ void k_ground_ccd(DModel m, const double* Xa, const double* Xb, const double* A, DScalar lenp, double c,
                              double* tmin, double* ds_need) {
+  const double len = lenp.get();
   // curved_ccd 的顶点–平面部分：弦上距离线性，带矢高余量的闭式解。
   const int v = blockIdx.x * blockDim.x + threadIdx.x;
   if (v >= m.nvert) return;
@@ -163,7 +164,8 @@ __global__ void k_body_disp(DModel m, const double* Xa, const double* Xb, double
   atomic_max(D + m.vbody[v], norm(v3load(Xb + 3 * v) - v3load(Xa + 3 * v)));
 }
 
-__global__ void k_ccd_init(double* tmin, double* ds_need, double* seen, double len) {
+__global__ void k_ccd_init(double* tmin, double* ds_need, double* seen, DScalar lenp) {
+  const double len = lenp.get();
   // 一段开始时的初值（一个线程）：截断位置 1、需要的段长 len、候选、刚体对、工作项的个数 0。用内核写，不用同步的拷贝。
   *tmin = 1.0;
   *ds_need = len;
@@ -190,8 +192,9 @@ __device__ inline void prim_box(const DModel& m, const double* Xa, const double*
 }
 
 __global__ void k_ccd_exact(DModel m, const double* Xa, const double* Xb, const double* boxes, const double* A,
-                            double len, double c, DCands C, const int* npairs_d, const int* work_n, double* tmin,
+                            DScalar lenp, double c, DCands C, const int* npairs_d, const int* work_n, double* tmin,
                             double* ds_need, double* seen) {
+  const double len = lenp.get();
   // 一个线程一个候选（narrow.cu 剔下来的）。剔除只保证“段起点的距离不小于阈值 T 的对一定被剔掉”，所以这里先按
   // CPU 版 curved_ccd 的规则用双精度复核（第一个图元的扫掠盒和对方刚体、和第二个图元都按 xi 重叠），
   // 通过的才做 ACCD（accd_pair）。做 ACCD 的对是 CPU 版的一个子集，少掉的都是 ACCD 什么也不改的（笔记第 4 节）。
@@ -245,7 +248,7 @@ void launch_accel_bounds(const DModel& m, const double* q, const double* p, doub
   k_accel_bounds<<<blocks(m.nbody), kThreads>>>(m, q, p, A);
 }
 
-void launch_ground_ccd(const DModel& m, const double* Xa, const double* Xb, const double* A, double len, double c,
+void launch_ground_ccd(const DModel& m, const double* Xa, const double* Xb, const double* A, DScalar len, double c,
                        double* tmin, double* ds_need) {
   if (m.nplane > 0 && m.nvert > 0) k_ground_ccd<<<blocks(m.nvert), kThreads>>>(m, Xa, Xb, A, len, c, tmin, ds_need);
 }
@@ -255,12 +258,12 @@ void launch_body_disp(const DModel& m, const double* Xa, const double* Xb, doubl
   if (m.nvert > 0) k_body_disp<<<blocks(m.nvert), kThreads>>>(m, Xa, Xb, D);
 }
 
-void launch_ccd_init(double* tmin, double* ds_need, double* seen, double len) {
+void launch_ccd_init(double* tmin, double* ds_need, double* seen, DScalar len) {
   k_ccd_init<<<1, 1>>>(tmin, ds_need, seen, len);
 }
 
 void launch_pair_ccd(const DModel& m, const DFrames& Fa, const double* Xb, const double* boxes, const double* D,
-                     const double* A, double len, double c, const int* pairs, const int* npairs_d, int pair_cap,
+                     const double* A, DScalar len, double c, const int* pairs, const int* npairs_d, int pair_cap,
                      DNarrow N, DCands C, double* tmin, double* ds_need, double* seen) {
   launch_narrow(m, Fa, boxes, pairs, npairs_d, pair_cap, 0.0, A, D, len, c, N, C);
   if (pair_cap > 0)

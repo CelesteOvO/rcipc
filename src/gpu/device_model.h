@@ -6,6 +6,35 @@
 // 相邻线程读相邻的元素，显存访问能合并。所有指针都指向显存。
 namespace rcipc::gpu {
 
+#ifdef __CUDACC__
+#define RC_DM_HD __host__ __device__
+#else
+#define RC_DM_HD
+#endif
+
+// 一个标量参数：主机传的值，或者显存里的地址。CUDA graph 版的 Newton 迭代（stepper.cc、iter.cu）录好以后，
+// 内核的参数就固定了；每次迭代都会变的数（步长、段长、kappa、接触数、行数）只能放在显存里，由内核自己去读。
+// 从 double / int 隐式转换，所以逐个发射的调用照常传值。
+struct DScalar {
+  double v = 0;
+  const double* p = nullptr;
+  RC_DM_HD DScalar(double x = 0) : v(x) {}
+  RC_DM_HD DScalar(double x, const double* ptr) : v(x), p(ptr) {}
+  RC_DM_HD double get() const { return p ? *p : v; }
+};
+// 一个个数：主机传的值，或者显存里的地址（这时不超过 cap，网格按 cap 开）。
+struct DCount {
+  int v = 0;
+  const int* p = nullptr;
+  int cap = 0;
+  RC_DM_HD DCount(int x = 0) : v(x) {}
+  RC_DM_HD DCount(const int* ptr, int c) : v(0), p(ptr), cap(c) {}
+#ifdef __CUDACC__
+  __device__ int get() const { return p ? min(*p, cap) : v; }
+#endif
+  int grid() const { return p ? cap : v; }  // 发射时按多少个开网格
+};
+
 constexpr int kMaxDepth = 64;  // 链的最大深度（FK 和链上的遍历用的本地数组大小）
 
 // 关节类型，和 JointType 的顺序一致。
@@ -158,6 +187,40 @@ struct DRows {
   int* body = nullptr;  // 每行 2 个：A 侧、B 侧的刚体（0 = 世界，这一侧没有贡献）
   double* w = nullptr;  // 每行 12 个：A 侧 f、tau，B 侧 f、tau
   double* D = nullptr;  // 每行的权重
+};
+
+// CUDA graph 版的一个 Newton 迭代（iter.cu、stepper.cc 的 Graph）：图录好以后内核参数都固定了，
+// 每次迭代会变的数都放在这个结构里（显存），由设备上的小内核读写；迭代结束时主机把整个结构读回一次。
+enum IterStatus { kIterRunning = 0, kIterConverged = 1, kIterDone = 2, kIterOverflow = 3 };
+struct DIter {
+  // 主机在发图之前写（异步拷贝，这三个放在最前面，一次拷完）：
+  double kappa = 0;
+  int nc = 0;       // 当前点的接触个数（接受试探点时由设备更新）
+  int nf = 0;       // 摩擦接触的个数（步首冻结）
+  // 设备写：
+  int nrow = 0;     // nc + 2 nf
+  int status = 0;   // IterStatus
+  int pcg = 0;      // PCG 的迭代次数
+  int segs = 0;     // CCD 的段数
+  int trials = 0;   // 线搜索试探了几次
+  int adv = 0;      // CCD：这一段通过了，下一段从它的终点开始（Fb 拷到 Fa）
+  int cont = 0;     // 循环要不要继续（逐个发射时主机读它；录图时同时写进条件节点）
+  int need[4] = {0, 0, 0, 0};  // 溢出时：刚体对、接触、候选、工作项各需要多少
+  double e0 = 0, size = 0;     // 组装时的能量、收敛量（整步里顶点的最大位移 / h）
+  double s = 0;                // launch_integrate 的参数（段终点，或试探的 alpha）
+  double s0 = 0, ds = 0, len = 0, t_ccd = -1;  // CCD：段起点、下一段的长度、这一段的长度、截断位置
+  double alpha_max = 0, alpha = 0;
+  double e_trial = 0, dmin = 0;  // 最后一次试探的能量、接触里最小的距离
+};
+
+// 预条件器的工作区（solver.cu 的 launch_precond_build，调用者分配）：
+//   Wb：每个刚体一个 6x6 对称矩阵 sum D w w^T（只存上三角 21 个），w 是落在这个刚体上的那一侧力旋量（关于树根）；
+//   cross：两侧在同一棵树里的行（它们还有两侧之间的交叉项），个数在显存里的 ncross，最多 cap 个（不少于行数）。
+struct DPrecondWork {
+  double* Wb = nullptr;
+  int* cross = nullptr;
+  int* ncross = nullptr;
+  int cap = 0;
 };
 
 }  // namespace rcipc::gpu

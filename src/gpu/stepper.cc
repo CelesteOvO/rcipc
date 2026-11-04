@@ -7,6 +7,8 @@
 // 每次读回都要等 GPU 把前面的活做完，GPU 在主机发下一批内核之前是空着的；所以能一起读的尽量一起读
 // （组装的能量、PCG 的迭代次数、收敛判断的位移一次读回；限位 CCD 的结果跟着第一段 CCD 读回；
 // kappa 调整用的最小距离跟着线搜索的能量读回），往显存里写一个数也用小内核，不用同步的拷贝（笔记第 8 节）。
+// 默认的写法更进一步：一个 Newton 迭代录成一张 CUDA graph，CCD 的分段和线搜索的回溯在设备上循环，
+// 每个迭代只读回一次（newton_graph、record_graph，笔记第 12 节）；逐个发射的循环（step() 里）留着做对照和后备。
 #include "rcipc/gpu.h"
 
 #include <cuda_runtime.h>
@@ -20,7 +22,11 @@
 #include <string>
 #include <utility>
 
+#include <cstddef>
+#include <cstring>
+
 #include "device_model.h"
+#include "iter.h"
 #include "kernels.h"
 #include "rcipc/contact.h"
 #include "rcipc/limits.h"
@@ -35,6 +41,10 @@ namespace {
 void check(cudaError_t e, const char* what) {
   if (e != cudaSuccess) throw std::runtime_error(std::string("CUDA error in ") + what + ": " + cudaGetErrorString(e));
 }
+
+// 显存缓冲区的“版本”：任何一块重新分配、或者两组交换指针，都加一。录好的 CUDA graph 里写死了指针，
+// 版本变了就要重录（笔记第 12 节）。
+long g_buf_gen = 0;
 
 // 一块显存。reserve 只增不减，增大时原来的内容不保留（这里的缓冲区都是每次重写的）。
 template <class T>
@@ -52,6 +62,7 @@ class DBuf {
     p_ = nullptr;
     check(cudaMalloc(&p_, std::max<size_t>(n, 1) * sizeof(T)), "cudaMalloc");
     n_ = std::max<size_t>(n, 1);
+    ++g_buf_gen;
   }
   void upload(const T* src, size_t n) {
     reserve(n);
@@ -66,6 +77,7 @@ class DBuf {
   void swap(DBuf& o) {
     std::swap(p_, o.p_);
     std::swap(n_, o.n_);
+    ++g_buf_gen;
   }
 
  private:
@@ -242,6 +254,8 @@ struct Stepper::Impl {
   DBuf<int> row_body;
   DBuf<double> row_w, row_D;
   int row_cap = 0, nrow = 0;
+  DBuf<double> pw_Wb;          // 预条件器：每个刚体的 6x6（21 个）
+  DBuf<int> pw_cross, pw_n;    // 两侧在同一棵树里的行，和它们的个数
   int last_eval_n = 0;  // energy_at 最后一次检测到的接触个数（contacts 里放的就是这些）
   // 协作内核版的 PCG（pcg_coop.cu）：acc 是每次迭代的点积，pcg_out 是迭代次数和是否收敛。
   bool coop = false;
@@ -249,11 +263,39 @@ struct Stepper::Impl {
   double last_eval_dmin = 0;  // energy_at 最后一次检测到的接触里最小的距离
   DBuf<double> pcg_acc;
 
+  // CUDA graph 版的 Newton 迭代（笔记第 12 节）。
+  bool graphs = true;      // 用不用（set_graphs）
+  bool graph_failed = false;  // 录图或者启动失败过一次，以后就不再试
+  bool last_graph = false;    // 上一步是不是用图跑的（测试用）
+  DBuf<DIter> d_it;
+  DIter* h_it = nullptr;   // 锁页内存：迭代前写 kappa、nc、nf，迭代后整个读回
+  cudaGraph_t graph = nullptr;
+  cudaGraphExec_t graph_exec = nullptr;
+  // 录图时写死的东西：缓冲区的版本，和 StepParams 里用到的常数。变了就重录。
+  struct GraphKey {
+    long gen = -1;
+    double h = 0, dhat = 0, mu = 0, eps_v = 0, curv = 0, limit_k = 0, limit_dhat = 0, c = 0, tol = 0, pcg_tol = 0;
+    int pcg_max = 0;
+    bool operator==(const GraphKey& o) const {
+      return gen == o.gen && h == o.h && dhat == o.dhat && mu == o.mu && eps_v == o.eps_v && curv == o.curv &&
+             limit_k == o.limit_k && limit_dhat == o.limit_dhat && c == o.c && tol == o.tol && pcg_tol == o.pcg_tol &&
+             pcg_max == o.pcg_max;
+    }
+  };
+  GraphKey graph_key;
+
   Timers timers;
 
   explicit Impl(const Model& model_in) : model(model_in) {
     upload();
     coop = pcg_coop_supported();
+    d_it.reserve(1);
+    check(cudaMallocHost(&h_it, sizeof(DIter)), "cudaMallocHost");
+    *h_it = DIter();
+  }
+  ~Impl() {
+    drop_graph();
+    if (h_it) cudaFreeHost(h_it);
   }
 
   // ---------- 上传 ----------
@@ -504,6 +546,8 @@ struct Stepper::Impl {
     xfa.reserve(3 * static_cast<size_t>(std::max(m.nvert, 1)));
     xfb.reserve(3 * static_cast<size_t>(std::max(m.nvert, 1)));
     bdisp.reserve(nb);
+    pw_Wb.reserve(21 * static_cast<size_t>(nb));
+    pw_n.reserve(1);
     grow_cands(1 << 16);
     cnt.reserve(4);
     grow_pairs(1024);
@@ -511,8 +555,10 @@ struct Stepper::Impl {
     grow_rows(3 * 1024);
   }
 
+  // 容量也写死在录好的图里，所以改了容量（哪怕没有重新分配）也要让版本加一。
   void grow_pairs(int n) {
     pair_cap = n;
+    ++g_buf_gen;
     pairs.reserve(2 * static_cast<size_t>(n));
     n_pxf.reserve(24 * static_cast<size_t>(n));
     n_ppad.reserve(n);
@@ -521,6 +567,7 @@ struct Stepper::Impl {
   }
   void grow_work(int n) {
     work_cap = n;
+    ++g_buf_gen;
     n_work.reserve(n);
   }
   // 工作项的个数在 cnt[3]。
@@ -539,20 +586,27 @@ struct Stepper::Impl {
     // 只扩接触的缓冲区。摩擦接触在步首冻结以后整步都要用，不能在这里跟着重新分配（重新分配会丢掉内容）。
     contact_cap = n;
     contacts.reserve(n);
+    ++g_buf_gen;
   }
   void grow_cands(int n) {
     cand_cap = n;
+    ++g_buf_gen;
     cand.reserve(n);
   }
   DCands cands() const { return DCands{cand.get(), cnt.get() + 2, cand_cap}; }
+  // 行数每次组装都在变，按 1.5 倍扩容：每次只扩到刚好够用时，接触一多就要重新分配，cudaFree 会让整个设备同步。
   void grow_rows(int n) {
     if (n <= row_cap) return;
+    n = std::max(n, row_cap + row_cap / 2);
     row_cap = n;
+    ++g_buf_gen;
     row_body.reserve(2 * static_cast<size_t>(n));
     row_w.reserve(12 * static_cast<size_t>(n));
     row_D.reserve(n);
+    pw_cross.reserve(n);
   }
   DRows rows_view() const { return DRows{row_body.get(), row_w.get(), row_D.get()}; }
+  DPrecondWork precond_work() const { return DPrecondWork{pw_Wb.get(), pw_cross.get(), pw_n.get(), row_cap}; }
 
   // ---------- 计时 ----------
 
@@ -622,7 +676,7 @@ struct Stepper::Impl {
     nf = 0;
     if (Pm.mu > 0 && kappa > 0) {
       const int n0 = detect(F0, Pm.dhat);
-      fric.reserve(std::max(n0, 1));  // 冻结之前扩容
+      if (static_cast<size_t>(n0) > fric.size()) fric.reserve(std::max<size_t>(n0, fric.size() + fric.size() / 2));  // 冻结之前扩容
       nf = launch_friction_lag(m, F0.X.get(), contacts.get(), n0, kappa, Pm.dhat, fric.get(), cnt.get());
     }
     timers.prepare += ms_since(t0);
@@ -673,7 +727,7 @@ struct Stepper::Impl {
   // 迭代次数：主机循环版直接返回；协作内核版不等，返回 -1，次数在 scal[12]（defer = false 时这里读回）。
   int pcg_solve(const double* rhs_d, double* x, double tol, int max_iter, bool defer = false) {
     const auto t0 = Clock::now();
-    launch_precond_build(m, F.view(), Hk.get(), rows_view(), nrow, P.get(), scale.get());
+    launch_precond_build(m, F.view(), Hk.get(), rows_view(), nrow, P.get(), scale.get(), precond_work());
     bool conv = false;
     int it = -1;
     if (coop) {
@@ -786,6 +840,284 @@ struct Stepper::Impl {
     return std::min(std::max(kappa, range.min), range.max);
   }
 
+  // ---------- CUDA graph 版的 Newton 迭代（笔记第 12 节）----------
+  //
+  // 一个 Newton 迭代录成一张图：组装、预条件器、协作 PCG、收敛判断，然后两个条件节点（WHILE）：CCD 的分段循环、
+  // 线搜索的回溯循环，最后接受试探点。循环里的判断是 iter.cu 的小内核，和下面 step() 里的那几行一一对应。
+  // 图录好以后内核参数固定，会变的数都在显存里的 DIter（d_it）；主机每个迭代只发一次图、读回一次 DIter。
+  // 任何缓冲区放不下时这次迭代作废（不接受试探点），主机扩容、重新检测当前点的接触，重录以后再发一次。
+
+  void drop_graph() {
+    if (graph_exec) cudaGraphExecDestroy(graph_exec);
+    if (graph) cudaGraphDestroy(graph);
+    graph_exec = nullptr;
+    graph = nullptr;
+    graph_key = GraphKey();
+  }
+
+  // f() 里发出去的操作捕获到图 g 里，接在 deps 后面；返回时 deps 是捕获出来的最后几个节点。
+  template <class Fn>
+  void capture_into(cudaGraph_t gr, std::vector<cudaGraphNode_t>& deps, Fn&& f) {
+    check(cudaStreamBeginCaptureToGraph(cudaStreamPerThread, gr, deps.empty() ? nullptr : deps.data(), nullptr,
+                                        deps.size(), cudaStreamCaptureModeThreadLocal),
+          "begin capture");
+    try {
+      f();
+    } catch (...) {
+      cudaGraph_t dummy = gr;
+      cudaStreamEndCapture(cudaStreamPerThread, &dummy);
+      throw;
+    }
+    cudaStreamCaptureStatus st;
+    const cudaGraphNode_t* d = nullptr;
+    size_t nd = 0;
+    check(cudaStreamGetCaptureInfo(cudaStreamPerThread, &st, nullptr, nullptr, &d, &nd), "capture info");
+    std::vector<cudaGraphNode_t> tail(d, d + nd);
+    cudaGraph_t out = gr;
+    check(cudaStreamEndCapture(cudaStreamPerThread, &out), "end capture");
+    deps = std::move(tail);
+  }
+
+  // WHILE 节点接在 deps 后面（循环条件是句柄 h），返回循环体的图；deps 变成这个节点。
+  cudaGraph_t add_while(cudaGraph_t gr, std::vector<cudaGraphNode_t>& deps, cudaGraphConditionalHandle h) {
+    cudaGraphNodeParams np = {};
+    np.type = cudaGraphNodeTypeConditional;
+    np.conditional.handle = h;
+    np.conditional.type = cudaGraphCondTypeWhile;
+    np.conditional.size = 1;
+    cudaGraphNode_t node;
+    check(cudaGraphAddNode(&node, gr, deps.empty() ? nullptr : deps.data(), deps.size(), &np), "while node");
+    deps = {node};
+    return np.conditional.phGraph_out[0];
+  }
+
+  void copy_frames(const FrameBufs& from, FrameBufs& to) {
+    cudaMemcpyAsync(to.xpos.get(), from.xpos.get(), sizeof(double) * 3 * m.nbody, cudaMemcpyDeviceToDevice);
+    cudaMemcpyAsync(to.xquat.get(), from.xquat.get(), sizeof(double) * 4 * m.nbody, cudaMemcpyDeviceToDevice);
+    cudaMemcpyAsync(to.daxis.get(), from.daxis.get(), sizeof(double) * 3 * m.nv, cudaMemcpyDeviceToDevice);
+    cudaMemcpyAsync(to.danchor.get(), from.danchor.get(), sizeof(double) * 3 * m.nv, cudaMemcpyDeviceToDevice);
+    cudaMemcpyAsync(to.X.get(), from.X.get(), sizeof(double) * 3 * m.nvert, cudaMemcpyDeviceToDevice);
+  }
+
+  // 录一个 Newton 迭代。
+  void record_graph(const StepParams& Pm) {
+    DIter* it = d_it.get();
+    double* sc = scal.get();
+    const double h = Pm.h;
+    const DCount nc_d(&it->nc, contact_cap), nf_d(&it->nf, static_cast<int>(fric.size()));
+    const DCount nrow_d(&it->nrow, row_cap);
+    const DScalar kappa_d(0, &it->kappa), s_d(0, &it->s), len_d(0, &it->len);
+    const bool fr = Pm.mu > 0;
+    check(cudaGraphCreate(&graph, 0), "graph create");
+    cudaGraphConditionalHandle hc, hl;
+    check(cudaGraphConditionalHandleCreate(&hc, graph, 0, 0), "handle");
+    check(cudaGraphConditionalHandleCreate(&hl, graph, 0, 0), "handle");
+    std::vector<cudaGraphNode_t> deps;
+
+    // 第 1、2 步：组装（assemble）、预条件器和 PCG（pcg_solve）、收敛判断；第 3 步的开头。
+    capture_into(graph, deps, [&] {
+      launch_it_begin(it);
+      cudaMemsetAsync(sc, 0, sizeof(double));
+      cudaMemsetAsync(g.get(), 0, sizeof(double) * m.nv);
+      launch_inertia_hessian(m, F.view(), h, Hk.get());
+      launch_inertia_energy(m, F.view(), tc.get(), tA.get(), h, sc);
+      launch_inertia_gradient(m, F.view(), tc.get(), tA.get(), h, g.get());
+      launch_contact_terms(m, F.view(), q.get(), contacts.get(), nc_d, kappa_d, Pm.dhat, Pm.curv_scale, sc, g.get(),
+                           Hk.get(), rows_view());
+      if (fr) launch_friction_terms(m, F.view(), fric.get(), nf_d, h, Pm.mu, Pm.eps_v, sc, g.get(), rows_view(), nc_d);
+      launch_limits(m, q.get(), Pm.limit_k, Pm.limit_dhat, sc, g.get(), Hk.get());
+      launch_precond_build(m, F.view(), Hk.get(), rows_view(), nrow_d, P.get(), scale.get(), precond_work());
+      if (run_pcg_coop(m, F.view(), Hk.get(), rows_view(), nrow_d, P.get(), g.get(), p.get(), Pm.pcg_tol, Pm.pcg_max,
+                       work.get(), pcg_acc.get(), sc + 12) != 0)
+        throw std::runtime_error("cooperative PCG does not fit");
+      launch_scale(p.get(), m.nv, -1.0);
+      launch_integrate(m, q.get(), p.get(), 1.0, qtrial.get());
+      launch_fk(m, qtrial.get(), F1.view());
+      launch_fill(sc + 7, 0.0);
+      launch_max_displacement(F.X.get(), F1.X.get(), m.nvert, sc + 7);
+      launch_it_converge(it, sc, h, Pm.tol);
+      launch_accel_bounds(m, q.get(), p.get(), A.get());
+      launch_ccd_setup(it, A.get(), m.nbody, Pm.dhat, sc, hc);
+      launch_limit_ccd(m, q.get(), p.get(), Pm.c, sc + 3);
+      copy_frames(F, Fa);  // 第一段从当前点开始
+    });
+
+    // 第 3 步：CCD 的分段（ccd()）。
+    cudaGraph_t body = add_while(graph, deps, hc);
+    std::vector<cudaGraphNode_t> bd;
+    capture_into(body, bd, [&] {
+      launch_ccd_seg_begin(it);
+      launch_integrate(m, q.get(), p.get(), s_d, qtrial.get());
+      launch_fk(m, qtrial.get(), Fb.view());
+      launch_ccd_init(sc + 1, sc + 2, sc + 9, len_d);
+      launch_ground_ccd(m, Fa.X.get(), Fb.X.get(), A.get(), len_d, Pm.c, sc + 1, sc + 2);
+      if (pairs_on()) {
+        launch_swept_boxes(m, Fa.X.get(), Fb.X.get(), boxes.get());
+        launch_body_pairs(m, boxes.get(), 0.0, A.get(), len_d, pairs.get(), pair_cap, cnt.get());
+        launch_body_disp(m, Fa.X.get(), Fb.X.get(), bdisp.get());
+        launch_to_float(Fa.X.get(), 3 * m.nvert, xfa.get());
+        launch_to_float(Fb.X.get(), 3 * m.nvert, xfb.get());
+        DNarrow N = narrow();
+        N.xa = xfa.get();
+        N.xb = xfb.get();
+        launch_pair_ccd(m, Fa.view(), Fb.X.get(), boxes.get(), bdisp.get(), A.get(), len_d, Pm.c, pairs.get(),
+                        cnt.get(), pair_cap, N, cands(), sc + 1, sc + 2, sc + 9);
+      } else {
+        launch_fill(sc + 9, 0.0);
+        launch_fill(sc + 10, 0.0);
+        launch_fill(sc + 11, 0.0);
+      }
+      launch_ccd_seg_end(it, sc, pair_cap, work_cap, cand_cap, hc);
+      launch_copy_frames_if(it, Fb.view(), Fa.view(), m.nbody, m.nv, m.nvert);
+    });
+
+    // 第 4 步：回溯线搜索（energy_at）。
+    capture_into(graph, deps, [&] { launch_ls_setup(it, sc, hl); });
+    body = add_while(graph, deps, hl);
+    bd.clear();
+    capture_into(body, bd, [&] {
+      launch_integrate(m, q.get(), p.get(), s_d, qtrial.get());
+      launch_fk(m, qtrial.get(), Ft.view());
+      launch_body_boxes(m, Ft.X.get(), boxes.get());
+      if (pairs_on()) launch_body_pairs(m, boxes.get(), Pm.dhat, nullptr, 0.0, pairs.get(), pair_cap, cnt.get());
+      else cudaMemsetAsync(cnt.get(), 0, sizeof(int));
+      launch_detect_async(m, Ft.view(), boxes.get(), pairs.get(), pairs_on() ? pair_cap : 0, Pm.dhat, narrow(),
+                          cands(), contacts.get(), contact_cap, cnt.get());
+      const DCount n_d(cnt.get() + 1, contact_cap);
+      cudaMemsetAsync(sc, 0, sizeof(double));
+      launch_inertia_energy(m, Ft.view(), tc.get(), tA.get(), h, sc);
+      launch_contact_terms(m, Ft.view(), qtrial.get(), contacts.get(), n_d, kappa_d, Pm.dhat, 0.0, sc, nullptr,
+                           nullptr, DRows{});
+      if (fr) launch_friction_terms(m, Ft.view(), fric.get(), nf_d, h, Pm.mu, Pm.eps_v, sc, nullptr, DRows{}, 0);
+      launch_limits(m, qtrial.get(), Pm.limit_k, Pm.limit_dhat, sc, nullptr, nullptr);
+      launch_fill(sc + 4, std::numeric_limits<double>::infinity());
+      launch_min_distance(contacts.get(), n_d, sc + 4);
+      launch_ls_end(it, sc, cnt.get(), pair_cap, contact_cap, cand_cap, work_cap, hl);
+    });
+
+    // 第 5 步：接受最后一次试探的点。
+    capture_into(graph, deps, [&] {
+      launch_it_accept(it, qtrial.get(), q.get(), m.nq, Ft.view(), F.view(), m.nbody, m.nv, m.nvert, cnt.get());
+    });
+    check(cudaGraphInstantiate(&graph_exec, graph, 0), "graph instantiate");
+  }
+
+  GraphKey key_for(const StepParams& Pm) const {
+    GraphKey k;
+    k.gen = g_buf_gen;
+    k.h = Pm.h;
+    k.dhat = Pm.dhat;
+    k.mu = Pm.mu;
+    k.eps_v = Pm.eps_v;
+    k.curv = Pm.curv_scale;
+    k.limit_k = Pm.limit_k;
+    k.limit_dhat = Pm.limit_dhat;
+    k.c = Pm.c;
+    k.tol = Pm.tol;
+    k.pcg_tol = Pm.pcg_tol;
+    k.pcg_max = Pm.pcg_max;
+    return k;
+  }
+
+  // 图能不能用：录过而且没过期就直接用，过期了重录。录图失败时返回 false（以后都用逐个发射）。
+  bool ensure_graph(const StepParams& Pm) {
+    pcg_acc.reserve(2 * static_cast<size_t>(Pm.pcg_max) + 4);  // 录图时不能分配显存
+    const GraphKey k = key_for(Pm);
+    if (graph_exec && k == graph_key) return true;
+    drop_graph();
+    try {
+      record_graph(Pm);
+    } catch (const std::exception&) {
+      drop_graph();
+      cudaGetLastError();
+      graph_failed = true;
+      return false;
+    }
+    graph_key = key_for(Pm);  // 录图时不会分配显存，版本应该没变；保险起见再取一次
+    return true;
+  }
+
+  bool use_graph(const StepParams& Pm, const std::vector<NewtonIterate>* trace) const {
+    (void)Pm;
+    return graphs && !graph_failed && coop && trace == nullptr && m.nvert > 0;
+  }
+
+  // 一次图版的 Newton 迭代：写 kappa、nc、nf，发图，读回 DIter。
+  const DIter& run_graph_iteration(double kappa) {
+    h_it->kappa = kappa;
+    h_it->nc = nc;
+    h_it->nf = nf;
+    check(cudaMemcpyAsync(d_it.get(), h_it, offsetof(DIter, nrow), cudaMemcpyHostToDevice), "iter header");
+    check(cudaGraphLaunch(graph_exec, cudaStreamPerThread), "graph launch");
+    check(cudaMemcpyAsync(h_it, d_it.get(), sizeof(DIter), cudaMemcpyDeviceToHost), "iter read");
+    check(cudaStreamSynchronize(cudaStreamPerThread), "iter sync");
+    return *h_it;
+  }
+
+  // 图版的 Newton 循环（和下面 step() 里的循环一样，只是每个迭代的第 1–5 步是一次 run_graph_iteration）。
+  // 第一次录图就失败时返回 false，step() 改用逐个发射的循环。
+  bool newton_graph(const StepParams& Pm, SolverState* state, const KappaRange& krange, int& newton, int& pcg_total,
+                    bool& semi_stopped) {
+    double beta = 1.0;
+    int redo = 0;
+    for (int it = 1; it <= Pm.max_newton;) {
+      newton = it;
+      // 第 0 步：第一次出现接触时初始化 kappa（逐个发射，很少走到）。
+      if (nc > 0 && state->kappa == 0) {
+        const auto t0 = Clock::now();
+        state->kappa = initial_kappa(Pm);
+        state->dmin_prev = contact_dmin(nc);
+        timers.assemble += ms_since(t0);
+      }
+      grow_rows(contact_cap + 2 * nf);  // 行数不超过 nc + 2 nf，nc 不超过 contact_cap：图里不用再扩容
+      if (!ensure_graph(Pm)) {
+        if (it == 1) return false;
+        throw std::runtime_error("CUDA graph could not be recorded in the middle of a step");
+      }
+      const auto t0 = Clock::now();
+      const DIter r = run_graph_iteration(state->kappa);
+      timers.graph += ms_since(t0);
+      if (r.status == kIterOverflow) {
+        // 某个缓冲区放不下：这次迭代没有接受任何东西。扩容，重新检测当前点的接触（线搜索把它们覆盖了），重来。
+        if (r.need[0] > pair_cap) grow_pairs(2 * r.need[0]);
+        if (r.need[1] > contact_cap) grow_contacts(2 * r.need[1]);
+        if (r.need[2] > cand_cap) grow_cands(2 * r.need[2]);
+        if (r.need[3] > work_cap) grow_work(2 * r.need[3]);
+        nc = detect(F, Pm.dhat);
+        if (++redo > 50) throw std::runtime_error("CUDA graph iteration keeps overflowing");
+        continue;
+      }
+      redo = 0;
+      timers.contacts += nc;
+      timers.rows += r.nrow;
+      timers.pcg += r.pcg;
+      timers.energy_evals += r.trials;
+      pcg_total += r.pcg;
+      if (r.status == kIterConverged) break;
+      nc = r.nc;
+      // 第 6 步：kappa 调整（接受的点上的最小距离）。
+      if (Pm.adapt_kappa && state->kappa > 0) {
+        const double dmin = r.dmin;
+        if (dmin < 1e-3 * Pm.dhat && dmin < state->dmin_prev) {
+          state->kappa = std::min(2 * state->kappa, krange.max);
+        } else if (dmin > 1e-2 * Pm.dhat) {
+          state->kappa = std::max(0.5 * state->kappa, krange.min);
+        }
+        state->dmin_prev = dmin;
+      }
+      // 第 7 步：半隐式提前停止。
+      if (Pm.semi_implicit && it >= Pm.semi_kmin) {
+        beta *= (1 - r.alpha_max);
+        if (beta <= Pm.semi_beta_tol && r.alpha == r.alpha_max) {
+          semi_stopped = true;
+          break;
+        }
+      }
+      ++it;
+    }
+    return true;
+  }
+
   // ---------- 一个时间步：和 src/step.cc 的 step() 一行一行对应 ----------
 
   StepResult step(const StepParams& Pm, const VectorXd& q0h, const VectorXd& v0h, SolverState* state,
@@ -806,7 +1138,10 @@ struct Stepper::Impl {
     int newton = 0, pcg_total = 0;
     bool semi_stopped = false;
     double beta = 1.0;
-    for (int it = 1; it <= Pm.max_newton; ++it) {
+    const bool graph_done =
+        use_graph(Pm, trace) && newton_graph(Pm, state, krange, newton, pcg_total, semi_stopped);
+    last_graph = graph_done;
+    for (int it = 1; !graph_done && it <= Pm.max_newton; ++it) {
       newton = it;
       // 第 0 步：第一次出现接触时初始化 kappa。
       if (nc > 0 && state->kappa == 0) {
@@ -926,6 +1261,14 @@ bool Stepper::set_cooperative_pcg(bool on) {
   return impl_->coop;
 }
 void Stepper::reset_timers() { impl_->timers = Timers(); }
+void Stepper::set_graphs(bool on) { impl_->graphs = on; }
+bool Stepper::used_graphs() const { return impl_->last_graph; }
+void Stepper::set_capacities(int pairs, int contacts, int candidates, int work) {
+  impl_->grow_pairs(pairs);
+  impl_->grow_contacts(contacts);
+  impl_->grow_cands(candidates);
+  impl_->grow_work(work);
+}
 void Stepper::set_timing(bool on) { impl_->timing = on; }
 
 Frames Stepper::fk(const VectorXd& qh) {
@@ -1004,6 +1347,23 @@ VectorXd Stepper::solve(const VectorXd& rhs_h, double tol, int* iterations) {
   VectorXd x(I.m.nv);
   I.p.download(x.data(), I.m.nv);
   return x;
+}
+
+MatrixXd Stepper::precond_inverse() {
+  Impl& I = *impl_;
+  const int nv = I.m.nv, TD = I.m.TD;
+  launch_precond_build(I.m, I.F.view(), I.Hk.get(), I.rows_view(), I.nrow, I.P.get(), I.scale.get(), I.precond_work());
+  std::vector<double> P(static_cast<size_t>(std::max(I.m.ntree, 1)) * TD * TD);
+  I.P.download(P.data(), P.size());
+  MatrixXd out = MatrixXd::Zero(nv, nv);
+  for (int d = 0; d < nv; ++d) {
+    const int t = I.model.dof_tree[d];
+    int d0 = d;
+    while (d0 > 0 && I.model.dof_tree[d0 - 1] == t) --d0;
+    for (int e = 0; e < nv; ++e)
+      if (I.model.dof_tree[e] == t) out(d, e) = P[static_cast<size_t>(t) * TD * TD + (d - d0) * TD + (e - d0)];
+  }
+  return out;
 }
 
 double Stepper::ccd(const StepParams& P, const VectorXd& qh, const VectorXd& ph) {

@@ -60,9 +60,10 @@ __device__ inline TreeShared tree_shared(double* base, int TD, int slot) {
   return TreeShared{b, b + 6 * TD, b + 7 * TD, b + 8 * TD};
 }
 
-__global__ void k_pcg_coop(DModel m, DFrames F, const double* Hk, DRows rows, int nrow, const double* P,
+__global__ void k_pcg_coop(DModel m, DFrames F, const double* Hk, DRows rows, DCount nrows, const double* P,
                            const double* rhs, double* x, double* z, double* tw, double* wacc, double* wsub, double* acc,
                            double tol, int max_iter, int slots, double* out) {
+  const int nrow = nrows.get();
   extern __shared__ double smem[];
   cg::grid_group grid = cg::this_grid();
   const int tid = blockIdx.x * blockDim.x + threadIdx.x, nth = gridDim.x * blockDim.x;
@@ -204,14 +205,14 @@ bool pcg_coop_supported() {
   return attr != 0;
 }
 
-int run_pcg_coop(const DModel& m, const DFrames& F, const double* Hk, DRows rows, int nrow, const double* P,
+int run_pcg_coop(const DModel& m, const DFrames& F, const double* Hk, DRows rows, DCount nrow, const double* P,
                  const double* rhs, double* x, double tol, int max_iter, double* work, double* acc, double* res) {
   // 块数和每个 warp 放几棵树（slots）：块数不超过能同时驻留的块数（和共享内存的用量有关），
   // 也不超过任务需要的量（每棵树一个 warp，每行一个线程）；warp 不够分时一个 warp 放几棵树。
   int dev = 0, sms = 0;
   cudaGetDevice(&dev);
   cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, dev);
-  const int want = std::max({(m.ntree + kWarps - 1) / kWarps, (nrow + kThreads - 1) / kThreads, 1});
+  const int want = std::max({(m.ntree + kWarps - 1) / kWarps, (nrow.grid() + kThreads - 1) / kThreads, 1});
   int nblocks = 0, slots = 1;
   size_t smem = 0;
   for (;; ++slots) {

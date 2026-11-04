@@ -4,6 +4,8 @@
 //
 // 约定：
 //   - 所有指针都指向显存，都在默认流上排队；需要把结果读回主机的函数会同步，并在注释里说明；
+//   - 随 Newton 迭代变化的标量和个数用 DScalar / DCount（device_model.h）：逐个发射时直接传值，
+//     CUDA graph 版传显存里的地址（图录好以后参数不能再改）；
 //   - “累加”的输出（能量、梯度、树块）用原子加累加到调用者清零过的缓冲区里，所以几个函数可以往同一个缓冲区里加；
 //   - 每个函数都对应 CPU 版的一个函数，名字和注释里写了是哪一个。
 #include "device_model.h"
@@ -13,7 +15,7 @@ namespace rcipc::gpu {
 // ---------- kin.cu：运动学、惯性项、关节限位 ----------
 
 // out = q ⊕ s p（integrate）。
-void launch_integrate(const DModel& m, const double* q, const double* p, double s, double* out);
+void launch_integrate(const DModel& m, const double* q, const double* p, DScalar s, double* out);
 // 正运动学和顶点的世界坐标（forward_kinematics + world_point）。
 void launch_fk(const DModel& m, const double* q, const DFrames& F);
 // 惯性目标（inertia_targets）：tc nbody x 3，tA nbody x 9。
@@ -40,7 +42,7 @@ void launch_body_boxes(const DModel& m, const double* X, double* boxes);
 void launch_swept_boxes(const DModel& m, const double* Xa, const double* Xb, double* boxes);
 // 候选刚体对：collide(a, b) 并且两个盒子按 margin（A 不为空时再加两侧的矢高 A len^2 / 8）放大后重叠。
 // 写到 pairs（每对两个 int），个数写到显存里的 *d_count（不读回主机）；个数可能大于 cap，调用者事后检查、扩容重来。
-void launch_body_pairs(const DModel& m, const double* boxes, double margin, const double* A, double len, int* pairs,
+void launch_body_pairs(const DModel& m, const double* boxes, double margin, const double* A, DScalar len, int* pairs,
                        int cap, int* d_count);
 // 接触检测（find_contacts）：顶点–平面，加上候选刚体对之间的点–三角形、边–边。只留 d < dmax 的。
 // 返回总数（同步）；可能大于 cap，调用者扩容后重来。
@@ -50,28 +52,31 @@ void launch_body_pairs(const DModel& m, const double* boxes, double margin, cons
 // pair_cap = 0 表示没有刚体对（模型里没有边和三角形）。
 void launch_detect(const DModel& m, const DFrames& F, const double* boxes, const int* pairs, int pair_cap,
                    double dmax, DNarrow N, DCands C, DContact* out, int cap, int* d_cnt, int h_cnt[4]);
+// 同上，但不读回：四个计数留在 d_cnt 里（CUDA graph 版由设备上的小内核检查是否放得下）。
+void launch_detect_async(const DModel& m, const DFrames& F, const double* boxes, const int* pairs, int pair_cap,
+                         double dmax, DNarrow N, DCands C, DContact* out, int cap, int* d_cnt);
 // 窄相的剔除（narrow.cu）：候选刚体对里，在刚体坐标系里剔掉“距离一定不小于阈值”的图元对，剩下的写进 C。
 // 检测时 A 为空，阈值是 dmax；CCD 时阈值是 max(2 xi, xi + 4 Dmax / c)（A 是加速度界，D 是每个刚体的最大位移）。
 // 都再加上两个图元的半径。F 是剔除用的位置的 FK（CCD 时是段起点）。
 void launch_narrow(const DModel& m, const DFrames& F, const double* boxes, const int* pairs, const int* npairs_d,
-                   int pair_cap, double dmax, const double* A, const double* D, double len, double c, DNarrow N,
+                   int pair_cap, double dmax, const double* A, const double* D, DScalar len, double c, DNarrow N,
                    DCands C);
 // out[i] = (float) x[i]，i < n（CCD 的单精度扫掠盒用）。
 void launch_to_float(const double* x, int n, float* out);
 // 接触的各项（contact_energy、contact_gradient、contact_rows、contact_curvature）：
 //   能量累加到 *e，梯度累加到 g，曲率上界累加到 Hk 的对角，行写到 rows 的第 0..n-1 行（哪个为空就不算）。
-void launch_contact_terms(const DModel& m, const DFrames& F, const double* q, const DContact* c, int n, double kappa,
+void launch_contact_terms(const DModel& m, const DFrames& F, const double* q, const DContact* c, DCount n, DScalar kappa,
                           double dhat, double curv_scale, double* e, double* g, double* Hk, DRows rows);
 // 测试用：把行展开成逐个自由度的值（每行 2 CH 个槽，用不到的 idx = -1）。
 void launch_rows_expand(const DModel& m, const DFrames& F, DRows rows, int nrow, int* idx, double* val);
 // 接触里最小的距离，atomic_min 到 *out（调用者先设成 +无穷）。
-void launch_min_distance(const DContact* c, int n, double* out);
+void launch_min_distance(const DContact* c, DCount n, double* out);
 // 滞后摩擦（lag_friction）：返回摩擦接触的个数（同步）。out 至少要 n 个。
 int launch_friction_lag(const DModel& m, const double* X0, const DContact* c, int n, double kappa, double dhat,
                         DFriction* out, int* d_count);
 // 摩擦的各项（friction_energy、friction_gradient、friction_rows）：行写到 rows 的第 row0.. row0 + 2 nf - 1 行。
-void launch_friction_terms(const DModel& m, const DFrames& F, const DFriction* f, int nf, double h, double mu,
-                           double eps_v, double* e, double* g, DRows rows, int row0);
+void launch_friction_terms(const DModel& m, const DFrames& F, const DFriction* f, DCount nf, double h, double mu,
+                           double eps_v, double* e, double* g, DRows rows, DCount row0);
 
 // ---------- ccd.cc 对应的部分：ccd.cu ----------
 
@@ -79,15 +84,15 @@ void launch_friction_terms(const DModel& m, const DFrames& F, const DFriction* f
 void launch_accel_bounds(const DModel& m, const double* q, const double* p, double* A);
 // 一段 [s0, s0 + len] 里的 CCD（curved_ccd 的第 2 步）：顶点–平面的闭式解，和候选刚体对之间的逐对 ACCD。
 //   段内的截断位置 atomic_min 到 *tmin（调用者先设成 1），需要的更短段长 atomic_min 到 *ds_need（先设成 len）。
-void launch_ground_ccd(const DModel& m, const double* Xa, const double* Xb, const double* A, double len, double c,
+void launch_ground_ccd(const DModel& m, const double* Xa, const double* Xb, const double* A, DScalar len, double c,
                        double* tmin, double* ds_need);
 // Fa 是段起点的 FK，Xb 是段终点的顶点，D 是 launch_body_disp 算的每个刚体的最大位移，npairs_d 是显存里的刚体对个数
 // （launch_body_pairs）。seen[0..2] 写候选、刚体对、工作项的总数（double），超过容量时调用者扩容后重做这一段。
 void launch_pair_ccd(const DModel& m, const DFrames& Fa, const double* Xb, const double* boxes, const double* D,
-                     const double* A, double len, double c, const int* pairs, const int* npairs_d, int pair_cap,
+                     const double* A, DScalar len, double c, const int* pairs, const int* npairs_d, int pair_cap,
                      DNarrow N, DCands C, double* tmin, double* ds_need, double* seen);
 // 一段 CCD 的初值：*tmin = 1，*ds_need = len，seen[0..1] = 0（一个小内核，不用同步的拷贝）。
-void launch_ccd_init(double* tmin, double* ds_need, double* seen, double len);
+void launch_ccd_init(double* tmin, double* ds_need, double* seen, DScalar len);
 // 每个刚体的顶点从 Xa 到 Xb 的最大位移，写到 D（nbody 个，先清零）。
 void launch_body_disp(const DModel& m, const double* Xa, const double* Xb, double* D);
 
@@ -98,9 +103,10 @@ void launch_body_disp(const DModel& m, const double* Xa, const double* Xb, doubl
 void launch_matvec(const DModel& m, const DFrames& F, const double* Hk, DRows rows, int nrow, const double* p,
                    double* y, double* bw);
 // 树块预条件器（build_preconditioner）：分解以后显式求逆。P 至少 2 ntree TD^2 个 double：前一半出来时是
-// 每棵树的 P_t^-1 = S (L L^T)^-1 S（ntree x TD x TD），后一半是工作区。scale 是 Jacobi 缩放（nv）。
-void launch_precond_build(const DModel& m, const DFrames& F, const double* Hk, DRows rows, int nrow, double* P,
-                          double* scale);
+// 每棵树的 P_t^-1 = S (L D L^T)^-1 S（ntree x TD x TD），后一半是工作区。scale 是 Jacobi 缩放（nv）。
+// W 是行的那部分用的工作区（Wb 至少 21 nbody 个，cross 至少 nrow 个）。
+void launch_precond_build(const DModel& m, const DFrames& F, const double* Hk, DRows rows, DCount nrow, double* P,
+                          double* scale, const DPrecondWork& W);
 // z = P^-1 r（树块对角的稠密矩阵乘向量）。
 void launch_precond_apply(const DModel& m, const double* P, const double* r, double* z);
 // PCG（pcg）：解 H x = rhs。work 至少 4 nv + 18 nbody 个 double，scal 至少 4 个。返回迭代次数，
@@ -112,7 +118,7 @@ int run_pcg(const DModel& m, const DFrames& F, const double* Hk, DRows rows, int
 bool pcg_coop_supported();
 // 和 run_pcg 不同，这里不等结果：迭代次数和是否收敛写到显存里的 res[0]、res[1]（double），调用者以后和别的数一起读回。
 // 返回 0；树太大、放不进共享内存时返回 -1（什么也没做）。
-int run_pcg_coop(const DModel& m, const DFrames& F, const double* Hk, DRows rows, int nrow, const double* P,
+int run_pcg_coop(const DModel& m, const DFrames& F, const double* Hk, DRows rows, DCount nrow, const double* P,
                  const double* rhs, double* x, double tol, int max_iter, double* work, double* acc, double* res);
 // out += a . b（点积，原子加到 *out）。
 void launch_dot(const double* a, const double* b, int n, double* out);

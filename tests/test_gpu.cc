@@ -188,6 +188,44 @@ TEST(Terms, MeshRagdoll) {
   expect_terms_match(M, P, s, s.q, "mesh ragdoll");
 }
 
+// ---------- 预条件器 ----------
+
+// 树块预条件器的逆：每棵树一块 S (S H_tt S + 1e-10 I)^-1 S，S = diag(1 / sqrt(H_ii))（H 用 CPU 版组装）。
+// 三个布娃娃的堆：落下以后手臂会碰到自己的躯干，这样就有两侧在同一棵树里的行（交叉项由 k_precond_cross 单独加）。
+TEST(Precond, MatchesBlockInverse) {
+  REQUIRE_GPU();
+  const Model M = load("ragdoll_pile.xml");
+  StepParams P;
+  State s{M.qpos0, VectorXd::Zero(M.nv), {}};
+  int same_tree = 0;
+  for (int k = 0; k < 40 && same_tree == 0; ++k) {  // 每 25 步看一次，直到有自己碰自己的接触
+    s = cpu_run(M, P, 25, s.q, s.v);
+    for (const Contact& c : find_contacts(M, forward_kinematics(M, s.q), P.dhat))
+      if (c.bodyA > 0 && c.bodyB > 0 && M.body_tree[c.bodyA] == M.body_tree[c.bodyB]) ++same_tree;
+  }
+  ASSERT_GT(same_tree, 0);
+  gpu::Stepper G(M);
+  G.terms(P, s.q, s.v, s.S.kappa, s.q);
+  const MatrixXd Pinv = G.precond_inverse();
+  const MatrixXd H = cpu_terms(M, P, s.q, s.v, s.S.kappa, s.q).H;
+  MatrixXd ref = MatrixXd::Zero(M.nv, M.nv);
+  for (int t = 0; t < M.ntree; ++t) {
+    std::vector<int> ds;
+    for (int d = 0; d < M.nv; ++d)
+      if (M.dof_tree[d] == t) ds.push_back(d);
+    const int n = static_cast<int>(ds.size());
+    MatrixXd B(n, n);
+    VectorXd sc(n);
+    for (int i = 0; i < n; ++i) sc[i] = 1.0 / std::sqrt(H(ds[i], ds[i]));
+    for (int i = 0; i < n; ++i)
+      for (int j = 0; j < n; ++j) B(i, j) = sc[i] * H(ds[i], ds[j]) * sc[j] + (i == j ? 1e-10 : 0.0);
+    const MatrixXd Bi = sc.asDiagonal() * B.inverse() * sc.asDiagonal();
+    for (int i = 0; i < n; ++i)
+      for (int j = 0; j < n; ++j) ref(ds[i], ds[j]) = Bi(i, j);
+  }
+  EXPECT_LT(rel(Pinv, ref), 1e-8) << same_tree << " same-tree contacts";
+}
+
 // ---------- PCG ----------
 
 // 堆叠（两棵树、跨树的行）：PCG 收紧到 1e-12 时和稠密 LDLT 的解一致。
@@ -243,24 +281,31 @@ TEST(Ccd, MatchesCpu) {
 // ---------- 整步 ----------
 
 // GPU 和 CPU 跑同一段，最后的状态一致（只差舍入的累积），每步的 Newton 次数一样。
+// GPU 的两种 Newton 迭代都比：CUDA graph 版（默认）和逐个发射的。small_buffers 时把缓冲区容量改得很小，
+// 让图版走“放不下、扩容、重录、重做这次迭代”的路径。
 void expect_same_run(const Model& M, const StepParams& P, VectorXd q, VectorXd v, int steps, double tol,
-                     const char* what) {
-  gpu::Stepper G(M);
-  VectorXd qc = q, vc = v, qg = q, vg = v;
-  SolverState Sc, Sg;
-  int newton_diff = 0;
-  for (int i = 0; i < steps; ++i) {
-    const StepResult rc = step(M, P, qc, vc, &Sc);
-    const StepResult rg = G.step(P, qg, vg, &Sg);
-    newton_diff += rc.newton != rg.newton;
-    qc = rc.q;
-    vc = rc.v;
-    qg = rg.q;
-    vg = rg.v;
-    EXPECT_GT(rg.min_distance, 0.0) << what << " step " << i;
+                     const char* what, bool small_buffers = false) {
+  for (bool graphs : {true, false}) {
+    gpu::Stepper G(M);
+    G.set_graphs(graphs);
+    if (small_buffers) G.set_capacities(2, 2, 4, 4);
+    VectorXd qc = q, vc = v, qg = q, vg = v;
+    SolverState Sc, Sg;
+    int newton_diff = 0;
+    for (int i = 0; i < steps; ++i) {
+      const StepResult rc = step(M, P, qc, vc, &Sc);
+      const StepResult rg = G.step(P, qg, vg, &Sg);
+      newton_diff += rc.newton != rg.newton;
+      qc = rc.q;
+      vc = rc.v;
+      qg = rg.q;
+      vg = rg.v;
+      EXPECT_GT(rg.min_distance, 0.0) << what << " step " << i << " graphs " << graphs;
+      if (graphs && G.set_cooperative_pcg(true)) EXPECT_TRUE(G.used_graphs()) << what << " step " << i;
+    }
+    EXPECT_LT((qg - qc).norm(), tol) << what << " graphs " << graphs;
+    EXPECT_LE(newton_diff, steps / 20) << what << " graphs " << graphs;
   }
-  EXPECT_LT((qg - qc).norm(), tol) << what;
-  EXPECT_LE(newton_diff, steps / 20) << what;
 }
 
 TEST(Step, BoxDropMatchesCpu) {
@@ -279,6 +324,13 @@ TEST(Step, RagdollMatchesCpu) {
   REQUIRE_GPU();
   const Model M = load("ragdoll.xml");
   expect_same_run(M, StepParams{}, M.qpos0, VectorXd::Zero(M.nv), 200, 1e-5, "ragdoll");
+}
+
+// 容量从很小开始：每种缓冲区都要在 Newton 迭代中间扩容（图版是作废这次迭代、扩容、重录、重做），结果照样和 CPU 一致。
+TEST(Step, GrowsBuffersMidStep) {
+  REQUIRE_GPU();
+  const Model M = load("stack.xml");
+  expect_same_run(M, StepParams{}, M.qpos0, VectorXd::Zero(12), 300, 1e-6, "stack, small buffers", true);
 }
 
 // 8 个网格布娃娃（libuipc 的对比场景，d̂ = 1 cm，半隐式停止）：GPU 跑 150 步，每步结束都不穿透。

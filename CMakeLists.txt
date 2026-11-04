@@ -95,11 +95,16 @@ if(RCIPC_CUDA AND CMAKE_CUDA_COMPILER)
     src/gpu/ccd.cu       # 曲线 CCD
     src/gpu/solver.cu    # PCG 和树块预条件器
     src/gpu/pcg_coop.cu  # 协作内核版的 PCG（整个循环一个内核）
+    src/gpu/iter.cu      # CUDA graph 版的 Newton 迭代里，设备上做的判断
   )
   target_link_libraries(rcipc_gpu PUBLIC rcipc CUDA::cudart)
   target_compile_definitions(rcipc_gpu PUBLIC RCIPC_HAVE_CUDA)
   # nvcc 把主机部分交给 MSVC 编译：一样要 /utf-8。
   target_compile_options(rcipc_gpu PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/utf-8>)
+  # 每个线程自己的默认流（不是旧的全局默认流）：不带流参数的发射和异步拷贝都在它上面排队，
+  # 这样整个 Newton 迭代可以用流捕获录成 CUDA graph（旧的默认流不能捕获）。.cu 用 nvcc 的选项，.cc 用宏。
+  target_compile_options(rcipc_gpu PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--default-stream=per-thread>)
+  target_compile_definitions(rcipc_gpu PRIVATE CUDA_API_PER_THREAD_DEFAULT_STREAM)
   target_link_libraries(scene_demo PRIVATE rcipc_gpu)
 endif()
 

@@ -86,6 +86,36 @@ __device__ inline void subtree_wrench(const DModel& m, int b, const double* wacc
   for (int k = 0; k < 6; ++k) out[k] = s[k];
 }
 
+// 自由度 d 关于参考点 ref 的空间轴 s（6 个）：转动 ((o_d - ref) x a_d, a_d)，滑动 (a_d, 0)。
+// 速度旋量是 sum_d p_d s_d（body_twist 是 ref = 0 的情形），力旋量 (f, tau - ref x f) 在 d 上的值是 s . w
+// （和 wrench_on_dof 相同）。所以“每个刚体累加一个 6x6，再按子树求和”的写法里，树块的元素都是 s_i^T A s_j
+// （惯性 Hessian 和预条件器的行都这样算，笔记第 11 节）。参考点取树根，坐标小，舍入小。
+__device__ inline void dof_axis6(const DModel& m, const DFrames& F, int d, V3 ref, double* s) {
+  const V3 a = v3load(F.daxis + 3 * d);
+  if (m.drot[d]) {
+    v3store(cross(v3load(F.danchor + 3 * d) - ref, a), s);
+    v3store(a, s + 3);
+  } else {
+    v3store(a, s);
+    v3store(v3(0, 0, 0), s + 3);
+  }
+}
+
+// s^T A t，A 是 6x6（按行存 36 个）。
+__device__ inline double form6(const double* s, const double* A, const double* t) {
+  double acc = 0;
+  for (int i = 0; i < 6; ++i) {
+    if (s[i] == 0) continue;
+    double r = 0;
+    for (int j = 0; j < 6; ++j) r += A[6 * i + j] * t[j];
+    acc += s[i] * r;
+  }
+  return acc;
+}
+
+// 6x6 对称矩阵按上三角存 21 个时 (i, j) 的位置（i <= j）。
+__device__ inline int sym21(int i, int j) { return i * 6 - i * (i - 1) / 2 + (j - i); }
+
 // 把一行展开成逐个自由度的值（idx/val，最多 2 CH 个，返回个数）。预条件器和测试用。
 __device__ inline int row_expand(const DModel& m, const DFrames& F, const DRows& rows, int r, int* idx, double* val) {
   int n = 0;

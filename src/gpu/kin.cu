@@ -4,11 +4,13 @@
 // 并行的方式：
 //   - FK：一个线程一个刚体。每个线程从根沿链往下自己算一遍（重复计算祖先，但链很短，省掉了按层同步）；
 //   - 顶点、惯性目标、能量、梯度：一个线程一个刚体或顶点，往全局数组里原子加；
-//   - 树块 M / h^2：一个线程块一棵树，块里一个线程一个 (i, j) 元素。
+//   - 树块 M / h^2：一个线程块一棵树，块里一个线程一个 (i, j) 元素；先在子树上把 6x6 的空间惯量加起来
+//     （组合刚体的写法，笔记第 11 节），每个元素只是一次二次型。
 #include <cfloat>
 
 #include "devmath.cuh"
 #include "kernels.h"
+#include "rows.cuh"
 
 namespace rcipc::gpu {
 
@@ -17,10 +19,11 @@ namespace {
 constexpr int kThreads = 128;
 inline int blocks(int n) { return (n + kThreads - 1) / kThreads; }
 
-__global__ void k_integrate(DModel m, const double* q, const double* p, double s, double* out) {
+__global__ void k_integrate(DModel m, const double* q, const double* p, DScalar sp, double* out) {
   // integrate：每个线程一个关节，只改写这个关节的那几个数。
   const int j = blockIdx.x * blockDim.x + threadIdx.x;
   if (j >= m.njnt) return;
+  const double s = sp.get();
   const int a = m.jqadr[j], d = m.jdadr[j];
   switch (m.jtype[j]) {
     case kHinge:
@@ -183,8 +186,64 @@ __global__ void k_inertia_gradient(DModel m, DFrames F, const double* tc, const 
   }
 }
 
+__global__ void k_inertia_hessian_crb(DModel m, DFrames F, double h, double* Hk) {
+  // inertia_hessian 的组合刚体写法（CRBA）：一个线程块一棵树 t，参考点 ref 取树根。
+  //   H_ij = 1/h^2 s_i^T Ibar_lo s_j，lo 是 i、j 所在刚体里较深的那个（两者在一条链上时），s 是空间轴（dof_axis6），
+  //   Ibar_b = sum_{b' 在 b 的子树里} I_b'，I_b' 是关于 ref 的 6x6 空间惯量（速度旋量 (v, omega) 的动能矩阵）：
+  //     [[m 1, -m [c]x], [m [c]x, I_c + m (|c|^2 1 - c c^T)]]，c = 质心 - ref，I_c 是世界系里关于质心的惯量。
+  // 和 k_inertia_hessian 是同一个和（m V_i . V_j + a_i . I_c a_j，V = v - [c]x omega 是质心的速度），只是先在子树上
+  // 把惯量加起来：每个元素从“子树里每个刚体一次叉乘和 3x3 乘法”变成一次 6x6 的二次型。结果只差舍入。
+  extern __shared__ double sh[];
+  const int t = blockIdx.x;
+  const int TD = m.TD, n = m.tndof[t], d0 = m.tdof0[t], b0 = m.tbody0[t], nb = m.tnbody[t];
+  double* I6 = sh;                 // nb x 36
+  double* Ibar = I6 + 36 * m.TB;   // nb x 36
+  double* s6 = Ibar + 36 * m.TB;   // n x 6
+  const V3 ref = v3load(F.xpos + 3 * b0);
+  for (int k = threadIdx.x; k < nb; k += blockDim.x) {
+    const int b = b0 + k;
+    const V3 c = com(m, F, b) - ref;
+    const M3 R = qmat(q4load(F.xquat + 4 * b));
+    const M3 Iw = mm(mm(R, mload(m.inertia + 9 * b)), mt(R));
+    const double ms = m.mass[b], cc = dot(c, c);
+    const double cv[3] = {c.x, c.y, c.z};
+    // [c]x 的第 (i, j) 个元素
+    const double X[9] = {0, -c.z, c.y, c.z, 0, -c.x, -c.y, c.x, 0};
+    double* A = I6 + 36 * k;
+    for (int i = 0; i < 3; ++i)
+      for (int j = 0; j < 3; ++j) {
+        A[6 * i + j] = i == j ? ms : 0.0;
+        A[6 * i + 3 + j] = -ms * X[3 * i + j];
+        A[6 * (3 + i) + j] = ms * X[3 * i + j];
+        A[6 * (3 + i) + 3 + j] = Iw.m[3 * i + j] + ms * ((i == j ? cc : 0.0) - cv[i] * cv[j]);
+      }
+  }
+  for (int li = threadIdx.x; li < n; li += blockDim.x) dof_axis6(m, F, d0 + li, ref, s6 + 6 * li);
+  __syncthreads();
+  for (int e = threadIdx.x; e < nb * 36; e += blockDim.x) {
+    const int k = e / 36, a = e % 36, b = b0 + k;
+    double s = 0;
+    for (int c = b; c < m.bsub_end[b]; ++c) s += I6[36 * (c - b0) + a];
+    Ibar[e] = s;
+  }
+  __syncthreads();
+  const double ih2 = 1.0 / (h * h);
+  for (int e = threadIdx.x; e < TD * TD; e += blockDim.x) {
+    const int li = e / TD, lj = e % TD;
+    if (lj < li) continue;  // 下三角由对称的那个线程写
+    double acc = 0;
+    if (lj < n) {
+      const int bi = m.dbody[d0 + li], bj = m.dbody[d0 + lj];
+      const int lo = max(bi, bj);
+      if (lo < min(m.bsub_end[bi], m.bsub_end[bj])) acc = form6(s6 + 6 * li, Ibar + 36 * (lo - b0), s6 + 6 * lj) * ih2;
+    }
+    Hk[t * TD * TD + li * TD + lj] = acc;
+    Hk[t * TD * TD + lj * TD + li] = acc;
+  }
+}
+
 __global__ void k_inertia_hessian(DModel m, DFrames F, double h, double* Hk) {
-  // inertia_hessian：一个线程块一棵树 t。
+  // inertia_hessian：一个线程块一棵树 t。（树太大、组合刚体版放不进共享内存时用这个。）
   //   H_ij = 1/h^2 sum_b ( m V_i . V_j + W_i . (I_world W_j) )，只对链上同时有 i 和 j 的刚体 b 求和。
   //   自由度 i 在 b 的链上 <=> i 所在的刚体是 b 的祖先或 b 自己 <=> dbody[i] <= b < bsub_end[dbody[i]]。
   // 先把这棵树每个刚体的质心 c_b、世界系的惯量 R I R^T，和每个自由度的轴、锚点放进共享内存（每个只算一次），
@@ -273,7 +332,7 @@ __global__ void k_max_displacement(const double* Xa, const double* Xb, int n, do
 
 }  // namespace
 
-void launch_integrate(const DModel& m, const double* q, const double* p, double s, double* out) {
+void launch_integrate(const DModel& m, const double* q, const double* p, DScalar s, double* out) {
   if (m.njnt > 0) k_integrate<<<blocks(m.njnt), kThreads>>>(m, q, p, s, out);
 }
 
@@ -295,8 +354,14 @@ void launch_inertia_gradient(const DModel& m, const DFrames& F, const double* tc
 }
 
 void launch_inertia_hessian(const DModel& m, const DFrames& F, double h, double* Hk) {
+  if (m.ntree == 0) return;
+  const size_t crb = sizeof(double) * (72 * static_cast<size_t>(m.TB) + 6 * static_cast<size_t>(m.TD));
+  if (crb <= 48 * 1024) {
+    k_inertia_hessian_crb<<<m.ntree, 256, crb>>>(m, F, h, Hk);
+    return;
+  }
   const size_t smem = sizeof(double) * (12 * static_cast<size_t>(m.TB) + 6 * static_cast<size_t>(m.TD));
-  if (m.ntree > 0) k_inertia_hessian<<<m.ntree, 256, smem>>>(m, F, h, Hk);
+  k_inertia_hessian<<<m.ntree, 256, smem>>>(m, F, h, Hk);
 }
 
 void launch_limits(const DModel& m, const double* q, double k, double dhat, double* e, double* g, double* Hk) {
