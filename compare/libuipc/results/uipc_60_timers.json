@@ -1,0 +1,130 @@
+{
+ "GlobalTimer": [
+  0.0,
+  300
+ ],
+ "GlobalTimer/Pipeline": [
+  65.4552243,
+  300
+ ],
+ "GlobalTimer/Pipeline/Simulation": [
+  65.45421410000002,
+  300
+ ],
+ "GlobalTimer/Pipeline/Simulation/Newton Iteration": [
+  63.748861599999984,
+  2050
+ ],
+ "GlobalTimer/Pipeline/Simulation/Newton Iteration/Solve Global Linear System": [
+  32.32517909999999,
+  2050
+ ],
+ "GlobalTimer/Pipeline/Simulation/Newton Iteration/Solve Global Linear System/Build Linear System": [
+  14.120633999999997,
+  2050
+ ],
+ "GlobalTimer/Pipeline/Simulation/Newton Iteration/Solve Global Linear System/Build Linear System/Assemble Subsystems": [
+  9.0047321,
+  2050
+ ],
+ "GlobalTimer/Pipeline/Simulation/Newton Iteration/Solve Global Linear System/Build Linear System/Convert To BCOO": [
+  4.0423221,
+  2050
+ ],
+ "GlobalTimer/Pipeline/Simulation/Newton Iteration/Solve Global Linear System/Build Linear System/Assemble Preconditioner": [
+  0.9981235999999998,
+  2050
+ ],
+ "GlobalTimer/Pipeline/Simulation/Newton Iteration/Solve Global Linear System/Solve Linear System": [
+  18.111818599999992,
+  2050
+ ],
+ "GlobalTimer/Pipeline/Simulation/Newton Iteration/Solve Global Linear System/Solve Linear System/FusedPCG": [
+  18.060114300000016,
+  2050
+ ],
+ "GlobalTimer/Pipeline/Simulation/Newton Iteration/Solve Global Linear System/Solve Linear System/FusedPCG/Apply Preconditioner": [
+  0.12122409999999996,
+  2050
+ ],
+ "GlobalTimer/Pipeline/Simulation/Newton Iteration/Line Search": [
+  14.488093400000013,
+  2050
+ ],
+ "GlobalTimer/Pipeline/Simulation/Newton Iteration/Line Search/Detect Trajectory Candidates": [
+  8.4577527,
+  2050
+ ],
+ "GlobalTimer/Pipeline/Simulation/Newton Iteration/Line Search/Line Search Iteration": [
+  2.8263833000000003,
+  2437
+ ],
+ "GlobalTimer/Pipeline/Simulation/Newton Iteration/Line Search/Line Search Iteration/Compute Energy": [
+  1.9927501000000014,
+  2437
+ ],
+ "GlobalTimer/Pipeline/Simulation/Newton Iteration/Line Search/Line Search Iteration/Filter Contact Candidates": [
+  0.7350865999999999,
+  2437
+ ],
+ "GlobalTimer/Pipeline/Simulation/Newton Iteration/Line Search/Compute Energy": [
+  1.7046233000000008,
+  2050
+ ],
+ "GlobalTimer/Pipeline/Simulation/Newton Iteration/Line Search/Filter CCD TOI": [
+  1.0241308,
+  2050
+ ],
+ "GlobalTimer/Pipeline/Simulation/Newton Iteration/Line Search/Compute Feasible Step": [
+  0.30485339999999983,
+  2050
+ ],
+ "GlobalTimer/Pipeline/Simulation/Newton Iteration/Detect DCD Candidates": [
+  9.525597199999993,
+  1750
+ ],
+ "GlobalTimer/Pipeline/Simulation/Newton Iteration/Compute DyTopo Effect": [
+  7.346440300000004,
+  2050
+ ],
+ "GlobalTimer/Pipeline/Simulation/Newton Iteration/Compute DyTopo Effect/Assemble Dytopo Effect": [
+  7.327247499999997,
+  2050
+ ],
+ "GlobalTimer/Pipeline/Simulation/Newton Iteration/Compute DyTopo Effect/Assemble Dytopo Effect/Report Extent": [
+  0.006985500000000003,
+  2050
+ ],
+ "GlobalTimer/Pipeline/Simulation/Newton Iteration/Compute DyTopo Effect/Assemble Dytopo Effect/Scan and Allocate": [
+  0.011915800000000027,
+  2050
+ ],
+ "GlobalTimer/Pipeline/Simulation/Newton Iteration/Compute DyTopo Effect/Distribute Dytopo Effect": [
+  0.0015551999999999988,
+  2050
+ ],
+ "GlobalTimer/Pipeline/Simulation/Detect DCD Candidates": [
+  1.5906241999999993,
+  300
+ ],
+ "GlobalTimer/Pipeline/Simulation/Compute External Force Accelerations": [
+  0.018653099999999995,
+  300
+ ],
+ "GlobalTimer/Pipeline/Simulation/Update Velocity": [
+  0.015616500000000007,
+  300
+ ],
+ "GlobalTimer/Pipeline/Simulation/Clear External Forces": [
+  0.0061526,
+  300
+ ],
+ "GlobalTimer/Pipeline/Rebuild Scene": [
+  0.00040409999999999963,
+  300
+ ],
+ "GlobalTimer/Pipeline/Simulation/Newton Iteration/Line Search/Compute CFL Condition": [
+  0.00018230000000000023,
+  351
+ ]
+}

@@ -37,9 +37,12 @@ ap.add_argument("--vel-tol", type=float, default=1e-3)
 ap.add_argument("--workspace", required=True)
 ap.add_argument("--no-timers", action="store_true",
                 help="不开 libuipc 的计时器（量墙钟时间用；这时数不出每步的 Newton 次数，记成 -1）")
+ap.add_argument("--timer-tree", help="跑完后把累计的计时器树（各阶段的总时间和次数）写到这个 json")
+ap.add_argument("--info-log", action="store_true",
+                help="日志级别改成 Info：每次 Newton 迭代打印 PCG 次数（breakdown_uipc.py 解析它），会变慢，不用来量墙钟")
 args = ap.parse_args()
 
-Logger.set_level(Logger.Level.Warn)
+Logger.set_level(Logger.Level.Info if args.info_log else Logger.Level.Warn)
 os.makedirs(args.workspace, exist_ok=True)
 engine = Engine("cuda", args.workspace)
 world = World(engine)
@@ -124,6 +127,18 @@ def newton_count(report):
     return -1
 
 
+timer_sum = {}  # 计时器节点的路径 → [总时间（秒）, 总次数]；每次读报告都会清零计时器，所以逐步累加
+
+
+def accumulate(node, path=""):
+    p = path + "/" + node.get("name", "") if path else node.get("name", "")
+    acc = timer_sum.setdefault(p, [0.0, 0])
+    acc[0] += node.get("duration", 0.0)
+    acc[1] += node.get("count", 0)
+    for c in node.get("children", []):
+        accumulate(c, p)
+
+
 rec = dict(engine="libuipc", n=args.n, steps=args.steps, dt=R.DT, kappa_abd=args.kappa, gamma=args.gamma,
            full=args.full, config=json.loads(str(config)) if not isinstance(config, dict) else config,
            newton=[], step_s=[], samples=[dict(step=0, **metrics.measure(transforms(), "mesh"))])
@@ -132,7 +147,14 @@ for s in range(1, args.steps + 1):
     world.advance()
     world.retrieve()
     rec["step_s"].append(time.perf_counter() - t0)
-    rec["newton"].append(-1 if args.no_timers else newton_count(Timer.report_as_json()))
+    if args.no_timers:
+        rec["newton"].append(-1)
+    else:
+        rep = Timer.report_as_json()
+        rep = json.loads(rep) if isinstance(rep, str) else rep
+        rec["newton"].append(newton_count(rep))
+        if args.timer_tree:
+            accumulate(rep)
     if s % 10 == 0 or s == args.steps:
         m = metrics.measure(transforms(), "mesh")
         rec["samples"].append(dict(step=s, **m))
@@ -141,3 +163,7 @@ for s in range(1, args.steps + 1):
 with open(args.out, "w") as f:
     json.dump(rec, f, default=lambda o: o.tolist() if hasattr(o, "tolist") else str(o))
 print("wrote", args.out)
+if args.timer_tree and not args.no_timers:
+    with open(args.timer_tree, "w") as f:
+        json.dump(timer_sum, f, indent=1, ensure_ascii=False)
+    print("wrote", args.timer_tree)
