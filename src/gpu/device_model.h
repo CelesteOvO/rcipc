@@ -185,7 +185,8 @@ __device__ inline int cand_count(const DCands& C) { return min(*C.count, C.cap);
 // 它返回 1，证不出来再接着走（k_ccd_exact）。
 struct DTail {
   int split = 1000;  // 串行走几步以后交给 warp；不小于 kAccdMax 时不分
-  unsigned long long* stats = nullptr;  // 累计：[0] 交给 warp 的对，[1] 证出返回 1 的，[2] 接着串行走的
+  // 累计：[0] 交给 warp 的对，[1] 证出返回 1 的，[2] 接着串行走的，[3] 单精度预筛跳过的（第 14.2 节）
+  unsigned long long* stats = nullptr;
 };
 
 // Newton 系统的行（行形式，阶段 9）。GPU 上按“力旋量”存（rows.cuh）：每行两侧，每侧一个刚体和一个力旋量 (f, tau)。

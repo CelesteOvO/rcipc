@@ -358,6 +358,39 @@ __device__ inline bool decode_cand(const DModel& m, DCand cd, int ids[4], int& b
   return true;
 }
 
+// 单精度预筛（笔记第 14.2 节）。xa、xb 是这一段两端顶点的单精度世界坐标（launch_to_float）。
+// ACCD 第一步就返回 1、也不要求缩短段长的条件是 d0 >= max(2 xi, xi + ell / c)。用单精度算 d0 和 ell：
+// 距离少算一个余量、ell 多算四个，条件仍然成立时，双精度的 ACCD 一定也是这个结果，这一对什么也不改，
+// 盒子规则、距离都不用再算。余量和 narrow.cu 的一样，1e-5 (1 + R) 米，R 是这几个顶点坐标的最大绝对值，
+// 比单精度的舍入（约 1e-7 R）大两个数量级以上。形状太差的三角形 pt_dist_f 返回 0，不会被跳过。
+constexpr float kFloatPad = 1e-5f;
+
+__device__ bool float_trivial(const float* xa, const float* xb, const int ids[4], bool pt, double radii, double xi,
+                              double c) {
+  F3 a[4], d[4];
+  float R = 0;
+  for (int i = 0; i < 4; ++i) {
+    a[i] = f3(xa + 3 * ids[i]);
+    const F3 b = f3(xb + 3 * ids[i]);
+    d[i] = b - a[i];
+    R = fmaxf(R, fmaxf(fmaxf(fabsf(a[i].x), fabsf(a[i].y)), fabsf(a[i].z)));
+    R = fmaxf(R, fmaxf(fmaxf(fabsf(b.x), fabsf(b.y)), fabsf(b.z)));
+  }
+  const float df = pt ? pt_dist_f(a[0], a[1], a[2], a[3]) : ee_dist_f(a[0], a[1], a[2], a[3]);
+  const F3 mv = 0.25f * (d[0] + d[1] + d[2] + d[3]);
+  float la = 0, lb = 0;
+  for (int i = 0; i < 4; ++i) {
+    const F3 e = d[i] - mv;
+    const float l = sqrtf(fdot(e, e));
+    if (i < (pt ? 1 : 2)) la = fmaxf(la, l);
+    else lb = fmaxf(lb, l);
+  }
+  const double pad = kFloatPad * (1.0 + R);
+  const double d0 = static_cast<double>(df) - radii - pad;
+  const double ell = static_cast<double>(la + lb) + 4 * pad;
+  return d0 >= 1.000001 * fmax(2 * xi, xi + ell / c);  // NaN 时为假
+}
+
 // CPU 版的盒子规则：点–三角形是顶点对三角形所在的刚体、对三角形；边–边是第一条边对第二条边的刚体、对第二条边。
 __device__ inline bool box_rule(const DModel& m, const double* Xa, const double* Xb, const double* boxes,
                                 const int ids[4], bool ee, int bb, double xi) {
@@ -389,12 +422,13 @@ __device__ bool warp_proves_one(const double* Xa, const double* Xb, const int id
 }
 
 __global__ void k_ccd_exact(DModel m, const double* Xa, const double* Xb, const double* boxes, const double* A,
-                            DScalar lenp, double c, DCands C, const int* npairs_d, const int* work_n, DTail tail,
-                            double* tmin, double* ds_need, double* seen) {
+                            DScalar lenp, double c, DCands C, const int* npairs_d, const int* work_n, const float* xfa,
+                            const float* xfb, DTail tail, double* tmin, double* ds_need, double* seen) {
   const double len = lenp.get();
   // 一个线程一个候选（narrow.cu 剔下来的）。剔除只保证“段起点的距离不小于阈值 T 的对一定被剔掉”，所以这里先按
   // CPU 版 curved_ccd 的规则用双精度复核（box_rule），通过的才做 ACCD。做 ACCD 的对是 CPU 版的一个子集，
   // 少掉的都是 ACCD 什么也不改的（笔记第 4 节）。xi、A_pair 由两个图元所在的刚体算。
+  // xfa 不为空时，先用单精度预筛（float_trivial，笔记第 14.2 节）：第一步一定返回 1 的对直接跳过。
   // ACCD 分三步（笔记第 14 节）：
   //   1. 每个线程串行走 tail.split 步，绝大多数对在这里就有结果；
   //   2. 这个 warp 里还没走完的对，整个 warp 一起证明它返回 1（warp_proves_one），一次一对；
@@ -413,20 +447,23 @@ __global__ void k_ccd_exact(DModel m, const double* Xa, const double* Xb, const 
   for (int base = blockIdx.x * blockDim.x + (threadIdx.x & ~31); base < n; base += gridDim.x * blockDim.x) {
     const int k = base + lane;
     int ids[4] = {0, 0, 0, 0}, ba = 0, bb = 0;
-    bool ee = false, pending = false;
+    bool ee = false, pending = false, skip = false;
     double xi = 0, radii = 0;
     AccdState S;
     if (k < n) {
       ee = decode_cand(m, C.item[k], ids, ba, bb);
       const double A_pair = A[ba] + A[bb];
       xi = A_pair * len * len / 8;
-      if (box_rule(m, Xa, Xb, boxes, ids, ee, bb, xi)) {
-        radii = m.vradius[ids[0]] + m.vradius[ids[ee ? 2 : 1]];
+      radii = m.vradius[ids[0]] + m.vradius[ids[ee ? 2 : 1]];
+      skip = xfa && float_trivial(xfa, xfb, ids, !ee, radii, xi, c);
+      if (!skip && box_rule(m, Xa, Xb, boxes, ids, ee, bb, xi)) {
         const int st = accd_begin(Xa, Xb, ids, !ee, radii, xi, A_pair, c, ds_need, tmin, split, S);
         if (st == 1 && S.t < 1.0) atomic_min(tmin, S.t);
         pending = st == 2;
       }
     }
+    const unsigned sk = __ballot_sync(0xffffffffu, skip);
+    if (sk && lane == 0 && tail.stats) atomicAdd(tail.stats + 3, static_cast<unsigned long long>(__popc(sk)));
     unsigned todo = __ballot_sync(0xffffffffu, pending);
     if (todo && lane == 0 && tail.stats) atomicAdd(tail.stats, static_cast<unsigned long long>(__popc(todo)));
     while (todo) {
@@ -487,7 +524,7 @@ void launch_ccd_exact(const DModel& m, const double* Xa, const double* Xb, const
                       DScalar len, double c, const int* npairs_d, int pair_cap, DNarrow N, DCands C, DTail tail,
                       double* tmin, double* ds_need, double* seen) {
   if (pair_cap > 0)
-    k_ccd_exact<<<std::min(blocks(C.cap), 1024), kThreads>>>(m, Xa, Xb, boxes, A, len, c, C, npairs_d, N.work_n, tail,
+    k_ccd_exact<<<std::min(blocks(C.cap), 1024), kThreads>>>(m, Xa, Xb, boxes, A, len, c, C, npairs_d, N.work_n, N.xa, N.xb, tail,
                                                            tmin, ds_need, seen);
 }
 

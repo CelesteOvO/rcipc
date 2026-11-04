@@ -38,7 +38,7 @@ using Eigen::VectorXd;
 struct Args {
   std::string model = "ragdoll.xml", out;
   double T = 2.0, h = NAN, dhat = 1e-3, mu = 0.2, eps_v = 1e-3, tol = 1e-6;
-  int semi = 0, ldlt = 0, check = 0, debug = 0, adapt = 1, gpu = 0, timing = 1, graph = 1, tight = 1, reuse = 1, tail = 1;
+  int semi = 0, ldlt = 0, check = 0, debug = 0, adapt = 1, gpu = 0, timing = 1, graph = 1, tight = 1, reuse = 1, tail = 1, prefilter = 1;
   double pcg_tol = NAN;
 };
 
@@ -66,6 +66,7 @@ Args parse(int argc, char** argv) {
     else if (k == "tight") a.tight = std::atoi(v.c_str());
     else if (k == "reuse") a.reuse = std::atoi(v.c_str());
     else if (k == "tail") a.tail = std::atoi(v.c_str());
+    else if (k == "prefilter") a.prefilter = std::atoi(v.c_str());
     else if (k == "pcg_tol") a.pcg_tol = std::atof(v.c_str());
     else if (k == "semi") a.semi = std::atoi(v.c_str());
     else if (k == "ldlt") a.ldlt = std::atoi(v.c_str());
@@ -107,6 +108,7 @@ int main(int argc, char** argv) {
       G->set_graphs(a.graph != 0);
       G->set_ccd_reuse(a.reuse != 0);
       G->set_ccd_tail(a.tail != 0);
+      G->set_ccd_prefilter(a.prefilter != 0);
     }
 #else
     if (a.gpu) throw std::runtime_error("gpu=1 but this build has no CUDA");
@@ -200,6 +202,9 @@ int main(int argc, char** argv) {
         std::printf("ACCD tail: %ld pairs handed over (%.2f per CCD segment), %ld proved to return 1, %ld finished serially\n",
                     T.ccd_tail, T.ccd_tail / std::max(1.0, static_cast<double>(T.ccd_segments)), T.ccd_tail_proved,
                     T.ccd_tail_serial);
+      if (T.ccd_prefiltered > 0)
+        std::printf("ACCD prefilter: %.0f pairs per CCD segment skipped in single precision\n",
+                    T.ccd_prefiltered / std::max(1.0, static_cast<double>(T.ccd_segments)));
     }
 #endif
     if (f) std::printf("wrote %s (replay: python tools/replay.py %s %s)\n", a.out.c_str(), path.c_str(), a.out.c_str());

@@ -251,6 +251,7 @@ TEST(Pcg, MatchesDenseSolve) {
 // ---------- CCD ----------
 
 // 两种求候选的方式（每段都求、按窗口求，set_ccd_reuse）都要和 CPU 版一样；按窗口求时确实有段用了窗口的候选。
+// 单精度预筛（set_ccd_prefilter）开、关的结果逐位相同，而且确实跳过了一些对。
 TEST(Ccd, MatchesCpu) {
   REQUIRE_GPU();
   struct Case {
@@ -258,6 +259,7 @@ TEST(Ccd, MatchesCpu) {
     double dhat;
   };
   long segs = 0, windows = 0;  // 按窗口求时：总段数、其中重新求候选的段数
+  long prefiltered = 0;
   for (const Case& cs : {Case{"flail.xml", 1e-3}, Case{"stack.xml", 1e-3}, Case{"ragdoll.xml", 1e-3},
                          Case{kMesh1, 0.01}}) {
     const Model M = load(cs.file);
@@ -285,10 +287,15 @@ TEST(Ccd, MatchesCpu) {
         }
         segs += G.timers().ccd_segments;
         windows += G.timers().ccd_windows;
+        prefiltered += G.timers().ccd_prefiltered;
+        G.set_ccd_prefilter(false);
+        EXPECT_EQ(G.ccd(P, q, p), a) << cs.file << " direction " << k << " without the prefilter";
+        G.set_ccd_prefilter(true);
       }
     }
   }
   EXPECT_LT(windows, segs);
+  EXPECT_GT(prefiltered, 0);
 }
 
 // ACCD 的尾巴（笔记第 14 节）：走了 16 步还没完的对交给整个 warp，先证明它返回 1，证不出来再接着走。

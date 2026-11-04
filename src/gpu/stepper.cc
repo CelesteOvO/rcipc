@@ -262,7 +262,8 @@ struct Stepper::Impl {
   bool timing = true;  // 分段计时（每段结束同步一次）
   bool reuse = true;   // CCD 的段落在候选的窗口里时不重新求候选（set_ccd_reuse，笔记第 13 节）
   bool tail = true;    // ACCD 走得久的对交给尾巴的内核（set_ccd_tail，笔记第 14 节）
-  DBuf<unsigned long long> tail_stats;  // 累计的三个计数（DTail::stats），timers() 时读回
+  bool prefilter = true;  // ACCD 前先用单精度预筛（set_ccd_prefilter，笔记第 14.2 节）
+  DBuf<unsigned long long> tail_stats;  // 累计的四个计数（DTail::stats），timers() 时读回
   double last_eval_dmin = 0;  // energy_at 最后一次检测到的接触里最小的距离
   DBuf<double> pcg_acc;
 
@@ -279,11 +280,12 @@ struct Stepper::Impl {
     long gen = -1;
     double h = 0, dhat = 0, mu = 0, eps_v = 0, curv = 0, limit_k = 0, limit_dhat = 0, c = 0, tol = 0, pcg_tol = 0;
     int pcg_max = 0;
-    bool tight = true, reuse = true, tail = true;
+    bool tight = true, reuse = true, tail = true, prefilter = true;
     bool operator==(const GraphKey& o) const {
       return gen == o.gen && h == o.h && dhat == o.dhat && mu == o.mu && eps_v == o.eps_v && curv == o.curv &&
              limit_k == o.limit_k && limit_dhat == o.limit_dhat && c == o.c && tol == o.tol && pcg_tol == o.pcg_tol &&
-             pcg_max == o.pcg_max && tight == o.tight && reuse == o.reuse && tail == o.tail;
+             pcg_max == o.pcg_max && tight == o.tight && reuse == o.reuse && tail == o.tail &&
+             prefilter == o.prefilter;
     }
   };
   GraphKey graph_key;
@@ -294,8 +296,8 @@ struct Stepper::Impl {
     upload();
     coop = pcg_coop_supported();
     d_it.reserve(1);
-    tail_stats.reserve(3);
-    check(cudaMemset(tail_stats.get(), 0, 3 * sizeof(unsigned long long)), "memset");
+    tail_stats.reserve(4);
+    check(cudaMemset(tail_stats.get(), 0, 4 * sizeof(unsigned long long)), "memset");
     check(cudaMallocHost(&h_it, sizeof(DIter)), "cudaMallocHost");
     *h_it = DIter();
   }
@@ -600,6 +602,15 @@ struct Stepper::Impl {
     cand.reserve(n);
   }
   DCands cands() const { return DCands{cand.get(), cnt.get() + 2, cand_cap}; }
+  // launch_ccd_exact 用的 DNarrow：预筛打开时带上这一段两端的单精度坐标。
+  DNarrow exact_narrow() const {
+    DNarrow N = narrow();
+    if (prefilter) {
+      N.xa = xfa.get();
+      N.xb = xfb.get();
+    }
+    return N;
+  }
   DTail tail_view() const {
     DTail T;
     T.split = tail ? kAccdSplit : kAccdMax;
@@ -608,11 +619,12 @@ struct Stepper::Impl {
   }
   // 尾巴的三个累计计数读回到 timers 里。
   void sync_tail_stats() {
-    unsigned long long h[3];
-    tail_stats.download(h, 3);
+    unsigned long long h[4];
+    tail_stats.download(h, 4);
     timers.ccd_tail = static_cast<long>(h[0]);
     timers.ccd_tail_proved = static_cast<long>(h[1]);
     timers.ccd_tail_serial = static_cast<long>(h[2]);
+    timers.ccd_prefiltered = static_cast<long>(h[3]);
   }
   // 行数每次组装都在变，按 1.5 倍扩容：每次只扩到刚好够用时，接触一多就要重新分配，cudaFree 会让整个设备同步。
   void grow_rows(int n) {
@@ -804,20 +816,20 @@ struct Stepper::Impl {
       launch_ground_ccd(m, Xa, Fb.X.get(), A.get(), len, Pm.c, scal.get() + 1, scal.get() + 2);
       if (pairs_on) {
         launch_swept_boxes(m, Xa, Fb.X.get(), boxes.get());  // 复核用这一段的盒子；新窗口的剔除也用它
+        launch_to_float(Xa, 3 * m.nvert, xfa.get());          // 单精度的两端：新窗口的剔除、预筛都用
+        launch_to_float(Fb.X.get(), 3 * m.nvert, xfb.get());
         if (fresh) {
           launch_body_pairs(m, boxes.get(), 0.0, A.get(), reuse ? kWindowPairLen * len : len, pairs.get(), pair_cap,
                             cnt.get());
           launch_body_disp(m, Xa, Fb.X.get(), bdisp.get());
-          launch_to_float(Xa, 3 * m.nvert, xfa.get());
-          launch_to_float(Fb.X.get(), 3 * m.nvert, xfb.get());
           DNarrow N = narrow();
           N.xa = xfa.get();
           N.xb = xfb.get();
           launch_ccd_cull(m, Fs->view(), boxes.get(), bdisp.get(), A.get(), len, Pm.c, pairs.get(), cnt.get(), pair_cap,
                           N, cands(), reuse);
         }
-        launch_ccd_exact(m, Xa, Fb.X.get(), boxes.get(), A.get(), len, Pm.c, cnt.get(), pair_cap, narrow(), cands(),
-                         tail_view(), scal.get() + 1, scal.get() + 2, scal.get() + 9);
+        launch_ccd_exact(m, Xa, Fb.X.get(), boxes.get(), A.get(), len, Pm.c, cnt.get(), pair_cap, exact_narrow(),
+                         cands(), tail_view(), scal.get() + 1, scal.get() + 2, scal.get() + 9);
       }
       double out[11];  // scal[1..11]
       check(cudaMemcpy(out, scal.get() + 1, 11 * sizeof(double), cudaMemcpyDeviceToHost), "ccd read");
@@ -987,7 +999,11 @@ struct Stepper::Impl {
       launch_fk(m, qtrial.get(), Fb.view());
       launch_ccd_init(sc + 1, sc + 2, sc + 9, len_d);
       launch_ground_ccd(m, Fa.X.get(), Fb.X.get(), A.get(), len_d, Pm.c, sc + 1, sc + 2);
-      if (pairs_on()) launch_swept_boxes(m, Fa.X.get(), Fb.X.get(), boxes.get());
+      if (pairs_on()) {
+        launch_swept_boxes(m, Fa.X.get(), Fb.X.get(), boxes.get());
+        launch_to_float(Fa.X.get(), 3 * m.nvert, xfa.get());
+        launch_to_float(Fb.X.get(), 3 * m.nvert, xfb.get());
+      }
     });
     if (pairs_on()) {
       cudaGraph_t cull = add_cond(body, bd, hf, cudaGraphCondTypeIf);
@@ -996,8 +1012,6 @@ struct Stepper::Impl {
       capture_into(cull, cd, [&] {
         launch_body_pairs(m, boxes.get(), 0.0, A.get(), plen_d, pairs.get(), pair_cap, cnt.get());
         launch_body_disp(m, Fa.X.get(), Fb.X.get(), bdisp.get());
-        launch_to_float(Fa.X.get(), 3 * m.nvert, xfa.get());
-        launch_to_float(Fb.X.get(), 3 * m.nvert, xfb.get());
         DNarrow N = narrow();
         N.xa = xfa.get();
         N.xb = xfb.get();
@@ -1007,8 +1021,8 @@ struct Stepper::Impl {
     }
     capture_into(body, bd, [&] {
       if (pairs_on()) {
-        launch_ccd_exact(m, Fa.X.get(), Fb.X.get(), boxes.get(), A.get(), len_d, Pm.c, cnt.get(), pair_cap, narrow(),
-                         cands(), tail_view(), sc + 1, sc + 2, sc + 9);
+        launch_ccd_exact(m, Fa.X.get(), Fb.X.get(), boxes.get(), A.get(), len_d, Pm.c, cnt.get(), pair_cap,
+                         exact_narrow(), cands(), tail_view(), sc + 1, sc + 2, sc + 9);
       } else {
         launch_fill(sc + 9, 0.0);
         launch_fill(sc + 10, 0.0);
@@ -1066,6 +1080,7 @@ struct Stepper::Impl {
     k.tight = Pm.tight_bound;
     k.reuse = reuse;
     k.tail = tail;
+    k.prefilter = prefilter;
     return k;
   }
 
@@ -1317,11 +1332,12 @@ bool Stepper::set_cooperative_pcg(bool on) {
 }
 void Stepper::reset_timers() {
   impl_->timers = Timers();
-  check(cudaMemset(impl_->tail_stats.get(), 0, 3 * sizeof(unsigned long long)), "memset");
+  check(cudaMemset(impl_->tail_stats.get(), 0, 4 * sizeof(unsigned long long)), "memset");
 }
 void Stepper::set_graphs(bool on) { impl_->graphs = on; }
 void Stepper::set_ccd_reuse(bool on) { impl_->reuse = on; }
 void Stepper::set_ccd_tail(bool on) { impl_->tail = on; }
+void Stepper::set_ccd_prefilter(bool on) { impl_->prefilter = on; }
 bool Stepper::used_graphs() const { return impl_->last_graph; }
 void Stepper::set_capacities(int pairs, int contacts, int candidates, int work) {
   impl_->grow_pairs(pairs);
