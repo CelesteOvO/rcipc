@@ -261,6 +261,8 @@ struct Stepper::Impl {
   bool coop = false;
   bool timing = true;  // 分段计时（每段结束同步一次）
   bool reuse = true;   // CCD 的段落在候选的窗口里时不重新求候选（set_ccd_reuse，笔记第 13 节）
+  bool tail = true;    // ACCD 走得久的对交给尾巴的内核（set_ccd_tail，笔记第 14 节）
+  DBuf<unsigned long long> tail_stats;  // 累计的三个计数（DTail::stats），timers() 时读回
   double last_eval_dmin = 0;  // energy_at 最后一次检测到的接触里最小的距离
   DBuf<double> pcg_acc;
 
@@ -277,11 +279,11 @@ struct Stepper::Impl {
     long gen = -1;
     double h = 0, dhat = 0, mu = 0, eps_v = 0, curv = 0, limit_k = 0, limit_dhat = 0, c = 0, tol = 0, pcg_tol = 0;
     int pcg_max = 0;
-    bool tight = true, reuse = true;
+    bool tight = true, reuse = true, tail = true;
     bool operator==(const GraphKey& o) const {
       return gen == o.gen && h == o.h && dhat == o.dhat && mu == o.mu && eps_v == o.eps_v && curv == o.curv &&
              limit_k == o.limit_k && limit_dhat == o.limit_dhat && c == o.c && tol == o.tol && pcg_tol == o.pcg_tol &&
-             pcg_max == o.pcg_max && tight == o.tight && reuse == o.reuse;
+             pcg_max == o.pcg_max && tight == o.tight && reuse == o.reuse && tail == o.tail;
     }
   };
   GraphKey graph_key;
@@ -292,6 +294,8 @@ struct Stepper::Impl {
     upload();
     coop = pcg_coop_supported();
     d_it.reserve(1);
+    tail_stats.reserve(3);
+    check(cudaMemset(tail_stats.get(), 0, 3 * sizeof(unsigned long long)), "memset");
     check(cudaMallocHost(&h_it, sizeof(DIter)), "cudaMallocHost");
     *h_it = DIter();
   }
@@ -596,6 +600,20 @@ struct Stepper::Impl {
     cand.reserve(n);
   }
   DCands cands() const { return DCands{cand.get(), cnt.get() + 2, cand_cap}; }
+  DTail tail_view() const {
+    DTail T;
+    T.split = tail ? kAccdSplit : kAccdMax;
+    T.stats = tail_stats.get();
+    return T;
+  }
+  // 尾巴的三个累计计数读回到 timers 里。
+  void sync_tail_stats() {
+    unsigned long long h[3];
+    tail_stats.download(h, 3);
+    timers.ccd_tail = static_cast<long>(h[0]);
+    timers.ccd_tail_proved = static_cast<long>(h[1]);
+    timers.ccd_tail_serial = static_cast<long>(h[2]);
+  }
   // 行数每次组装都在变，按 1.5 倍扩容：每次只扩到刚好够用时，接触一多就要重新分配，cudaFree 会让整个设备同步。
   void grow_rows(int n) {
     if (n <= row_cap) return;
@@ -799,7 +817,7 @@ struct Stepper::Impl {
                           N, cands(), reuse);
         }
         launch_ccd_exact(m, Xa, Fb.X.get(), boxes.get(), A.get(), len, Pm.c, cnt.get(), pair_cap, narrow(), cands(),
-                         scal.get() + 1, scal.get() + 2, scal.get() + 9);
+                         tail_view(), scal.get() + 1, scal.get() + 2, scal.get() + 9);
       }
       double out[11];  // scal[1..11]
       check(cudaMemcpy(out, scal.get() + 1, 11 * sizeof(double), cudaMemcpyDeviceToHost), "ccd read");
@@ -885,10 +903,10 @@ struct Stepper::Impl {
     const cudaGraphNode_t* d = nullptr;
     size_t nd = 0;
     check(cudaStreamGetCaptureInfo(cudaStreamPerThread, &st, nullptr, nullptr, &d, &nd), "capture info");
-    std::vector<cudaGraphNode_t> tail(d, d + nd);
+    std::vector<cudaGraphNode_t> last(d, d + nd);
     cudaGraph_t out = gr;
     check(cudaStreamEndCapture(cudaStreamPerThread, &out), "end capture");
-    deps = std::move(tail);
+    deps = std::move(last);
   }
 
   // 条件节点接在 deps 后面（句柄 h；WHILE 是循环，IF 是 h 不为 0 时跑一次），返回循环体的图；deps 变成这个节点。
@@ -990,7 +1008,7 @@ struct Stepper::Impl {
     capture_into(body, bd, [&] {
       if (pairs_on()) {
         launch_ccd_exact(m, Fa.X.get(), Fb.X.get(), boxes.get(), A.get(), len_d, Pm.c, cnt.get(), pair_cap, narrow(),
-                         cands(), sc + 1, sc + 2, sc + 9);
+                         cands(), tail_view(), sc + 1, sc + 2, sc + 9);
       } else {
         launch_fill(sc + 9, 0.0);
         launch_fill(sc + 10, 0.0);
@@ -1047,6 +1065,7 @@ struct Stepper::Impl {
     k.pcg_max = Pm.pcg_max;
     k.tight = Pm.tight_bound;
     k.reuse = reuse;
+    k.tail = tail;
     return k;
   }
 
@@ -1288,14 +1307,21 @@ StepResult Stepper::step(const StepParams& P, const VectorXd& q0, const VectorXd
   return impl_->step(P, q0, v0, state, trace);
 }
 
-const Stepper::Timers& Stepper::timers() const { return impl_->timers; }
+const Stepper::Timers& Stepper::timers() const {
+  impl_->sync_tail_stats();
+  return impl_->timers;
+}
 bool Stepper::set_cooperative_pcg(bool on) {
   impl_->coop = on && pcg_coop_supported();
   return impl_->coop;
 }
-void Stepper::reset_timers() { impl_->timers = Timers(); }
+void Stepper::reset_timers() {
+  impl_->timers = Timers();
+  check(cudaMemset(impl_->tail_stats.get(), 0, 3 * sizeof(unsigned long long)), "memset");
+}
 void Stepper::set_graphs(bool on) { impl_->graphs = on; }
 void Stepper::set_ccd_reuse(bool on) { impl_->reuse = on; }
+void Stepper::set_ccd_tail(bool on) { impl_->tail = on; }
 bool Stepper::used_graphs() const { return impl_->last_graph; }
 void Stepper::set_capacities(int pairs, int contacts, int candidates, int work) {
   impl_->grow_pairs(pairs);

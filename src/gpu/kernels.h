@@ -98,9 +98,14 @@ void launch_ccd_cull(const DModel& m, const DFrames& Fa, const double* boxes, co
 constexpr double kWindowPairLen = 1.42;
 // 2. 复核和 ACCD：C 里的候选（上一次剔除留下的，可以是窗口的）在这一段 [Xa, Xb] 上做，boxes 是这一段的扫掠盒。
 //    seen[0..2] 写候选、刚体对、工作项的总数（double），超过容量时调用者扩容后重做这一段。
+//    tail.split < kAccdMax 时，ACCD 走了 split 步还没完的对由整个 warp 一起先试着证明它返回 1，
+//    证不出来再接着走；结果不变（笔记第 14 节）。
 void launch_ccd_exact(const DModel& m, const double* Xa, const double* Xb, const double* boxes, const double* A,
-                      DScalar len, double c, const int* npairs_d, int pair_cap, DNarrow N, DCands C, double* tmin,
-                      double* ds_need, double* seen);
+                      DScalar len, double c, const int* npairs_d, int pair_cap, DNarrow N, DCands C, DTail tail,
+                      double* tmin, double* ds_need, double* seen);
+// ACCD 最多走几步（和 CPU 版的 accd 一样），和默认先串行走几步再交给尾巴的内核。
+constexpr int kAccdMax = 1000;
+constexpr int kAccdSplit = 16;
 // 一段 CCD 的初值：*tmin = 1，*ds_need = len，seen[0..1] = 0（一个小内核，不用同步的拷贝）。
 void launch_ccd_init(double* tmin, double* ds_need, double* seen, DScalar len);
 // 每个刚体的顶点从 Xa 到 Xb 的最大位移，写到 D（nbody 个，先清零）。

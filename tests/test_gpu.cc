@@ -291,6 +291,51 @@ TEST(Ccd, MatchesCpu) {
   EXPECT_LT(windows, segs);
 }
 
+// ACCD 的尾巴（笔记第 14 节）：走了 16 步还没完的对交给整个 warp，先证明它返回 1，证不出来再接着走。
+// 两个盒子一起绕 y 轴倾斜 0.3 rad（倾斜的面上，三角形的盒子在 z 方向有厚度，扫掠盒才会重叠；水平的面上，
+// 平移的滑动早被盒子规则剔掉了），上面的盒子离下面 0.1 mm，沿下面盒子的顶面滑 3 cm：贴着滑的对要走约 330 步。
+//   - 只滑：距离一直是 0.1 mm，证得出返回 1；
+//   - 滑的同时沿法向沉 0.2 mm：中途会碰上，证不出来，接着串行走完。
+// 交不交给 warp，结果都要逐位相同，并且和 CPU 版一致。
+TEST(Ccd, TailMatchesSerial) {
+  REQUIRE_GPU();
+  const Model M = load("stack.xml");
+  StepParams P;
+  P.dhat = 1e-3;
+  gpu::Stepper G(M);
+  const double th = 0.3, gap = 1e-4;
+  const Eigen::Quaterniond tilt(Eigen::AngleAxisd(th, Eigen::Vector3d::UnitY()));
+  const Eigen::Quaterniond up = tilt * Eigen::Quaterniond(Eigen::AngleAxisd(EIGEN_PI / 4, Eigen::Vector3d::UnitZ()));
+  const Eigen::Vector3d centre(0, 0, 1.0);  // 离地面远一点
+  const Eigen::Vector3d nrm = tilt * Eigen::Vector3d::UnitZ(), tan = tilt * Eigen::Vector3d::UnitX();
+  VectorXd q = M.qpos0;
+  q.segment<3>(0) = centre;
+  q.segment<4>(3) << tilt.w(), tilt.x(), tilt.y(), tilt.z();
+  q.segment<3>(7) = centre + (0.2 + gap) * nrm;
+  q.segment<4>(10) << up.w(), up.x(), up.y(), up.z();
+  long tail = 0, proved = 0, serial = 0;
+  for (int k = 0; k < 2; ++k) {
+    VectorXd p = VectorXd::Zero(M.nv);
+    p.segment<3>(6) = 0.03 * tan - (k == 1 ? 2 * gap : 0.0) * nrm;
+    const double b = std::min(curved_ccd(M, q, p, P.dhat, P.c), limit_ccd(M, q, p, P.c));
+    G.set_ccd_tail(false);
+    const double a0 = G.ccd(P, q, p);
+    G.set_ccd_tail(true);
+    G.reset_timers();
+    const double a1 = G.ccd(P, q, p);
+    EXPECT_EQ(a0, a1) << "direction " << k;
+    EXPECT_NEAR(a1, b, 1e-12) << "direction " << k;
+    if (k == 0) EXPECT_EQ(a1, 1.0);
+    if (k == 1) EXPECT_LT(a1, 0.6);  // 真的截断了
+    tail += G.timers().ccd_tail;
+    proved += G.timers().ccd_tail_proved;
+    serial += G.timers().ccd_tail_serial;
+  }
+  EXPECT_GT(tail, 0);
+  EXPECT_GT(proved, 0);
+  EXPECT_GT(serial, 0);
+}
+
 // ---------- 整步 ----------
 
 // GPU 和 CPU 跑同一段，最后的状态一致（只差舍入的累积），每步的 Newton 次数一样。

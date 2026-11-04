@@ -48,6 +48,7 @@ class Stepper {
     long pair_calls = 0, pair_sum = 0;   // 候选刚体对：求了几次、个数之和（检测和 CCD 都算）
     long ccd_segments = 0;               // CCD 一共检查了几段（缩短重做的也算）
     long ccd_windows = 0;                // 其中重新求候选（刚体对和剔除）的段数，见 set_ccd_reuse
+    long ccd_tail = 0, ccd_tail_proved = 0, ccd_tail_serial = 0;  // ACCD 的尾巴：交出去的对、证出返回 1 的、接着串行走的
   };
   const Timers& timers() const;
   void reset_timers();
@@ -66,6 +67,9 @@ class Stepper {
   // CCD 的候选按窗口求（默认）：求候选的那一段当作窗口，余量放大到盖住窗口里的任何一段；之后落在窗口里的段
   // （缩短重做的、缩短以后接着走的）只做复核和 ACCD。关掉时每一段都重新求。两者结果一样（笔记 notes/11_gpu.md 第 13 节）。
   void set_ccd_reuse(bool on);
+  // ACCD 串行走了 16 步还没完的对交给第二个内核（默认）：一个 warp 一对，先用整段弦上的距离下界证明它返回 1，
+  // 证不出来再接着走。关掉时每对在一个线程里走完。两者结果逐位相同（笔记 notes/11_gpu.md 第 14 节）。
+  void set_ccd_tail(bool on);
   // 测试用：把刚体对、接触、候选、工作项的容量改小，让“放不下、扩容、重来”的路径也走到。
   void set_capacities(int pairs, int contacts, int candidates, int work);
 
