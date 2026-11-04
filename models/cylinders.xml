@@ -1,0 +1,26 @@
+<!--
+  圆柱（cylinder geom，做成 12 边形的棱柱，笔记 notes/13_mechanisms.md 第 3 节）。
+    upright：竖着从 2 cm 高落下，最后立在地上，中心高度 = 半长 0.05；
+    lying  ：横着（轴沿 x、绕轴转 15° 让一个侧面朝下）落下，侧面着地，中心高度 = 半径 x cos(15°) = 0.966 x 0.04；
+    onbox  ：横着落到世界上的一个盒子上。
+-->
+<mujoco model="cylinders">
+  <compiler angle="radian"/>
+  <option gravity="0 0 -9.81" timestep="0.01"/>
+  <worldbody>
+    <geom name="floor" type="plane" size="1 1 0.1"/>
+    <geom name="block" type="box" pos="0.6 0 0.05" size="0.1 0.1 0.05"/>
+    <body name="upright" pos="0 0 0.07">
+      <freejoint/>
+      <geom type="cylinder" size="0.03 0.05" density="1000"/>
+    </body>
+    <body name="lying" pos="0.3 0 0.06" euler="0 1.5707963 0.2617994">
+      <freejoint/>
+      <geom type="cylinder" size="0.04 0.06" density="1000"/>
+    </body>
+    <body name="onbox" pos="0.6 0 0.16" euler="0.3 1.5707963 0">
+      <freejoint/>
+      <geom type="cylinder" size="0.03 0.08" density="1000"/>
+    </body>
+  </worldbody>
+</mujoco>

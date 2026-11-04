@@ -6,7 +6,10 @@
 //   gpu=1：用 GPU 版（阶段 11，需要编译时打开了 CUDA）。check 在 GPU 上不支持。
 //   timing=0：GPU 版不做分段计时（分段计时每段都要等 GPU，会拖慢整步；量墙钟时间时关掉）。
 //
-//   model：models/ 下的文件名（或绝对路径）。有的场景：ragdoll.xml、ragdoll_pile.xml、chain.xml、stack.xml、ledge.xml。
+//   model：models/ 下的文件名（或绝对路径）。有的场景：ragdoll.xml、ragdoll_pile.xml、chain.xml、stack.xml、ledge.xml，
+//          阶段 12 之后：gears.xml（用 mu=0 gpu=1）、gripper.xml（用 mu=0.5）、cylinders.xml，
+//          以及 tools/make_robot_pile.py 生成的 models/local/go2_pile.xml。
+//   模型有关键帧时，从第一个关键帧的 qpos 开始（没有时从 qpos0）。
 //   check=1：每次接受的 Newton 迭代都沿真实轨迹采样最小距离（慢，但验证的是 CCD 真正保证的东西）。
 //   out：每行 t, min_distance, min_limit, newton, pcg, 然后是 nq 个 qpos。用 tools/replay.py 在 MuJoCo 的窗口里回放。
 //
@@ -127,7 +130,7 @@ int main(int argc, char** argv) {
     if (model.nu() > 0) std::printf("%d actuators, %zu control keyframes\n", model.nu(), model.ctrl_keys.size());
     for (const std::string& s : model.ignored) std::printf("ignored (not supported): %s\n", s.c_str());
 
-    VectorXd q = model.qpos0, v = VectorXd::Zero(model.nv);
+    VectorXd q = model.key_qpos.size() == model.nq ? model.key_qpos : model.qpos0, v = VectorXd::Zero(model.nv);
     FILE* f = a.out.empty() ? nullptr : std::fopen(a.out.c_str(), "w");
     if (f) std::fprintf(f, "t,min_distance,min_limit,newton,pcg,qpos...\n");
     double t = 0, dmin_end = 1e300, dmin_iter = 1e300, lmin = 1e300, next_report = 0;

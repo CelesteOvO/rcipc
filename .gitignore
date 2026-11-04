@@ -10,3 +10,6 @@ cmake-build-*/
 
 # tools/render.py 的输出（轨迹和视频，可以重新生成）
 media/
+
+# tools/make_robot_pile.py 生成的场景（机器人模型不在仓库里）
+models/local/

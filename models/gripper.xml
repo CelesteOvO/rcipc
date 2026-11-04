@@ -1,0 +1,54 @@
+<!--
+  夹爪抓起一个方块（阶段 12 之后的机构场景，笔记 notes/13_mechanisms.md 第 2 节）。用 mu=0.5 跑。
+
+  树：world -> lift（沿 z 滑动，position 驱动）-> 左右两个手指（沿 x 滑动，position 驱动）。
+  方块 5 cm、0.1 kg，自由关节，放在地面上方 0.5 mm。手指和方块的侧面开始时隔 3 cm。
+  控制量（关键帧，单位 m，都是相对 MJCF 里的位置）：
+    0 – 0.4 s   往下 5.5 cm，手指尖停在地面上方 5 mm；
+    0.6 – 0.9 s 两个手指各往里 3.5 cm，比方块的侧面多 5 mm，夹紧力约 kp x 5 mm = 2 N；
+    1.1 – 1.8 s 往上提 15.5 cm；之后不动。
+  方块的重量 0.98 N，两侧的摩擦力最多 2 x 0.5 x 2 N = 2 N，提得起来。
+  手指上方那根细杆只用来显示（contype=0 conaffinity=0、密度 0，不参与碰撞，也不算质量）。
+-->
+<mujoco model="gripper">
+  <compiler angle="radian"/>
+  <option gravity="0 0 -9.81" timestep="0.01"/>
+
+  <worldbody>
+    <geom name="floor" type="plane" size="1 1 0.1"/>
+    <body name="cube" pos="0 0 0.0255">
+      <freejoint/>
+      <geom type="box" size="0.025 0.025 0.025" mass="0.1" rgba="0.85 0.35 0.3 1"/>
+    </body>
+    <body name="lift" pos="0 0 0.25">
+      <joint name="lift" type="slide" axis="0 0 1"/>
+      <geom name="palm" type="box" size="0.08 0.025 0.01" mass="0.5" rgba="0.4 0.45 0.55 1"/>
+      <body name="finger_l" pos="-0.06 0 -0.15">
+        <joint name="finger_l" type="slide" axis="1 0 0"/>
+        <geom type="box" size="0.005 0.02 0.04" mass="0.05" rgba="0.35 0.6 0.75 1"/>
+        <geom type="box" size="0.004 0.01 0.05" pos="0 0 0.09" density="0" contype="0" conaffinity="0" rgba="0.5 0.5 0.55 1"/>
+      </body>
+      <body name="finger_r" pos="0.06 0 -0.15">
+        <joint name="finger_r" type="slide" axis="1 0 0"/>
+        <geom type="box" size="0.005 0.02 0.04" mass="0.05" rgba="0.35 0.6 0.75 1"/>
+        <geom type="box" size="0.004 0.01 0.05" pos="0 0 0.09" density="0" contype="0" conaffinity="0" rgba="0.5 0.5 0.55 1"/>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <position name="lift" joint="lift" kp="3000" kv="150"/>
+    <position name="finger_l" joint="finger_l" kp="400" kv="20"/>
+    <position name="finger_r" joint="finger_r" kp="400" kv="20"/>
+  </actuator>
+
+  <keyframe>
+    <key time="0" ctrl="0 0 0"/>
+    <key time="0.4" ctrl="-0.055 0 0"/>
+    <key time="0.6" ctrl="-0.055 0 0"/>
+    <key time="0.9" ctrl="-0.055 0.035 -0.035"/>
+    <key time="1.1" ctrl="-0.055 0.035 -0.035"/>
+    <key time="1.8" ctrl="0.1 0.035 -0.035"/>
+    <key time="2.5" ctrl="0.1 0.035 -0.035"/>
+  </keyframe>
+</mujoco>

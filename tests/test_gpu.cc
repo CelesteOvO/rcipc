@@ -418,6 +418,68 @@ TEST(Step, DrivesMatchCpu) {
   }
 }
 
+// 机构场景（笔记 notes/13_mechanisms.md）：夹爪夹起方块，GPU 两种 Newton 迭代都和 CPU 逐步接近（接触、摩擦、
+// 三个 position 驱动）。夹爪有顶点，图版确实用上了：驱动在 CUDA graph 里也对。
+TEST(Mechanism, GripperMatchesCpu) {
+  REQUIRE_GPU();
+  const Model M = load("gripper.xml");
+  for (bool graphs : {true, false}) {
+    gpu::Stepper G(M);
+    G.set_graphs(graphs);
+    StepParams P;
+    P.h = M.timestep;
+    P.mu = 0.5;
+    VectorXd qc = M.qpos0, vc = VectorXd::Zero(M.nv), qg = qc, vg = vc;
+    SolverState Sc, Sg;
+    int newton_diff = 0;
+    for (int i = 0; i < 250; ++i) {
+      P.ctrl = ctrl_at(M, (i + 1) * P.h);
+      const StepResult rc = step(M, P, qc, vc, &Sc);
+      const StepResult rg = G.step(P, qg, vg, &Sg);
+      newton_diff += rc.newton != rg.newton;
+      qc = rc.q;
+      vc = rc.v;
+      qg = rg.q;
+      vg = rg.v;
+      EXPECT_GT(rg.min_distance, 0.0) << "step " << i;
+      if (graphs && G.set_cooperative_pcg(true)) EXPECT_TRUE(G.used_graphs()) << "step " << i;
+    }
+    EXPECT_LT((qg - qc).norm(), 1e-5) << "graphs " << graphs;
+    EXPECT_LE(newton_diff, 250 / 20) << "graphs " << graphs;
+    EXPECT_GT(qg[2], 0.15);  // 方块被提起来了
+  }
+}
+
+// 齿轮组（tools/make_gears.py）：GPU 跑 1 s，不穿模；一样的齿轮相邻啮合，第 k 个转了主动轮的 (-1)^k 倍
+// （差一个侧隙，所以比 1 小一点）；主动轮最后接近目标转速 -100°/s。CPU 上一步约 0.25 s，所以只在 GPU 上跑。
+TEST(Mechanism, GearsTransmit) {
+  REQUIRE_GPU();
+  const Model M = load("gears.xml");
+  ASSERT_EQ(M.nv, 4);
+  gpu::Stepper G(M);
+  StepParams P;
+  P.h = M.timestep;
+  P.mu = 0;
+  VectorXd q = M.qpos0, v = VectorXd::Zero(M.nv);
+  SolverState S;
+  double dmin = 1e300;
+  for (int i = 0; i < 100; ++i) {
+    P.ctrl = ctrl_at(M, (i + 1) * P.h);
+    const StepResult r = G.step(P, q, v, &S);
+    dmin = std::min(dmin, r.min_distance);
+    q = r.q;
+    v = r.v;
+  }
+  EXPECT_GT(dmin, 0.0);
+  EXPECT_LT(q[0], -1.4);  // 1 s 里主动轮转了 80° 以上（0.2 s 加速）
+  for (int k = 1; k < 4; ++k) {
+    const double ratio = q[k] / q[0];
+    EXPECT_LT(ratio * (k % 2 ? -1 : 1), 1.0) << "gear " << k;
+    EXPECT_GT(ratio * (k % 2 ? -1 : 1), 0.9) << "gear " << k;
+  }
+  EXPECT_NEAR(v[0], -100 * 3.14159265358979323846 / 180, 0.05);
+}
+
 // 容量从很小开始：每种缓冲区都要在 Newton 迭代中间扩容（图版是作废这次迭代、扩容、重录、重做），结果照样和 CPU 一致。
 TEST(Step, GrowsBuffersMidStep) {
   REQUIRE_GPU();

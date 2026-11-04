@@ -114,6 +114,7 @@ struct Model {
   std::vector<int> dof_body;     // 每个自由度属于哪个刚体（长度 nv）
   std::vector<bool> dof_rot;     // 每个自由度是转动（true）还是平移（false）
   Eigen::VectorXd qpos0;         // 参考位置：MJCF 里写的姿态
+  Eigen::VectorXd key_qpos;      // 第一个关键帧的 qpos（没有关键帧时为空）。scene_demo 有它就从它开始
   Eigen::Vector3d gravity{0, 0, -9.81};  // 重力加速度（MJCF 的 option gravity），阶段 3 起用
   double timestep = 0.002;       // MJCF 的 option timestep（s）
   std::vector<Vertex> vertices;  // 阶段 4：所有刚体的顶点（从 MJCF 的 geom 读出）
@@ -154,7 +155,7 @@ struct Model {
 //   - 一个刚体上有多个关节（书里也要求每个刚体至多一个关节）；
 //   - 自由关节不在顶层（父刚体不是世界）；
 //   - mocap 刚体；
-//   - 阶段 4 起：geom 不是 plane、box、sphere、capsule；plane 不在世界上。
+//   - 阶段 4 起：geom 不是 plane、box、sphere、capsule（阶段 12 之后加了 cylinder、mesh）；plane 不在世界上。
 //     （MJCF 里 contype="0" conaffinity="0" 的 geom 只用来显示，会被跳过。）
 //   阶段 7 起世界上也可以放 box、sphere、capsule，当作静止的障碍物。
 //   阶段 12 起：驱动不在 Actuator 说明的范围里（传动不是铰链或滑动、有激活动力学、增益不固定、偏置不是 affine，

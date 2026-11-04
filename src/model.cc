@@ -1,6 +1,7 @@
 #include "rcipc/model.h"
 
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -43,6 +44,8 @@ Model from_mujoco(const mjModel* m) {
   M.qpos0 = Eigen::Map<const Eigen::VectorXd>(m->qpos0, m->nq);
   M.gravity = Eigen::Vector3d(m->opt.gravity);
   M.timestep = m->opt.timestep;
+  // 阶段 12 之后：第一个关键帧的 qpos 当作起始姿态（MJCF 的关键帧没写 qpos 时，MuJoCo 填的就是 qpos0）。
+  if (m->nkey > 0) M.key_qpos = Eigen::Map<const Eigen::VectorXd>(m->key_qpos, m->nq);
   M.filter_parent = (m->opt.disableflags & mjDSBL_FILTERPARENT) == 0;  // 阶段 10 之后：对比 libuipc 时关掉父子过滤
 
   // 关节：逐个抄出类型、地址、锚点和轴。
@@ -149,6 +152,38 @@ Model from_mujoco(const mjModel* m) {
         M.vertices.push_back({b, pos - quat * Eigen::Vector3d(0, 0, size[1]), size[0]});
         M.edges.push_back({M.nvertex() - 2, M.nvertex() - 1, b});
         break;
+      case mjGEOM_CYLINDER: {
+        // 圆柱（阶段 12 之后，为了 Go2 这类机器人模型）：轴是 geom 坐标系的 z 轴，size[0] 是半径，size[1] 是半长。
+        //   做成正 kCylinderSides 边形的棱柱：两圈顶点（半径 0）、两个端面的中心各一个顶点，
+        //   侧面每格两个三角形，端面从中心扇形三角化。多边形内接于圆，所以比真圆柱略小（12 边时差 3.4% 的半径）。
+        constexpr int kSides = 12;
+        const int v0 = M.nvertex();
+        for (int ring = 0; ring < 2; ++ring) {
+          const double z = ring ? size[1] : -size[1];
+          for (int k = 0; k < kSides; ++k) {
+            const double a = 2 * 3.14159265358979323846 * k / kSides;
+            M.vertices.push_back({b, pos + quat * Eigen::Vector3d(size[0] * std::cos(a), size[0] * std::sin(a), z), 0.0});
+          }
+        }
+        const int cb = M.nvertex(), ct = cb + 1;  // 底面、顶面的中心
+        M.vertices.push_back({b, pos + quat * Eigen::Vector3d(0, 0, -size[1]), 0.0});
+        M.vertices.push_back({b, pos + quat * Eigen::Vector3d(0, 0, size[1]), 0.0});
+        for (int k = 0; k < kSides; ++k) {
+          const int j = (k + 1) % kSides;
+          const int b0 = v0 + k, b1 = v0 + j, t0 = v0 + kSides + k, t1 = v0 + kSides + j;
+          M.faces.push_back({b0, b1, t1, b});  // 侧面
+          M.faces.push_back({b0, t1, t0, b});
+          M.faces.push_back({ct, t0, t1, b});  // 顶面
+          M.faces.push_back({cb, b1, b0, b});  // 底面
+          M.edges.push_back({b0, b1, b});      // 底圈、顶圈、竖边、侧面的对角线、端面的辐条
+          M.edges.push_back({t0, t1, b});
+          M.edges.push_back({b0, t0, b});
+          M.edges.push_back({b0, t1, b});
+          M.edges.push_back({cb, b0, b});
+          M.edges.push_back({ct, t0, b});
+        }
+        break;
+      }
       case mjGEOM_MESH: {
         // 三角网格（阶段 11 前加的，为了和 libuipc 用同一套几何）：顶点半径 0，三角形照抄，边从三角形里去重得到。
         //   MuJoCo 编译时会把网格挪到它自己的质心、转到主轴上（mesh_vert 在这个网格坐标系里），
@@ -176,7 +211,7 @@ Model from_mujoco(const mjModel* m) {
         break;
       }
       default:
-        throw std::runtime_error("geom " + name + ": only plane, box, sphere, capsule and mesh are supported");
+        throw std::runtime_error("geom " + name + ": only plane, box, sphere, capsule, cylinder and mesh are supported");
     }
   }
 

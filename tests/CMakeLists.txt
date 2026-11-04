@@ -27,6 +27,7 @@ rcipc_test(test_friction rcipc)    # 阶段 8：摩擦
 rcipc_test(test_solver rcipc)      # 阶段 9：PCG、预条件器、停止规则、kappa 调整
 rcipc_test(test_scenes rcipc)      # 阶段 10：关节限位、布娃娃、链条、布娃娃堆
 rcipc_test(test_drives rcipc)      # 阶段 12：驱动、阻尼、armature
+rcipc_test(test_mechanisms rcipc)  # 阶段 12 之后：圆柱、夹爪等机构场景
 if(TARGET rcipc_gpu)
   rcipc_test(test_gpu rcipc_gpu)    # 阶段 11：GPU 版和 CPU 版逐项对比
 endif()
