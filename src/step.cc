@@ -8,6 +8,7 @@
 
 #include "rcipc/ccd.h"
 #include "rcipc/contact.h"
+#include "rcipc/drive.h"
 #include "rcipc/friction.h"
 #include "rcipc/inertia.h"
 #include "rcipc/kinematics.h"
@@ -59,12 +60,15 @@ StepResult step(const Model& model, const StepParams& P, const VectorXd& q0, con
   const std::vector<FrictionContact> FC =
       P.mu > 0 ? lag_friction(model, F0, find_contacts(model, F0, P.dhat), state->kappa, P.dhat)
                : std::vector<FrictionContact>();
+  // 阶段 12：驱动、阻尼、armature 的系数（步首的 q0、v0 和这一步的控制量定下来，这一步里不变）。
+  const DriveTerms D = drive_terms(model, q0, v0, P.ctrl, h);
 
   // 能量作为 q 的函数：先做 FK，重新找活跃的接触（换了位置，活跃的接触可能变了），再把各项加起来。线搜索里反复用。
   const auto energy_at = [&](const VectorXd& q, double kappa) {
     const Frames F = forward_kinematics(model, q);
     return inertia_energy(model, F, T, h) + contact_energy(model, find_contacts(model, F, P.dhat), kappa, P.dhat) +
-           friction_energy(model, F, FC, h, P.mu, P.eps_v) + limit_energy(model, q, P.limit_k, P.limit_dhat);
+           friction_energy(model, F, FC, h, P.mu, P.eps_v) + limit_energy(model, q, P.limit_k, P.limit_dhat) +
+           drive_energy(model, D, q);
   };
 
   // 从上一步结束的位置出发（它是不相交的）。newton 记录做了几次迭代，循环结束以后还要返回它。
@@ -90,12 +94,13 @@ StepResult step(const Model& model, const StepParams& P, const VectorXd& q0, con
     //   H = H_k + sum_r D_r r_r^T r_r：树块 H_k = M(q) / h^2 + 曲率上界的对角（阶段 3、6），
     //       行 = 障碍行（D = kappa b''，阶段 4）和摩擦行（阶段 8）。
     //   阶段 9 起用树块预条件的 PCG 解它（不组装 H）；LDLT 留着做参照（solver 参数）。
-    //   阶段 10：关节限位的梯度和对角 Hessian（进树块）。
+    //   阶段 10：关节限位的梯度和对角 Hessian（进树块）。阶段 12：驱动、阻尼、armature 也是（drive.h）。
     const VectorXd g = inertia_gradient(model, F, T, h) + contact_gradient(model, F, C, kappa, P.dhat) +
-                       friction_gradient(model, F, FC, h, P.mu, P.eps_v) + limit_gradient(model, q, P.limit_k, P.limit_dhat);
+                       friction_gradient(model, F, FC, h, P.mu, P.eps_v) + limit_gradient(model, q, P.limit_k, P.limit_dhat) +
+                       drive_gradient(model, D, q);
     NewtonSystem sys;
     sys.Hk = inertia_hessian(model, F, h) + contact_curvature(model, q, C, kappa, P.dhat, P.curv_scale);
-    sys.Hk.diagonal() += limit_hessian_diagonal(model, q, P.limit_k, P.limit_dhat);
+    sys.Hk.diagonal() += limit_hessian_diagonal(model, q, P.limit_k, P.limit_dhat) + drive_hessian_diagonal(model, D, q);
     sys.rows = contact_rows(model, F, C, kappa, P.dhat);
     const std::vector<Row> frows = friction_rows(model, F, FC, h, P.mu, P.eps_v);
     sys.rows.insert(sys.rows.end(), frows.begin(), frows.end());
@@ -131,7 +136,8 @@ StepResult step(const Model& model, const StepParams& P, const VectorXd& q0, con
     //   阶段 1 是 energy(x + alpha * p)；现在“加法”换成 integrate，算能量前先做 FK、找接触。
     //   alpha > 1e-12 是保险，防止无限循环。
     const double e0 = inertia_energy(model, F, T, h) + contact_energy(model, C, kappa, P.dhat) +
-                      friction_energy(model, F, FC, h, P.mu, P.eps_v) + limit_energy(model, q, P.limit_k, P.limit_dhat);
+                      friction_energy(model, F, FC, h, P.mu, P.eps_v) + limit_energy(model, q, P.limit_k, P.limit_dhat) +
+                      drive_energy(model, D, q);
     double alpha = alpha_max;
     while (energy_at(integrate(model, q, p, alpha), kappa) > e0 && alpha > 1e-12) {
       alpha *= 0.5;

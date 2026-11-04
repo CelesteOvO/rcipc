@@ -38,6 +38,7 @@ add_library(rcipc
   src/friction.cc    # 阶段 8：滞后的光滑化 Coulomb 摩擦
   src/solver.cc      # 阶段 9：PCG 和树块预条件器
   src/limits.cc      # 阶段 10：关节限位
+  src/drive.cc       # 阶段 12：驱动、关节阻尼、armature
 )
 target_include_directories(rcipc PUBLIC include)
 target_link_libraries(rcipc PUBLIC Eigen3::Eigen mujoco::mujoco)

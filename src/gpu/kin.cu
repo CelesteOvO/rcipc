@@ -312,6 +312,45 @@ __global__ void k_limits(DModel m, const double* q, double k, double dhat, doubl
   }
 }
 
+__global__ void k_drives(DModel m, DDrive D, const double* q, double* e, double* g, double* Hk) {
+  // drive.cc：前 nv 个线程是阻尼和 armature（K/2 (q - r)^2），后 nact 个是驱动（Huber 形状的一元凸函数）。
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  int d = -1;
+  double de = 0, dg = 0, dh = 0;
+  if (i < D.nv) {
+    if (D.K[i] == 0) return;
+    d = i;
+    const double x = q[D.dqadr[i]] - D.r[i];
+    de = 0.5 * D.K[i] * x * x;
+    dg = D.K[i] * x;
+    dh = D.K[i];
+  } else if (i < D.nv + D.nact) {
+    const int k = i - D.nv;
+    d = D.adof[k];
+    const double* a = D.act + 6 * k;
+    const double s = a[0], A = a[1], C = a[2], w = a[3], lo = a[4], hi = a[5];
+    const double qd = q[D.dqadr[d]];
+    if (C == 0) {
+      const double f = fmin(fmax(A, lo), hi);
+      de = -s * f * qd;
+      dg = -s * f;
+    } else {
+      const double y = A + C * qd, c = fmin(fmax(y, lo), hi);
+      de = -(0.5 * c * c + c * (y - c)) / w;
+      dg = -s * c;
+      if (y > lo && y < hi) dh = -s * C;
+    }
+  } else {
+    return;
+  }
+  if (e) atomicAdd(e, de);
+  if (g) atomicAdd(g + d, dg);
+  if (Hk && dh != 0) {
+    const int t = m.dtree[d], l = d - m.tdof0[t];
+    atomicAdd(Hk + t * m.TD * m.TD + l * m.TD + l, dh);
+  }
+}
+
 __global__ void k_limit_ccd(DModel m, const double* q, const double* p, double c, double* tmin) {
   // limit_ccd：和阶段 1 的 ccd_max_step 一样的闭式解。
   const int j = blockIdx.x * blockDim.x + threadIdx.x;
@@ -362,6 +401,11 @@ void launch_inertia_hessian(const DModel& m, const DFrames& F, double h, double*
   }
   const size_t smem = sizeof(double) * (12 * static_cast<size_t>(m.TB) + 6 * static_cast<size_t>(m.TD));
   k_inertia_hessian<<<m.ntree, 256, smem>>>(m, F, h, Hk);
+}
+
+void launch_drives(const DModel& m, const DDrive& D, const double* q, double* e, double* g, double* Hk) {
+  const int n = D.nv + D.nact;
+  if (n > 0) k_drives<<<(n + 127) / 128, 128>>>(m, D, q, e, g, Hk);
 }
 
 void launch_limits(const DModel& m, const double* q, double k, double dhat, double* e, double* g, double* Hk) {

@@ -83,6 +83,28 @@ struct Face {
   int body;
 };
 
+// 阶段 12：驱动（MJCF 的 actuator，笔记 notes/12_drives.md）。只支持 MuJoCo 的 general 模型里的一部分：
+//   传动是关节（铰链或滑动），没有激活动力学（dyntype none），增益固定，偏置是 none 或 affine。
+//   position、velocity、motor 这几种快捷写法都在这个范围里。
+//   驱动力 f = gain u + bias[0] + bias[1] L + bias[2] dL/dt，L = gear q 是驱动的“长度”，关节上的力矩是 gear f。
+struct Actuator {
+  int joint = -1;          // 驱动的关节
+  int dof = -1, qadr = -1; // 那个关节的自由度、在 q 里的下标
+  double gear = 1;         // 传动比（actuator_gear 的第一个数）
+  double gain = 0;         // gainprm[0]
+  double bias[3] = {0, 0, 0};  // biasprm[0..2]
+  bool ctrl_limited = false;   // 控制量 u 夹在 ctrl_range 里
+  double ctrl_range[2] = {0, 0};
+  bool force_limited = false;  // 驱动力 f 夹在 force_range 里
+  double force_range[2] = {0, 0};
+};
+
+// 阶段 12：控制量的时间表，来自 MJCF 的关键帧 <key time="..." ctrl="..."/>，按时间分段线性插值（drive.h 的 ctrl_at）。
+struct CtrlKey {
+  double time;
+  Eigen::VectorXd ctrl;  // 长度 nu
+};
+
 struct Model {
   int nq = 0;                    // q 的长度
   int nv = 0;                    // 自由度个数，也就是 v 和 delta 的长度
@@ -103,7 +125,14 @@ struct Model {
   int ntree = 0;
   std::vector<int> body_tree;    // 每个刚体属于哪棵树（世界是 -1）
   std::vector<int> dof_tree;     // 每个自由度属于哪棵树（长度 nv）
+  // 阶段 12：驱动、关节阻尼和 armature（drive.h）。阻尼和 armature 只用在铰链和滑动的自由度上。
+  std::vector<double> dof_damping;   // 长度 nv（dof_damping，N s/m 或 N m s/rad）
+  std::vector<double> dof_armature;  // 长度 nv（dof_armature，加在质量矩阵对角上的转子惯量）
+  std::vector<Actuator> actuators;
+  std::vector<CtrlKey> ctrl_keys;    // 控制量的时间表（没有驱动或没有关键帧时为空）
+  std::vector<std::string> ignored;  // 读到了、但不支持而被忽略的设置（比如关节的 frictionloss），演示程序会打印
 
+  int nu() const { return static_cast<int>(actuators.size()); }
   int nbody() const { return static_cast<int>(bodies.size()); }
   int nvertex() const { return static_cast<int>(vertices.size()); }
   int nedge() const { return static_cast<int>(edges.size()); }
@@ -128,6 +157,8 @@ struct Model {
 //   - 阶段 4 起：geom 不是 plane、box、sphere、capsule；plane 不在世界上。
 //     （MJCF 里 contype="0" conaffinity="0" 的 geom 只用来显示，会被跳过。）
 //   阶段 7 起世界上也可以放 box、sphere、capsule，当作静止的障碍物。
+//   阶段 12 起：驱动不在 Actuator 说明的范围里（传动不是铰链或滑动、有激活动力学、增益不固定、偏置不是 affine，
+//     或者偏置让驱动变成负刚度、负阻尼）。
 Model from_mujoco(const mjModel* m);
 
 // mjModel 的智能指针：离开作用域时自动调用 mj_deleteModel。

@@ -1,0 +1,48 @@
+<!--
+  阶段 12 的测试模型：几个互不相干的刚体，各自检验一项（笔记 notes/12_drives.md 第 4 节）。没有碰撞几何。
+    damped：沿 x 滑动，阻尼 3、armature 0.5，没有驱动：速度每步按固定比例衰减（隐式欧拉的闭式解）；
+    servo ：沿 y 滑动，position 驱动（kp 50、kv 4），力限制在 ±5：PD 伺服，和闭式递推逐步比较；
+    pushed：沿 x 滑动，motor 驱动，控制量 10、力限制在 ±2：一直以 2 N 加速；
+    spin  ：绕竖直轴转，velocity 驱动（kv 5）：角速度收敛到目标；
+    arm   ：绕 y 轴的摆（质量 1，杆长 0.5），position 驱动（kp 20）加阻尼：停在重力和驱动力矩平衡的角度。
+  关键帧给出控制量的时间表：0.2 s 以前 servo 的目标从 0 线性升到 0.3，之后不变。
+-->
+<mujoco model="drives">
+  <compiler angle="radian"/>
+  <option gravity="0 0 -9.81" timestep="0.01"/>
+
+  <worldbody>
+    <body name="damped" pos="0 0 1">
+      <joint name="damped" type="slide" axis="1 0 0" damping="3" armature="0.5"/>
+      <inertial pos="0 0 0" mass="2" diaginertia="0.01 0.01 0.01"/>
+    </body>
+    <body name="servo" pos="1 0 1">
+      <joint name="servo" type="slide" axis="0 1 0" damping="0.5"/>
+      <inertial pos="0 0 0" mass="1.5" diaginertia="0.01 0.01 0.01"/>
+    </body>
+    <body name="pushed" pos="2 0 1">
+      <joint name="pushed" type="slide" axis="1 0 0"/>
+      <inertial pos="0 0 0" mass="4" diaginertia="0.01 0.01 0.01"/>
+    </body>
+    <body name="spin" pos="3 0 1">
+      <joint name="spin" type="hinge" axis="0 0 1"/>
+      <inertial pos="0 0 0" mass="1" diaginertia="0.03 0.03 0.05"/>
+    </body>
+    <body name="arm" pos="4 0 1">
+      <joint name="arm" type="hinge" axis="0 1 0" damping="1"/>
+      <inertial pos="0 0 -0.5" mass="1" diaginertia="0.001 0.001 0.001"/>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <position name="servo" joint="servo" kp="50" kv="4" forcelimited="true" forcerange="-5 5"/>
+    <motor name="pushed" joint="pushed" gear="1" ctrllimited="true" ctrlrange="-20 20" forcelimited="true" forcerange="-2 2"/>
+    <velocity name="spin" joint="spin" kv="5"/>
+    <position name="arm" joint="arm" kp="20"/>
+  </actuator>
+
+  <keyframe>
+    <key time="0" ctrl="0 10 2 0.8"/>
+    <key time="0.2" ctrl="0.3 10 2 0.8"/>
+  </keyframe>
+</mujoco>

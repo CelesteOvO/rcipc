@@ -181,6 +181,17 @@ struct DCands {
 __device__ inline int cand_count(const DCands& C) { return min(*C.count, C.cap); }
 #endif
 
+// 阶段 12：驱动、关节阻尼、armature（drive.h）。系数每步开头在主机上用 drive_terms 算好，再上传（缓冲区大小不变，
+// 所以 CUDA graph 里的指针也不变）。
+struct DDrive {
+  int nv = 0, nact = 0;
+  const double* K = nullptr;    // nv：阻尼和 armature 的二次项 K/2 (q - r)^2
+  const double* r = nullptr;    // nv
+  const int* dqadr = nullptr;   // nv：铰链、滑动的自由度在 q 里的下标，其余是 -1
+  const double* act = nullptr;  // nact x 6：s、A、C、w、lo、hi（DriveTerms::Act）
+  const int* adof = nullptr;    // nact：驱动的自由度
+};
+
 // CCD 的“尾巴”（notes/11_gpu.md 第 14 节）：ACCD 串行走了 split 步还没走完的对，由整个 warp 一起先试着证明
 // 它返回 1，证不出来再接着走（k_ccd_exact）。
 struct DTail {

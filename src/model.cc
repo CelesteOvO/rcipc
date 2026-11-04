@@ -206,6 +206,71 @@ Model from_mujoco(const mjModel* m) {
       M.dof_tree[j.dadr + k] = M.body_tree[j.body];
     }
   }
+
+  // 阶段 12：关节阻尼、armature（只用在铰链和滑动上；球、自由关节上的记进 ignored）。
+  M.dof_damping.assign(m->dof_damping, m->dof_damping + m->nv);
+  M.dof_armature.assign(m->dof_armature, m->dof_armature + m->nv);
+  bool ignored_3d = false, ignored_friction = false;
+  for (int d = 0; d < m->nv; ++d) {
+    const JointType t = M.joints[M.dof_joint[d]].type;
+    if (t == JointType::kBall || t == JointType::kFree) {
+      ignored_3d = ignored_3d || M.dof_damping[d] != 0 || M.dof_armature[d] != 0;
+      M.dof_damping[d] = M.dof_armature[d] = 0;
+    }
+    ignored_friction = ignored_friction || m->dof_frictionloss[d] != 0;
+  }
+  if (ignored_3d) M.ignored.push_back("damping / armature on ball and free joints");
+  if (ignored_friction) M.ignored.push_back("joint frictionloss");
+  for (int i = 0; i < m->njnt; ++i) {
+    if (m->jnt_stiffness[i] != 0) {
+      M.ignored.push_back("joint stiffness");
+      break;
+    }
+  }
+
+  // 阶段 12：驱动。只接受 Actuator 说明的那一类，别的直接报错（静悄悄地忽略一个驱动，场景就全错了）。
+  for (int i = 0; i < m->nu; ++i) {
+    const std::string name = mj_id2name(m, mjOBJ_ACTUATOR, i) ? mj_id2name(m, mjOBJ_ACTUATOR, i) : std::to_string(i);
+    const auto fail = [&](const std::string& why) { throw std::runtime_error("actuator " + name + ": " + why); };
+    if (m->actuator_trntype[i] != mjTRN_JOINT) fail("only joint transmission is supported");
+    if (m->actuator_dyntype[i] != mjDYN_NONE) fail("activation dynamics are not supported");
+    if (m->actuator_gaintype[i] != mjGAIN_FIXED) fail("only a fixed gain is supported");
+    if (m->actuator_biastype[i] != mjBIAS_NONE && m->actuator_biastype[i] != mjBIAS_AFFINE) fail("only an affine bias is supported");
+    Actuator A;
+    A.joint = m->actuator_trnid[2 * i];
+    const Joint& j = M.joints[A.joint];
+    if (j.type != JointType::kHinge && j.type != JointType::kSlide) fail("only hinge and slide joints can be driven");
+    A.dof = j.dadr;
+    A.qadr = j.qadr;
+    A.gear = m->actuator_gear[6 * i];
+    A.gain = m->actuator_gainprm[mjNGAIN * i];
+    if (m->actuator_biastype[i] == mjBIAS_AFFINE) {
+      for (int k = 0; k < 3; ++k) A.bias[k] = m->actuator_biasprm[mjNBIAS * i + k];
+    }
+    // 力随 L、dL/dt 增大而增大（bias[1] > 0 或 bias[2] > 0）时，能量不再是凸的，Newton 法没有保证。
+    if (A.bias[1] > 0 || A.bias[2] > 0) fail("a positive stiffness or damping bias is not supported");
+    A.ctrl_limited = m->actuator_ctrllimited[i] != 0;
+    A.ctrl_range[0] = m->actuator_ctrlrange[2 * i];
+    A.ctrl_range[1] = m->actuator_ctrlrange[2 * i + 1];
+    A.force_limited = m->actuator_forcelimited[i] != 0;
+    A.force_range[0] = m->actuator_forcerange[2 * i];
+    A.force_range[1] = m->actuator_forcerange[2 * i + 1];
+    M.actuators.push_back(A);
+  }
+  for (int i = 0; i < m->njnt; ++i) {
+    if (m->jnt_actfrclimited[i]) {
+      M.ignored.push_back("joint actuatorfrcrange");
+      break;
+    }
+  }
+  // 关键帧里的控制量和时间。
+  if (m->nu > 0) {
+    for (int k = 0; k < m->nkey; ++k) {
+      M.ctrl_keys.push_back({m->key_time[k], Eigen::Map<const Eigen::VectorXd>(m->key_ctrl + k * m->nu, m->nu)});
+    }
+    std::sort(M.ctrl_keys.begin(), M.ctrl_keys.end(),
+              [](const CtrlKey& a, const CtrlKey& b) { return a.time < b.time; });
+  }
   return M;
 }
 

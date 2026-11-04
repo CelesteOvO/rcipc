@@ -10,6 +10,9 @@
 //   check=1：每次接受的 Newton 迭代都沿真实轨迹采样最小距离（慢，但验证的是 CCD 真正保证的东西）。
 //   out：每行 t, min_distance, min_limit, newton, pcg, 然后是 nq 个 qpos。用 tools/replay.py 在 MuJoCo 的窗口里回放。
 //
+// 阶段 12：有驱动的场景，每一步的控制量按 MJCF 的关键帧插值（ctrl_at，取这一步结束的时刻）。
+//   模型里读到了但不支持而被忽略的设置（Model::ignored）在开头打印出来。
+//
 // 每 0.1 s 打印一行：时间、步末最小距离、最近的限位距离、Newton 和 PCG 的次数、每步耗时。
 // 结束时打印整段的最小距离（步末、迭代轨迹）、限位、Newton 统计、总耗时。输出用英文（Windows 控制台）。
 #include <chrono>
@@ -22,6 +25,7 @@
 #include <vector>
 
 #include "rcipc/contact.h"
+#include "rcipc/drive.h"
 #include "rcipc/kinematics.h"
 #include "rcipc/limits.h"
 #include "rcipc/model.h"
@@ -120,6 +124,8 @@ int main(int argc, char** argv) {
                 P.h, a.T, P.dhat, P.mu, P.eps_v, P.tol, a.gpu ? "GPU" : (a.ldlt ? "LDLT" : "PCG"),
                 a.semi ? ", semi-implicit stop" : "",
                 model.filter_parent ? "" : ", parent-child contact on");
+    if (model.nu() > 0) std::printf("%d actuators, %zu control keyframes\n", model.nu(), model.ctrl_keys.size());
+    for (const std::string& s : model.ignored) std::printf("ignored (not supported): %s\n", s.c_str());
 
     VectorXd q = model.qpos0, v = VectorXd::Zero(model.nv);
     FILE* f = a.out.empty() ? nullptr : std::fopen(a.out.c_str(), "w");
@@ -131,6 +137,7 @@ int main(int argc, char** argv) {
     auto last = t0;
     while (t < a.T - 1e-12) {
       std::vector<NewtonIterate> trace;
+      if (model.nu() > 0) P.ctrl = ctrl_at(model, t + P.h);
 #ifdef RCIPC_HAVE_CUDA
       const StepResult r = G ? G->step(P, q, v, &S, a.debug ? &trace : nullptr)
                              : step(model, P, q, v, &S, a.debug ? &trace : nullptr);

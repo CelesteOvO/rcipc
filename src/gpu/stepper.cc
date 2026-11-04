@@ -29,6 +29,7 @@
 #include "iter.h"
 #include "kernels.h"
 #include "rcipc/contact.h"
+#include "rcipc/drive.h"
 #include "rcipc/limits.h"
 
 namespace rcipc::gpu {
@@ -263,6 +264,10 @@ struct Stepper::Impl {
   bool reuse = true;   // CCD 的段落在候选的窗口里时不重新求候选（set_ccd_reuse，笔记第 13 节）
   bool tail = true;    // ACCD 走得久的对交给尾巴的内核（set_ccd_tail，笔记第 14 节）
   bool prefilter = true;  // ACCD 前先用单精度预筛（set_ccd_prefilter，笔记第 14.2 节）
+  // 阶段 12：驱动、阻尼、armature。没有这些时 drives_on 是 false，什么也不发。
+  bool drives_on = false;
+  DBuf<double> drv_K, drv_r, drv_act;
+  DBuf<int> drv_qadr, drv_dof;
   DBuf<unsigned long long> tail_stats;  // 累计的四个计数（DTail::stats），timers() 时读回
   double last_eval_dmin = 0;  // energy_at 最后一次检测到的接触里最小的距离
   DBuf<double> pcg_acc;
@@ -297,6 +302,7 @@ struct Stepper::Impl {
     coop = pcg_coop_supported();
     d_it.reserve(1);
     tail_stats.reserve(4);
+    setup_drives();
     check(cudaMemset(tail_stats.get(), 0, 4 * sizeof(unsigned long long)), "memset");
     check(cudaMallocHost(&h_it, sizeof(DIter)), "cudaMallocHost");
     *h_it = DIter();
@@ -693,6 +699,35 @@ struct Stepper::Impl {
     return get_scalar(4);
   }
 
+  // 阶段 12：驱动的缓冲区（大小只和模型有关，这里一次分配好），和每个自由度在 q 里的下标。
+  void setup_drives() {
+    bool any = model.nu() > 0;
+    std::vector<int> qadr(m.nv, -1);
+    for (int d = 0; d < m.nv; ++d) {
+      const Joint& j = model.joints[model.dof_joint[d]];
+      if (j.type == JointType::kHinge || j.type == JointType::kSlide) qadr[d] = j.qadr;
+      any = any || model.dof_damping[d] != 0 || model.dof_armature[d] != 0;
+    }
+    drives_on = any;
+    if (!any) return;
+    drv_K.reserve(m.nv);
+    drv_r.reserve(m.nv);
+    drv_qadr.upload(qadr);
+    drv_act.reserve(6 * std::max(model.nu(), 1));
+    drv_dof.reserve(std::max(model.nu(), 1));
+  }
+  DDrive drive_view() const {
+    DDrive D;
+    D.nv = m.nv;
+    D.nact = model.nu();
+    D.K = drv_K.get();
+    D.r = drv_r.get();
+    D.dqadr = drv_qadr.get();
+    D.act = drv_act.get();
+    D.adof = drv_dof.get();
+    return D;
+  }
+
   // 步首（CPU 版 step 的“准备”）：倒推 q_{n-1}、惯性目标、步首的惯性梯度、滞后摩擦。
   void prepare(const StepParams& Pm, const VectorXd& q0h, const VectorXd& v0h, double kappa) {
     const auto t0 = Clock::now();
@@ -705,6 +740,22 @@ struct Stepper::Impl {
     launch_targets(m, F0.view(), Fp.view(), h, tc.get(), tA.get());
     cudaMemsetAsync(ge0.get(), 0, sizeof(double) * m.nv);
     launch_inertia_gradient(m, F0.view(), tc.get(), tA.get(), h, ge0.get());
+    if (drives_on) {
+      // 阶段 12：这一步的驱动系数，和 CPU 版同一个函数算，上传（同步的小拷贝）。
+      const DriveTerms D = drive_terms(model, q0h, v0h, Pm.ctrl, h);
+      drv_K.upload(D.K.data(), m.nv);
+      drv_r.upload(D.r.data(), m.nv);
+      std::vector<double> act;
+      std::vector<int> dof;
+      for (const DriveTerms::Act& a : D.act) {
+        act.insert(act.end(), {a.s, a.A, a.C, a.w, a.lo, a.hi});
+        dof.push_back(a.dof);
+      }
+      if (!dof.empty()) {
+        drv_act.upload(act);
+        drv_dof.upload(dof);
+      }
+    }
     nf = 0;
     if (Pm.mu > 0 && kappa > 0) {
       const int n0 = detect(F0, Pm.dhat);
@@ -728,6 +779,7 @@ struct Stepper::Impl {
                          Hk.get(), rows_view());
     launch_friction_terms(m, F.view(), fric.get(), nf, h, Pm.mu, Pm.eps_v, scal.get(), g.get(), rows_view(), nc);
     launch_limits(m, q.get(), Pm.limit_k, Pm.limit_dhat, scal.get(), g.get(), Hk.get());
+    if (drives_on) launch_drives(m, drive_view(), q.get(), scal.get(), g.get(), Hk.get());
     nrow = nc + 2 * nf;
     timers.contacts += nc;
     timers.rows += nrow;
@@ -745,6 +797,7 @@ struct Stepper::Impl {
     launch_contact_terms(m, Ft.view(), qd, contacts.get(), n, kappa, Pm.dhat, 0.0, scal.get(), nullptr, nullptr, DRows{});
     launch_friction_terms(m, Ft.view(), fric.get(), nf, Pm.h, Pm.mu, Pm.eps_v, scal.get(), nullptr, DRows{}, 0);
     launch_limits(m, qd, Pm.limit_k, Pm.limit_dhat, scal.get(), nullptr, nullptr);
+    if (drives_on) launch_drives(m, drive_view(), qd, scal.get(), nullptr, nullptr);
     // 顺便算接触里最小的距离（kappa 调整要用接受的那个点的，而接受的点就是最后一次试探的点），和能量一起读回。
     set_scalar(4, std::numeric_limits<double>::infinity());
     launch_min_distance(contacts.get(), n, scal.get() + 4);
@@ -970,6 +1023,7 @@ struct Stepper::Impl {
                            Hk.get(), rows_view());
       if (fr) launch_friction_terms(m, F.view(), fric.get(), nf_d, h, Pm.mu, Pm.eps_v, sc, g.get(), rows_view(), nc_d);
       launch_limits(m, q.get(), Pm.limit_k, Pm.limit_dhat, sc, g.get(), Hk.get());
+      if (drives_on) launch_drives(m, drive_view(), q.get(), sc, g.get(), Hk.get());
       launch_precond_build(m, F.view(), Hk.get(), rows_view(), nrow_d, P.get(), scale.get(), precond_work());
       if (run_pcg_coop(m, F.view(), Hk.get(), rows_view(), nrow_d, P.get(), g.get(), p.get(), Pm.pcg_tol, Pm.pcg_max,
                        work.get(), pcg_acc.get(), sc + 12) != 0)
@@ -1051,6 +1105,7 @@ struct Stepper::Impl {
                            nullptr, DRows{});
       if (fr) launch_friction_terms(m, Ft.view(), fric.get(), nf_d, h, Pm.mu, Pm.eps_v, sc, nullptr, DRows{}, 0);
       launch_limits(m, qtrial.get(), Pm.limit_k, Pm.limit_dhat, sc, nullptr, nullptr);
+      if (drives_on) launch_drives(m, drive_view(), qtrial.get(), sc, nullptr, nullptr);
       launch_fill(sc + 4, std::numeric_limits<double>::infinity());
       launch_min_distance(contacts.get(), n_d, sc + 4);
       launch_ls_end(it, sc, cnt.get(), pair_cap, contact_cap, cand_cap, work_cap, hl);

@@ -27,6 +27,8 @@ void launch_inertia_gradient(const DModel& m, const DFrames& F, const double* tc
 void launch_inertia_hessian(const DModel& m, const DFrames& F, double h, double* Hk);
 // 关节限位（limits.cc）：能量累加到 *e、梯度累加到 g、对角累加到 Hk（哪个为空就不算）。
 void launch_limits(const DModel& m, const double* q, double k, double dhat, double* e, double* g, double* Hk);
+// 阶段 12：驱动、阻尼、armature（drive.cc）：能量累加到 *e，梯度累加到 g，对角 Hessian 累加到 Hk（哪个为空就不算）。
+void launch_drives(const DModel& m, const DDrive& D, const double* q, double* e, double* g, double* Hk);
 // 限位的 CCD（limit_ccd）：结果 atomic_min 到 *tmin（调用者先设成 1）。
 void launch_limit_ccd(const DModel& m, const double* q, const double* p, double c, double* tmin);
 // *p = v（一个线程的内核）。用它代替从主机拷一个数过去：那样的拷贝要等前面的内核都做完。

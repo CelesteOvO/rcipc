@@ -50,6 +50,8 @@ struct StepParams {
   // 阶段 10：关节限位的障碍（limits.h）。limit_k 是刚度（J/rad^2 或 J/m^2），limit_dhat 是激活距离（rad 或 m）。
   double limit_k = 10.0;
   double limit_dhat = 0.1;
+  // 阶段 12：这一步的控制量（长度 nu；空表示全 0）。时间表通常来自 MJCF 的关键帧（drive.h 的 ctrl_at）。
+  Eigen::VectorXd ctrl;
 };
 
 // 跨时间步保留的求解器状态。kappa 在第一次出现接触时初始化，之后沿用并按间隙调整。
