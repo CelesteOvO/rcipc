@@ -136,6 +136,20 @@ TEST(Fk, MatchesCpuOnZoo) {
 // ---------- 能量、梯度、Hessian ----------
 
 // 落地的盒子（地面接触 + 摩擦）：静止在地面上的状态，和稍微挪开一点的点。
+// 碰撞过滤（焊在一起的整体、<exclude>，filters.xml）：GPU 的宽相和 CPU 一样过滤，所以 dhat 很大时检测到的接触、
+// 能量、梯度、Hessian 都一致。
+TEST(Terms, FilteredPairs) {
+  REQUIRE_GPU();
+  const Model M = load("filters.xml");
+  StepParams P;
+  P.dhat = 0.2;
+  P.mu = 0;
+  const State s{M.qpos0, VectorXd::Zero(M.nv), {}};
+  State sk = s;
+  sk.S.kappa = 1.0;
+  expect_terms_match(M, P, sk, M.qpos0, "filters");
+}
+
 TEST(Terms, BoxOnTheFloor) {
   REQUIRE_GPU();
   const Model M = load("drop.xml");

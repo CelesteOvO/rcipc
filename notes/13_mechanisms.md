@@ -1,6 +1,11 @@
 # 机构和机器人场景（阶段 12 之后）
 
-**目标：** 用阶段 12 的驱动、阻尼，跑几个前面没有的场景：被驱动的齿轮组、夹爪抓取，以及真实的机器人模型（Unitree Go2）堆在一起。为了 Go2，读模型时加了圆柱（cylinder）geom，场景程序从第一个关键帧的姿态开始。
+**目标：** 用阶段 12 的驱动、阻尼，跑几个前面没有的场景：被驱动的齿轮组、夹爪抓取，真实的机器人模型（Unitree Go2）堆在一起，以及 Allegro 手抓住物体再翻过来。
+
+为此读模型时加了几样东西：
+- 圆柱（cylinder）geom（为了 Go2）；
+- 碰撞过滤改成 MuJoCo 的写法，支持 MJCF 的 `<exclude>`（为了 Allegro 手）；
+- 场景程序从第一个关键帧的姿态开始。
 
 | 场景 | 文件 | 生成方式 | 测试 |
 |---|---|---|---|
@@ -87,7 +92,46 @@ Go2 的模型文件不在仓库里，生成的 MJCF 写到 `models/local/`（被
 
 ---
 
-## 5. 复现
+## 5. Allegro 手：抓住再翻过来
+
+**模型**：`tools/make_hand_grasp.py` 用 MuJoCo Menagerie 的 `wonik_allegro/right_hand.xml`（BSD 许可）。
+- 每只手：手掌加 4 个手指，每个手指 4 个铰链，共 16 个，都有限位、关节阻尼 0.1 和 position 驱动；碰撞体是盒子和胶囊。
+- 摆法：3 只手排成一排，手心朝上，手心里各放一个物体（半径 3 cm 的球、圆柱、方块），离手心 2 mm。
+- 每只手挂在一个 mount 刚体上。mount 绕世界 x 轴（手指的方向）转，转轴穿过物体的中心，也是 position 驱动（$k_p$ = 300、$k_v$ = 5）。
+- 合起来 69 个刚体、69 个自由度、51 个驱动、15 对 `<exclude>`。
+
+时间表写在关键帧里：0–0.2 s 手张开、物体落到手心；0.2–0.8 s 手指的目标从张开线性变到握拳；0.8–1.8 s mount 转 180°，手心朝下，物体只靠手指和摩擦挂住；之后不动。
+- 手指的目标超过了碰到物体的位置，握力就是 $k_p(\text{目标} - q)$。
+- Menagerie 的手指驱动 $k_p$ = 1，这里加到 3（旧分支也是）。用 `mu=0.8` 跑。
+
+**结果**（GPU，3.5 s）：三个物体都挂住了，3.5 s 时都还在转轴的高度（z ≈ 0.30 m）。
+- 每步平均 11 ms，平均 11.7 次 Newton（最多 50 次，2 步撞上限），每步 160 次 PCG。
+- 不穿透，最近 2.6 μm；关节都在限位里。
+- CPU 上一步约 0.12 s。
+
+**做出来之前改过的几处：**
+- **起始姿态。** 圆柱和方块比球宽，放在旧分支的位置会压到拇指根部（拇指根部比手心高约 2 mm）。生成器用 MuJoCo 的检测检查起始姿态，有 1 mm 以内的接触就报错。MuJoCo 把两个 geom 的 margin 相加，所以每个 geom 的 margin 要设成 0.5 mm。圆柱和方块往远离拇指、靠近手指的方向挪了 1.3 cm 和 0.7 cm。
+- **指尖和中节重叠。** 第一次在我们这边跑，第一步就是 −3 mm 的“穿透”，是同一根手指的指尖和中节。指尖没有关节，焊在末节上；MuJoCo 把焊在一起的刚体当成一个整体，指尖和中节因此算父子，不检测。我们原来只看刚体自己的父刚体，两者隔了一层，于是去检测了。见第 6 节。
+- **球掉了。** 第一版球放在手心中间（手掌坐标系 z = −0.035），翻过来以后在 1.8–2.5 s 之间从手腕那一侧滚出去，落到地上。往手指的方向挪 1 cm（z = −0.025）以后就挂住了，z = −0.015 也行。手指弯过来包住的是靠指根的那一半，物体离手腕越近，翻过来以后越容易从手腕那边滚出去。
+
+---
+
+## 6. 碰撞过滤
+
+`Model::collide(a, b)` 决定两个刚体要不要检测（CPU 的宽相、GPU 的 `k_body_pairs` 都用它）。现在和 MuJoCo 的规则一样：
+- 比较“焊在一起的整体”：没有关节的刚体和它的父刚体是一个整体，即 `body_weldid`，存在 `Model::weld` 里。同一个整体里的两个刚体不检测；
+- 两个整体是父子时不检测：一个整体的父刚体所在的整体，正好是另一个整体。父子过滤可以用 `filterparent` 关掉；世界照旧除外；
+- MJCF 的 `<contact><exclude body1 body2/>` 列出的对不检测：`Model::exclude`，编码成 min·nbody + max 排好序，CPU 用二分查找，GPU 也是。
+
+每个刚体都有关节时，和原来的规则完全一样。不一样的模型目前只有 `zoo.xml`：它的 hand 焊在 forearm 上，hand 和 arm、finger 和 forearm 现在不再检测。`Energy.GradientMatchesFiniteDifference` 在这个模型上，有一个自由度的梯度因此变小，相对容差跟着变紧。原来 1e-6 的差分步长，舍入误差超过了容差，换成 1e-5 以后就过了。
+
+测试 `filters.xml`：a → b → c（焊在 b 上）→ d，另一个自由刚体 e，`<exclude>` 去掉 a–e；胶囊挤在一起，被过滤的几对互相穿透 2 cm。
+- `Filter.WeldsAndExcludes` 逐对检查 `collide()`，再检查检测到的接触里没有被过滤的对。
+- `Terms.FilteredPairs`（GPU）在 $\hat d$ = 0.2 m 时比较 GPU 和 CPU 的接触个数、能量、梯度、Hessian。GPU 要是没过滤，穿透的那几对会让障碍能量变成无穷，对不上。
+
+---
+
+## 7. 复现
 
 ```
 python tools/make_gears.py models/gears.xml
@@ -98,23 +142,28 @@ build\Release\scene_demo.exe model=<仓库>/models/local/go2_pile.xml T=3 gpu=1 
 python tools/render.py models/gears.xml media/gears.csv media/gears.mp4 --speed 1 --el 75 --az 90 --range 1.0 --target 0.24,0,0
 python tools/render.py models/gripper.xml media/gripper.csv media/gripper.mp4 --speed 0.5 --el 12 --az 70 --range 0.8 --target 0,0,0.17
 python tools/render.py models/local/go2_pile.xml media/go2_pile.csv media/go2_pile.mp4 --speed 1 --el 25 --az 35 --dist 0.9
+python tools/make_hand_grasp.py <menagerie>/wonik_allegro/right_hand.xml models/local/allegro_grasp.xml --n 3
+build\Release\scene_demo.exe model=<仓库>/models/local/allegro_grasp.xml T=3.5 mu=0.8 gpu=1 out=media/allegro.csv
+python tools/render.py models/local/allegro_grasp.xml media/allegro.csv media/allegro.mp4 --speed 0.5 --el 20 --az 150 --range 0.9 --target 0,0.3,0.3
 ```
 
 ---
 
-## 6. 还差的
+## 8. 还差的
 
 - **G1 人形**：24 个碰撞网格一共 21.9 万个三角形，直接用太重。要先换成凸包或者减面（旧分支是把每个连杆的碰撞体合成一个凸包）。
-- **Allegro 手**：碰撞体是盒子和胶囊，驱动是 position，都支持了；还缺一个抓取的时间表和一个物体。
+- **更多的手**：旧分支跑到过 64 只手。这里 3 只时每步 11 ms，大部分是 PCG（每步 160 次）：手指的驱动很软，接触很硬，系统的条件数大。
 - **闭环**（自行车链、活塞、履带车）：要等式约束，和“关节精确”的说法冲突（路线图第 3 类）。
 - **关节干摩擦**（frictionloss）：可以做成光滑化的 Coulomb 摩擦，和接触摩擦同一个写法。
 
 ---
 
-## 7. 思考题
+## 9. 思考题
 
 1. 齿轮的转角比值为什么随时间越来越接近 ±1？用侧隙算一下 2 s 时 gear3 应该落后多少度，和表里的比一比。
 2. velocity 驱动的主动轮最后是 −99.6°/s。负载阻尼 0.02 N m s/rad 时，算一下稳态的转速差（别忘了阶段 12 第 4 节的惯性阻力）。
 3. 夹爪提起方块时，方块在手指里滑了约 0.4 mm。光滑化摩擦在静止时允许多大的滑动速度？把 `eps_v` 减小 10 倍会怎样，代价是什么？
 4. 圆柱横着时停在一条棱上。在真实的物理里它会倒吗？我们的模拟为什么不倒？
 5. Go2 的腿上没有阻尼也没有驱动，落地以后很快就不动了（每步 1 次 Newton）。能量去哪了？
+6. Allegro 手的握力是 $k_p(\text{目标} - q)$。翻过来以后，物体的重量由哪几个力平衡？把 $k_p$ 从 3 降回 Menagerie 的 1，估计哪个物体先掉？
+7. 第 6 节的过滤里，为什么“同一个整体里的两个刚体”根本不用检测？如果检测了，会出什么问题（提示：它们之间的距离永远不变）？

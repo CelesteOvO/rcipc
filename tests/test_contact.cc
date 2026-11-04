@@ -172,10 +172,13 @@ TEST(Row, VerticalTranslationGivesTwoD) {
 // ---------- 第 3 节：能量、梯度、Hessian ----------
 
 // 梯度和能量的有限差分一致。dhat 取 1 m，让一部分顶点活跃、一部分不活跃。
+// 步长 1e-5：碰撞过滤改成按“焊在一起的整体”比以后（Model::collide），zoo.xml 里焊在前臂上的 hand 和 arm、
+// finger 和 forearm 不再检测，有一个自由度的梯度变小，相对容差跟着变紧；1e-6 的步长时差分的舍入误差（约 1e-6）
+// 就超过了它。换成 1e-5，舍入误差小一个数量级，截断误差仍然远小于容差。
 TEST(Energy, GradientMatchesFiniteDifference) {
   const Model M = load("zoo.xml");
   std::mt19937 rng(51);
-  const double dhat = 1.0, kappa = 3.0, eps = 1e-6;
+  const double dhat = 1.0, kappa = 3.0, eps = 1e-5;
   for (int i = 0; i < 5; ++i) {
     const VectorXd q = random_q_above_floor(M, rng);
     const Frames F = forward_kinematics(M, q);

@@ -242,6 +242,15 @@ Model from_mujoco(const mjModel* m) {
     }
   }
 
+  M.weld.assign(m->body_weldid, m->body_weldid + m->nbody);
+  // MJCF 的 <contact><exclude>：MuJoCo 存的是 body1 << 16 + body2。
+  for (int i = 0; i < m->nexclude; ++i) {
+    const int a = m->exclude_signature[i] >> 16, b = m->exclude_signature[i] & 0xFFFF;
+    M.exclude.push_back(std::min(a, b) * static_cast<int>(m->nbody) + std::max(a, b));
+  }
+  std::sort(M.exclude.begin(), M.exclude.end());
+  if (m->npair > 0) M.ignored.push_back("explicit contact pairs (<contact><pair>)");
+
   // 阶段 12：关节阻尼、armature（只用在铰链和滑动上；球、自由关节上的记进 ignored）。
   M.dof_damping.assign(m->dof_damping, m->dof_damping + m->nv);
   M.dof_armature.assign(m->dof_armature, m->dof_armature + m->nv);

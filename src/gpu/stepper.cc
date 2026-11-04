@@ -226,6 +226,7 @@ struct Stepper::Impl {
   DModel m;
 
   // 模型的数组。
+  DBuf<int> i_excl, i_weld;
   DBuf<int> i_parent, i_bjnt, i_btree, i_bsub_end, i_chain_dof, i_chain_n, i_bvert0, i_bnvert, i_bedge0, i_bnedge,
       i_bface0, i_bnface, i_jtype, i_jqadr, i_jdadr, i_jbody, i_jlimited, i_dbody, i_drot, i_dtree, i_tdof0, i_tndof,
       i_tbody0, i_tnbody, i_vbody, i_ev, i_ebody, i_fv, i_fbody;
@@ -482,6 +483,9 @@ struct Stepper::Impl {
       return buf.get();
     };
     m.parent = up_i(i_parent, parent);
+    m.nexcl = static_cast<int>(M.exclude.size());
+    m.excl = m.nexcl > 0 ? up_i(i_excl, M.exclude) : nullptr;
+    m.weld = up_i(i_weld, M.weld);
     m.bpos = up_d(d_bpos, bpos);
     m.bquat = up_d(d_bquat, bquat);
     m.bjnt = up_i(i_bjnt, bjnt);

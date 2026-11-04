@@ -50,8 +50,19 @@ __device__ inline bool overlaps(V3 alo, V3 ahi, V3 blo, V3 bhi, double margin) {
 __device__ inline bool collide(const DModel& m, int a, int b) {
   // Model::collide。
   if (a == b) return false;
-  if (m.filter_parent && m.parent[a] == b && b != 0) return false;
-  if (m.filter_parent && m.parent[b] == a && a != 0) return false;
+  const int wa = m.weld[a], wb = m.weld[b];
+  if (wa == wb) return false;
+  if (m.filter_parent && wa != 0 && wb != 0 && (m.weld[m.parent[wa]] == wb || m.weld[m.parent[wb]] == wa)) return false;
+  if (m.nexcl > 0) {  // MJCF 的 <contact><exclude>：在排好序的表里二分查找
+    const int key = min(a, b) * m.nbody + max(a, b);
+    int lo = 0, hi = m.nexcl - 1;
+    while (lo <= hi) {
+      const int mid = (lo + hi) / 2;
+      if (m.excl[mid] == key) return false;
+      if (m.excl[mid] < key) lo = mid + 1;
+      else hi = mid - 1;
+    }
+  }
   return true;
 }
 

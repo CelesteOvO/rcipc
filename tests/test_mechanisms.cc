@@ -3,11 +3,13 @@
 //   Cylinder.Geometry           圆柱做成 12 边形的棱柱：顶点、边、三角形的个数，三角形都朝外
 //   Cylinder.RestsOnGroundAndBox 立着的、横着的、落到盒子上的圆柱：不穿模，停在该停的高度
 //   Gripper.LiftsCube           夹爪夹起方块提 15 cm：不穿模，方块跟着走（几乎不滑）
+//   Filter.WeldsAndExcludes     碰撞过滤：焊在一起的整体、MJCF 的 <exclude>（Allegro 手要用）
 // 齿轮组在 CPU 上一步约 0.25 s（网格大、检测是暴力的），它的测试在 test_gpu.cc（Mechanism.GearsTransmit）。
 #include <cmath>
 
 #include <gtest/gtest.h>
 
+#include "rcipc/contact.h"
 #include "rcipc/drive.h"
 #include "rcipc/kinematics.h"
 #include "rcipc/model.h"
@@ -55,6 +57,20 @@ TEST(Cylinder, RestsOnGroundAndBox) {
   EXPECT_NEAR(q[7 + 2], 0.04 * std::cos(3.14159265358979323846 / 12), 1e-3);   // 横着：一个侧面着地
   EXPECT_GT(q[14 + 2], 0.1 + 0.03 * 0.9);                         // 停在盒子上（盒子顶面 0.1）
   EXPECT_LT(v.norm(), 0.05);
+}
+
+// filters.xml：a -> b -> c（焊在 b 上）-> d，e 单独，<exclude> 去掉 a 和 e。按 MuJoCo 的规则比较“焊在一起的整体”。
+TEST(Filter, WeldsAndExcludes) {
+  const Model M = load("filters.xml");
+  const auto id = [](char c) { return 1 + (c - 'a'); };  // 刚体按 a..e 的顺序是 1..5
+  ASSERT_EQ(M.weld[id('c')], id('b'));
+  ASSERT_EQ(M.exclude.size(), 1u);
+  for (const char* p : {"bc", "ac", "bd", "cd", "ab", "ae"}) EXPECT_FALSE(M.collide(id(p[0]), id(p[1]))) << p;
+  for (const char* p : {"ad", "be", "ce", "de"}) EXPECT_TRUE(M.collide(id(p[0]), id(p[1]))) << p;
+  // 检测到的接触里也没有被过滤掉的对（dhat 取得大，所有胶囊都在范围里）。
+  for (const Contact& c : find_contacts(M, forward_kinematics(M, M.qpos0), 1.0)) {
+    if (c.bodyA > 0 && c.bodyB > 0) EXPECT_TRUE(M.collide(c.bodyA, c.bodyB)) << c.bodyA << " " << c.bodyB;
+  }
 }
 
 TEST(Gripper, LiftsCube) {

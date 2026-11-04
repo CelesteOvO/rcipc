@@ -1,0 +1,35 @@
+<!--
+  碰撞过滤（笔记 notes/13_mechanisms.md 第 6 节）：哪些刚体对不检测。
+    a（自由）-> b（铰链）-> c（没有关节，焊在 b 上）-> d（铰链）；e 是另一个自由刚体；<exclude> 去掉 a 和 e。
+  胶囊都挤在一起，dhat 取得大时每一对都在范围里。按 MuJoCo 的规则（比较“焊在一起的整体”）：
+    b–c 是同一个整体，不检测；a–c、b–d、c–d 是相邻的整体（父子），不检测；a–e 被 exclude；
+    其余的对（a–d、b–e、c–e、d–e）要检测。
+-->
+<mujoco model="filters">
+  <compiler angle="radian"/>
+  <option gravity="0 0 0" timestep="0.01"/>
+  <worldbody>
+    <body name="a" pos="0 0 1">
+      <freejoint/>
+      <geom type="capsule" size="0.02" fromto="0 0 0 0.1 0 0"/>
+      <body name="b" pos="0.12 0 0">
+        <joint type="hinge" axis="0 0 1"/>
+        <geom type="capsule" size="0.02" fromto="0 0 0 0.1 0 0"/>
+        <body name="c" pos="0.12 0 0">
+          <geom type="capsule" size="0.02" fromto="0 0 0 0.1 0 0"/>
+          <body name="d" pos="0.12 0 0">
+            <joint type="hinge" axis="0 0 1"/>
+            <geom type="capsule" size="0.02" fromto="0 0 0 0.1 0 0"/>
+          </body>
+        </body>
+      </body>
+    </body>
+    <body name="e" pos="0.2 0.08 1">
+      <freejoint/>
+      <geom type="capsule" size="0.02" fromto="-0.2 0 0 0.3 0 0"/>
+    </body>
+  </worldbody>
+  <contact>
+    <exclude body1="a" body2="e"/>
+  </contact>
+</mujoco>

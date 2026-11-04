@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <vector>
@@ -141,12 +142,24 @@ struct Model {
 
   // 两个刚体之间要不要检测接触（阶段 7）：不同的刚体，而且不是父子（MuJoCo 的默认规则；世界除外，
   // 挂在世界上的刚体和世界上的静态几何要检测）。
+  //   阶段 12 之后按 MuJoCo 的写法，比的是“焊在一起的整体”（weld）：没有关节的刚体和它的父刚体是一个整体
+  //   （body_weldid）。同一个整体里的两个刚体不检测；两个整体是父子时也不检测。Allegro 手的指尖焊在末节上，
+  //   指尖和中节因此算父子，不检测（它们本来就重叠）。每个刚体都有关节时，和原来的规则一样。
   //   MJCF 里 <option><flag filterparent="disable"/></option> 关掉父子过滤（和 libuipc 对比时用：它检测所有刚体对）。
   bool filter_parent = true;
+  // 阶段 12 之后：MJCF 的 <contact><exclude body1 body2/> 指定的刚体对也不检测（Allegro 手的手掌和拇指根部就是）。
+  //   每对编码成 min(a, b) * nbody + max(a, b)，排好序。
+  std::vector<int> exclude;
+  std::vector<int> weld;  // 每个刚体所在的整体（MuJoCo 的 body_weldid），长度 nbody
   bool collide(int a, int b) const {
     if (a == b) return false;
-    if (filter_parent && bodies[a].parent == b && b != 0) return false;
-    if (filter_parent && bodies[b].parent == a && a != 0) return false;
+    const int wa = weld[a], wb = weld[b];
+    if (wa == wb) return false;
+    if (filter_parent && wa != 0 && wb != 0 && (weld[bodies[wa].parent] == wb || weld[bodies[wb].parent] == wa)) return false;
+    if (!exclude.empty()) {
+      const int key = std::min(a, b) * nbody() + std::max(a, b);
+      if (std::binary_search(exclude.begin(), exclude.end(), key)) return false;
+    }
     return true;
   }
 };

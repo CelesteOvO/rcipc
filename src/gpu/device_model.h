@@ -49,6 +49,9 @@ struct DModel {
   int CH = 0;  // 一个刚体的链上最多几个自由度（一行最多 2 CH 个非零元）
   double gravity[3] = {0, 0, 0};
   int filter_parent = 1;
+  int nexcl = 0;
+  const int* excl = nullptr;  // Model::exclude（排好序的 min * nbody + max）
+  const int* weld = nullptr;  // Model::weld（nbody）
 
   // 刚体
   const int* parent = nullptr;       // nbody
