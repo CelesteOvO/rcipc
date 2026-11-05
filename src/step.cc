@@ -73,7 +73,7 @@ StepResult step(const Model& model, const StepParams& P, const VectorXd& q0, con
 
   // 从上一步结束的位置出发（它是不相交的）。newton 记录做了几次迭代，循环结束以后还要返回它。
   VectorXd q = q0;
-  int newton = 0, pcg_total = 0;
+  int newton = 0, pcg_total = 0, curv_dropped = 0;
   bool semi_stopped = false;
   double beta = 1.0;  // 半隐式停止的累积量
   double iterate_min = std::numeric_limits<double>::infinity();
@@ -99,8 +99,13 @@ StepResult step(const Model& model, const StepParams& P, const VectorXd& q0, con
                        friction_gradient(model, F, FC, h, P.mu, P.eps_v) + limit_gradient(model, q, P.limit_k, P.limit_dhat) +
                        drive_gradient(model, D, q);
     NewtonSystem sys;
-    sys.Hk = inertia_hessian(model, F, h) + contact_curvature(model, q, C, kappa, P.dhat, P.curv_scale);
+    const MatrixXd Mh = inertia_hessian(model, F, h);
+    sys.Hk = Mh + contact_curvature(model, q, C, kappa, P.dhat, P.curv_scale);
     sys.Hk.diagonal() += limit_hessian_diagonal(model, q, P.limit_k, P.limit_dhat) + drive_hessian_diagonal(model, D, q);
+    //   阶段 13：再加上 Gauss-Newton 丢掉的惯性项 K（轻链吊重物时它是链上拉力的几何刚度，比 M / h^2 大几十倍），
+    //   每棵树单独判断，不正定的树不加。
+    if (P.inertia_curvature) curv_dropped += add_inertia_curvature(model, Mh, inertia_curvature(model, F, T, h, P.inertia_curvature_rot), &sys.Hk,
+                                                     P.inertia_curvature_floor);
     sys.rows = contact_rows(model, F, C, kappa, P.dhat);
     const std::vector<Row> frows = friction_rows(model, F, FC, h, P.mu, P.eps_v);
     sys.rows.insert(sys.rows.end(), frows.begin(), frows.end());
@@ -183,6 +188,7 @@ StepResult step(const Model& model, const StepParams& P, const VectorXd& q0, con
   r.min_distance = min_distance(model, forward_kinematics(model, q));
   r.iterate_min_distance = iterate_min;
   r.min_limit_distance = min_limit_distance(model, q);
+  r.curvature_dropped = curv_dropped;
   return r;
 }
 

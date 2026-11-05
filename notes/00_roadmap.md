@@ -24,6 +24,8 @@ RC-IPC：在关节坐标里做 IPC。未知量是 MuJoCo 的关节坐标 $q$，�
 | 9 | 求解器：rz 准则的 PCG、树块预条件器、停止规则、$\kappa$ 的调整（[笔记](09_solver.md)） | 和直接求解一致 | §10 |
 | 10 | 场景：布娃娃堆、链条，关节限位（[笔记](10_scenes.md)） | 每步独立检查穿模 | §12 |
 | 11 | GPU 版：同一个 Newton 循环在显存里跑，单精度只用来剔除（[笔记](11_gpu.md)） | 和 CPU 版逐项对比；60 个布娃娃比 libuipc 快约 14–15 倍 | §11 |
+| 12 | 驱动、关节阻尼、armature、关节干摩擦：单个自由度上的凸势能（[笔记](12_drives.md)） | 读 MuJoCo 的机器人模型直接跑 | — |
+| 13 | 惯性项的曲率：把 Gauss-Newton 丢掉的“残差 × 正运动学二阶导数”加回 Hessian，逐棵树判断正定（[笔记](16_inertia_curvature.md)） | 和能量的二阶差分一致；轻链吊重物的摆锤 Newton 不再撞上限 | §7.5 |
 
 阶段 10 之后：和 libuipc 在同一个布娃娃堆上比了不看墙钟时间的部分（关节、刚性、离地、Newton 次数、穿模），见 [compare_libuipc.md](compare_libuipc.md)。墙钟时间在阶段 11 比（[11_gpu.md](11_gpu.md) 第 9 节）。
 

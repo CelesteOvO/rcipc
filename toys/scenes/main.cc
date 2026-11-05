@@ -2,8 +2,9 @@
 //
 // 用法（参数都可以省略，写成 名字=值）：
 //   scene_demo model=ragdoll.xml [T=2] [h=..] [dhat=..] [mu=..] [eps_v=..] [tol=..] [semi=0|1] [adapt=0|1] [ldlt=0|1]
-//              [check=0|1] [debug=0|1|2] [gpu=0|1] [timing=0|1] [pcg_tol=..] [out=traj.csv]
+//              [check=0|1] [debug=0|1|2] [gpu=0|1] [timing=0|1] [pcg_tol=..] [icurv=0|1|2] [icurv_floor=..] [out=traj.csv]
 //   gpu=1：用 GPU 版（阶段 11，需要编译时打开了 CUDA）。check 在 GPU 上不支持。
+//   icurv=0：惯性 Hessian 只用 M / h^2（阶段 13 之前的做法，notes/16_inertia_curvature.md）；icurv=2 连转动那一部分也加。
 //   timing=0：GPU 版不做分段计时（分段计时每段都要等 GPU，会拖慢整步；量墙钟时间时关掉）。
 //
 //   model：models/ 下的文件名（或绝对路径）。有的场景：ragdoll.xml、ragdoll_pile.xml、chain.xml、stack.xml、ledge.xml，
@@ -49,6 +50,8 @@ struct Args {
   std::string model = "ragdoll.xml", out;
   double T = 2.0, h = NAN, dhat = 1e-3, mu = 0.2, eps_v = 1e-3, tol = 1e-6;
   int semi = 0, ldlt = 0, check = 0, debug = 0, adapt = 1, gpu = 0, timing = 1, graph = 1, tight = 1, reuse = 1, tail = 1, prefilter = 1;
+  int icurv = 1;
+  double icurv_floor = NAN;
   double pcg_tol = NAN;
 };
 
@@ -82,6 +85,8 @@ Args parse(int argc, char** argv) {
     else if (k == "ldlt") a.ldlt = std::atoi(v.c_str());
     else if (k == "check") a.check = std::atoi(v.c_str());
     else if (k == "debug") a.debug = std::atoi(v.c_str());
+    else if (k == "icurv") a.icurv = std::atoi(v.c_str());
+    else if (k == "icurv_floor") a.icurv_floor = std::atof(v.c_str());
     else if (k == "out") a.out = v;
     else std::fprintf(stderr, "unknown option %s\n", k.c_str());
   }
@@ -104,6 +109,9 @@ int main(int argc, char** argv) {
     P.tol = a.tol;
     P.adapt_kappa = a.adapt != 0;
     P.semi_implicit = a.semi != 0;
+    P.inertia_curvature = a.icurv != 0;
+    P.inertia_curvature_rot = a.icurv == 2;
+    if (!std::isnan(a.icurv_floor)) P.inertia_curvature_floor = a.icurv_floor;
     P.solver = a.ldlt ? LinearSolver::kLdlt : LinearSolver::kPcg;
     P.check_iterates = a.check != 0;
     P.tight_bound = a.tight != 0;
@@ -138,7 +146,7 @@ int main(int argc, char** argv) {
     if (f) std::fprintf(f, "t,min_distance,min_limit,newton,pcg,qpos...\n");
     double t = 0, dmin_end = 1e300, dmin_iter = 1e300, lmin = 1e300, next_report = 0;
     int nmax = 0, capped = 0;
-    long nsum = 0, pcg_sum = 0, nstep = 0, last_step = 0;
+    long nsum = 0, pcg_sum = 0, nstep = 0, last_step = 0, dropped = 0;
     const auto t0 = std::chrono::steady_clock::now();
     auto last = t0;
     while (t < a.T - 1e-12) {
@@ -180,6 +188,7 @@ int main(int argc, char** argv) {
       capped += r.newton >= P.max_newton;
       nsum += r.newton;
       pcg_sum += r.pcg;
+      dropped += r.curvature_dropped;
       ++nstep;
       if (f) {
         std::fprintf(f, "%.6f,%.9g,%.9g,%d,%d", t, r.min_distance, r.min_limit_distance, r.newton, r.pcg);
@@ -204,6 +213,8 @@ int main(int argc, char** argv) {
     if (a.check) std::printf(", along accepted iterates %.3e m%s", dmin_iter, dmin_iter > 0 ? "" : "  <-- PENETRATION");
     std::printf("\nmin joint-limit distance %.3e; Newton per step max %d mean %.2f (%d hit the cap); PCG per step mean %.2f\n",
                 lmin, nmax, double(nsum) / nstep, capped, double(pcg_sum) / nstep);
+    if (P.inertia_curvature && !a.gpu)
+      std::printf("inertia curvature left out %ld times (tree x iteration, not positive definite)\n", dropped);
 #ifdef RCIPC_HAVE_CUDA
     if (G) {
       // GPU 各部分的耗时（每步平均，毫秒；timing=0 时没有分段计时）。
@@ -222,6 +233,9 @@ int main(int argc, char** argv) {
         std::printf("ACCD tail: %ld pairs handed over (%.2f per CCD segment), %ld proved to return 1, %ld finished serially\n",
                     T.ccd_tail, T.ccd_tail / std::max(1.0, static_cast<double>(T.ccd_segments)), T.ccd_tail_proved,
                     T.ccd_tail_serial);
+      if (P.inertia_curvature)
+        std::printf("inertia curvature left out %ld times on the GPU (tree x iteration, not positive definite)\n",
+                    T.curv_dropped);
       if (T.ccd_prefiltered > 0)
         std::printf("ACCD prefilter: %.0f pairs per CCD segment skipped in single precision\n",
                     T.ccd_prefiltered / std::max(1.0, static_cast<double>(T.ccd_segments)));

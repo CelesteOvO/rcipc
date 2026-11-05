@@ -25,6 +25,13 @@ void launch_inertia_energy(const DModel& m, const DFrames& F, const double* tc, 
 void launch_inertia_gradient(const DModel& m, const DFrames& F, const double* tc, const double* tA, double h, double* g);
 // 树块 M / h^2（inertia_hessian），覆盖写 Hk（ntree x TD x TD）。
 void launch_inertia_hessian(const DModel& m, const DFrames& F, double h, double* Hk);
+// 阶段 13：惯性 Hessian 里 Gauss-Newton 丢掉的那一项（inertia_curvature + add_inertia_curvature）。紧跟在
+// launch_inertia_hessian 后面调用（这时 Hk 里只有 M / h^2）：每棵树 floor M / h^2 + K 正定时 Hk += K，否则 *dropped 加一。
+// rot：K 里要不要转动那一部分（StepParams::inertia_curvature_rot）。
+// K 是工作区（ntree x TD x TD）。inertia_curvature_fits 是共享内存放不放得下（放不下时不要调用）。
+bool inertia_curvature_fits(const DModel& m);
+void launch_inertia_curvature(const DModel& m, const DFrames& F, const double* tc, const double* tA, double h, bool rot,
+                              double floor, double* Hk, double* K, unsigned long long* dropped);
 // 关节限位（limits.cc）：能量累加到 *e、梯度累加到 g、对角累加到 Hk（哪个为空就不算）。
 void launch_limits(const DModel& m, const double* q, double k, double dhat, double* e, double* g, double* Hk);
 // 阶段 12：驱动、阻尼、armature（drive.cc）：能量累加到 *e，梯度累加到 g，对角 Hessian 累加到 Hk（哪个为空就不算）。

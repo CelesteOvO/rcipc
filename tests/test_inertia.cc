@@ -5,6 +5,7 @@
 //   Targets.*   第 2 节：惯性目标
 //   Gradient.*  第 3 节：梯度，用有限差分检查
 //   Hessian.*   第 4 节：Gauss-Newton Hessian = M(q) / h^2，和 MuJoCo 的 mj_fullM 比较
+//   Curvature.* 阶段 13（notes/16_inertia_curvature.md）：Gauss-Newton 丢掉的那一项，加上以后 Hessian 是精确的
 //
 // 模型主要用 models/zoo.xml（四种关节、两棵树），每个测试在几个随机姿态上比较，随机数种子固定。
 #include "rcipc/inertia.h"
@@ -193,4 +194,74 @@ TEST(Hessian, IsExactWhenEveryBodyIsOnItsTarget) {
     const VectorXd gm = inertia_gradient(M, forward_kinematics(M, integrate(M, q, e, -eps)), T, kH);
     EXPECT_LT((H.col(d) - (gp - gm) / (2 * eps)).norm(), 1e-5 * H.norm()) << "dof " << d;
   }
+}
+
+// ---------- 阶段 13：Gauss-Newton 丢掉的那一项 ----------
+
+namespace {
+
+// phi(delta) = E(q ⊕ delta) 在 delta = 0 处的 Hessian，用能量的二阶差分（同一个 chart，球关节、自由关节也对）：
+//   H_ij ≈ [phi(e e_i + e e_j) - phi(e e_i - e e_j) - phi(-e e_i + e e_j) + phi(-e e_i - e e_j)] / (4 e^2)。
+MatrixXd fd_hessian(const Model& M, const VectorXd& q, const InertiaTargets& T, double eps) {
+  const int n = M.nv;
+  MatrixXd H(n, n);
+  const auto phi = [&](const VectorXd& d) { return energy_at(M, integrate(M, q, d), T); };
+  for (int i = 0; i < n; ++i)
+    for (int j = i; j < n; ++j) {
+      const VectorXd ei = eps * VectorXd::Unit(n, i), ej = eps * VectorXd::Unit(n, j);
+      H(i, j) = H(j, i) = (phi(ei + ej) - phi(ei - ej) - phi(-ei + ej) + phi(-ei - ej)) / (4 * eps * eps);
+    }
+  return H;
+}
+
+}  // namespace
+
+// M / h^2 + K 就是精确的 Hessian（四种关节）；只有 M / h^2 时差得多（检查这个测试本身有区分度）。
+TEST(Curvature, MakesTheHessianExact) {
+  Zoo z;
+  const Model& M = z.model;
+  std::mt19937 rng(45);
+  for (int i = 0; i < 4; ++i) {
+    const VectorXd qn = random_q(M, rng);
+    const InertiaTargets T = random_targets(M, qn, rng);
+    const VectorXd q = integrate(M, qn, random_delta(M.nv, rng, 0.05));
+    const Frames F = forward_kinematics(M, q);
+    const MatrixXd Mh = inertia_hessian(M, F, kH);
+    const MatrixXd K = inertia_curvature(M, F, T, kH);
+    const MatrixXd fd = fd_hessian(M, q, T, 1e-4);
+    EXPECT_LT((K - K.transpose()).norm(), 1e-12 * K.norm()) << "pose " << i;
+    EXPECT_LT((Mh + K - fd).norm(), 1e-6 * fd.norm()) << "pose " << i;
+    EXPECT_GT((Mh - fd).norm(), 1e-3 * fd.norm()) << "pose " << i;  // K 不是可以忽略的
+  }
+}
+
+// 刚体都在目标上时，残差力是 0，K = 0（和 Hessian.IsExactWhenEveryBodyIsOnItsTarget 对应）。
+TEST(Curvature, IsZeroOnTarget) {
+  Zoo z;
+  const Model& M = z.model;
+  std::mt19937 rng(46);
+  const Frames F = forward_kinematics(M, random_q(M, rng));
+  InertiaTargets T;
+  T.c.resize(M.nbody());
+  T.A.resize(M.nbody());
+  for (int b = 0; b < M.nbody(); ++b) {
+    T.c[b] = body_com(M, F, b);
+    T.A[b] = F.xquat[b].toRotationMatrix();
+  }
+  EXPECT_LT(inertia_curvature(M, F, T, kH).norm(), 1e-9);
+}
+
+// 正定的才加：K = 0 时每棵树都加（H 不变），K = -M / h^2 时每棵树都不加。
+TEST(Curvature, IsAddedOnlyWhereItKeepsTheBlockPositiveDefinite) {
+  Zoo z;
+  const Model& M = z.model;
+  std::mt19937 rng(47);
+  const MatrixXd Mh = inertia_hessian(M, forward_kinematics(M, random_q(M, rng)), kH);
+  MatrixXd H = Mh;
+  EXPECT_EQ(add_inertia_curvature(M, Mh, MatrixXd::Zero(M.nv, M.nv), &H), 0);
+  EXPECT_EQ(add_inertia_curvature(M, Mh, -Mh, &H), M.ntree);
+  EXPECT_LT((H - Mh).norm(), 1e-12 * Mh.norm());
+  MatrixXd K = 0.5 * Mh;  // 正定的方向：加上
+  EXPECT_EQ(add_inertia_curvature(M, Mh, K, &H), 0);
+  EXPECT_LT((H - 1.5 * Mh).norm(), 1e-12 * Mh.norm());
 }

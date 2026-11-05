@@ -163,6 +163,7 @@ $$
 
 - $M(q)$ 总是对称正定，所以 Newton 方向总是下降方向，`ldlt()` 总能解；
 - 被丢掉的项在刚体正好按惯性运动（$c = \tilde c$、$R = \tilde A$）时为 0（测试 `Hessian.IsExactWhenEveryBodyIsOnItsTarget`），只影响收敛速度，不影响收敛到哪里。
+- **后来发现它不总是小的**：轻的连杆吊着重物时，残差就是链上的拉力，丢掉的这一项是绳子的几何刚度，比 $M/h^2$ 大几十倍，Newton 每步撞上限。阶段 13 把它加回来了（[16_inertia_curvature.md](16_inertia_curvature.md)，思考题 3 也在那里接着讨论）。
 
 ---
 

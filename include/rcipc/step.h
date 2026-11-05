@@ -52,6 +52,14 @@ struct StepParams {
   double limit_dhat = 0.1;
   // 阶段 12：这一步的控制量（长度 nu；空表示全 0）。时间表通常来自 MJCF 的关键帧（drive.h 的 ctrl_at）。
   Eigen::VectorXd ctrl;
+  // 阶段 13：惯性 Hessian 加上 Gauss-Newton 丢掉的那一项（inertia_curvature；每棵树正定时才加）。
+  // false 退回阶段 3 的 M / h^2（笔记 notes/16_inertia_curvature.md）。
+  bool inertia_curvature = true;
+  // 其中转动那一部分（R S (R - A~)^T / h^2，刚体绕自己的质心转得快时它让 Newton 走过头）要不要（笔记 16 第 5 节）。
+  bool inertia_curvature_rot = false;
+  // 树块上 floor * M / h^2 + K 正定才加 K（add_inertia_curvature）。0.99：K 可以抵掉质量矩阵 99% 的曲率；
+  // 小的 floor 只在 K 接近半正定（链被拉紧）时才加。笔记 16 第 5 节比较了两者。
+  double inertia_curvature_floor = 0.99;
 };
 
 // 跨时间步保留的求解器状态。kappa 在第一次出现接触时初始化，之后沿用并按间隙调整。
@@ -80,6 +88,7 @@ struct StepResult {
   double min_distance = 0;  // 结束位置上所有候选对的最小距离；没有障碍时是 +无穷
   double iterate_min_distance = 0;  // check_iterates 时：所有接受的迭代轨迹（采样）上的最小距离，否则 +无穷
   double min_limit_distance = 0;    // 阶段 10：结束位置上到最近的关节限位的距离；没有限位时 +无穷
+  int curvature_dropped = 0;        // 阶段 13：这一步里有几次（迭代 x 树）因为不正定没加惯性的曲率项
 };
 
 // 从 (q0, v0) 走一个时间步。state 为空时用一个临时状态（kappa 每步重新初始化）。

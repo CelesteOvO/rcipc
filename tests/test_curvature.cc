@@ -165,6 +165,9 @@ TEST(Lever, GaussNewtonOvershootsTheGapAndTheMajoriserDoesNot) {
   StepParams P;
   P.h = 0.1;
   P.adapt_kappa = false;  // 两次运行的迭代次数不同，kappa 调整会让它们的极小点不同；这里只看 Newton 模型
+  // 阶段 13 的惯性曲率项也关掉：h = 0.1、1 rad/s 时惯性的残差很大，它会改变两次运行的迭代路径（GN 那次不再挖过头）。
+  // 这里只比较接触的曲率上界。
+  P.inertia_curvature = false;
   VectorXd q = VectorXd::Zero(1), v = VectorXd::Zero(1);
   v[0] = 1.0;
   EXPECT_NEAR(min_distance(M, forward_kinematics(M, q)), 0.5e-3, 1e-12);

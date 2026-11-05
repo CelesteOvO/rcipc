@@ -2,7 +2,7 @@
 //
 // GPU 版的每一项都对应 CPU 版的一个函数，所以这里一项一项地比：
 //   Fk.*      正运动学（zoo.xml，四种关节）
-//   Terms.*   能量、梯度、稠密 Hessian（惯性、接触三种、mollifier、摩擦、曲率上界、限位、世界上的静态几何）
+//   Terms.*   能量、梯度、稠密 Hessian（惯性和它的曲率项、接触三种、mollifier、摩擦、曲率上界、限位、世界上的静态几何）
 //   Pcg.*     PCG 的解和稠密 LDLT 的解
 //   Ccd.*     CCD 的步长上限（地面、刚体之间、网格）
 //   Step.*    整步：落地盒子、堆叠、布娃娃，和 CPU 版的轨迹一致；网格布娃娃堆不穿透
@@ -64,9 +64,12 @@ gpu::Stepper::Terms cpu_terms(const Model& M, const StepParams& P, const VectorX
                friction_energy(M, F, FC, P.h, P.mu, P.eps_v) + limit_energy(M, q, P.limit_k, P.limit_dhat);
   out.g = inertia_gradient(M, F, T, P.h) + contact_gradient(M, F, C, kappa, P.dhat) +
           friction_gradient(M, F, FC, P.h, P.mu, P.eps_v) + limit_gradient(M, q, P.limit_k, P.limit_dhat);
-  out.H = inertia_hessian(M, F, P.h) + contact_curvature(M, q, C, kappa, P.dhat, P.curv_scale) +
-          contact_hessian(M, F, C, kappa, P.dhat) + friction_hessian(M, F, FC, P.h, P.mu, P.eps_v);
+  const MatrixXd Mh = inertia_hessian(M, F, P.h);
+  out.H = Mh + contact_curvature(M, q, C, kappa, P.dhat, P.curv_scale) + contact_hessian(M, F, C, kappa, P.dhat) +
+          friction_hessian(M, F, FC, P.h, P.mu, P.eps_v);
   out.H.diagonal() += limit_hessian_diagonal(M, q, P.limit_k, P.limit_dhat);
+  if (P.inertia_curvature) add_inertia_curvature(M, Mh, inertia_curvature(M, F, T, P.h, P.inertia_curvature_rot), &out.H,
+                                             P.inertia_curvature_floor);  // 阶段 13
   out.ncontact = static_cast<int>(C.size());
   out.nfriction = static_cast<int>(FC.size());
   return out;
@@ -182,6 +185,50 @@ TEST(Terms, LedgeWithStaticGeometry) {
   StepParams P;
   const State s = cpu_run(M, P, 120, M.qpos0, VectorXd::Zero(6));
   expect_terms_match(M, P, s, s.q, "ledge");
+}
+
+// 阶段 13：惯性的曲率项。摆锤摆到最低点附近（链上拉力最大，这一项比 M / h^2 大几十倍），以及 zoo.xml
+// （四种关节）带很大的速度，转动那一部分加和不加都比。GPU 的子树求和写法和 CPU 的逐个刚体写法一致，
+// 而且这一项确实改变了 Hessian。
+TEST(Terms, InertiaCurvature) {
+  REQUIRE_GPU();
+  {
+    const Model M = load("wrecking_ball.xml");
+    StepParams P;
+    P.h = 0.01;
+    P.eps_v = 0.01;
+    P.tol = 0.01;
+    P.semi_implicit = true;
+    const State s = cpu_run(M, P, 55, M.qpos0, VectorXd::Zero(M.nv));
+    expect_terms_match(M, P, s, s.q, "wrecking ball");
+    gpu::Stepper G(M);
+    const MatrixXd H1 = G.terms(P, s.q, s.v, s.S.kappa, s.q).H;
+    EXPECT_EQ(G.timers().curv_dropped, 0);
+    P.inertia_curvature = false;
+    const MatrixXd H0 = G.terms(P, s.q, s.v, s.S.kappa, s.q).H;
+    // 之字形方向（铰链 4、5、6 转 (1, -2, 1)，摆锤一阶不动，只有两节钢条在动）：拉力的几何刚度比 M / h^2 大几十倍。
+    VectorXd z = VectorXd::Zero(M.nv);
+    z[4] = 1;
+    z[5] = -2;
+    z[6] = 1;
+    EXPECT_GT(z.dot(H1 * z), 10 * z.dot(H0 * z));
+  }
+  {
+    const Model M = load("zoo.xml");
+    StepParams P;
+    P.h = 0.01;
+    P.mu = 0;
+    std::mt19937 rng(120);
+    std::uniform_real_distribution<double> u(-5, 5);
+    VectorXd v(M.nv);
+    for (int d = 0; d < M.nv; ++d) v[d] = u(rng);
+    const State s{M.qpos0, v, {}};
+    VectorXd dq(M.nv);
+    for (int d = 0; d < M.nv; ++d) dq[d] = 0.01 * u(rng);
+    expect_terms_match(M, P, s, integrate(M, M.qpos0, dq), "zoo");
+    P.inertia_curvature_rot = true;  // 连转动那一部分也加（默认不加，笔记 16 第 5 节）
+    expect_terms_match(M, P, s, integrate(M, M.qpos0, dq), "zoo, with the rotational part");
+  }
 }
 
 // 布娃娃（球、胶囊带半径，关节限位，深的链）。
@@ -664,7 +711,8 @@ TEST(Topology, BlenderKeepsBallsInside) {
 
 // 摆锤（tools/make_wrecking_ball.py）：30 kg 的钢块挂在 10 节 23 g 的钢条连成的 1 m 长的链上，从水平位置释放。
 // 链竖直时摆锤底面比矮墙的墙顶高 2 cm。libuipc 的罚函数关节和仿射体在这里把链拉长约 10 cm，摆锤撞墙；
-// 我们的关节就是坐标、刚体由正运动学生成，链长不变，摆锤越过去。h = 2 ms（h = 10 ms 时 Newton 常撞上限，见笔记）。
+// 我们的关节就是坐标、刚体由正运动学生成，链长不变，摆锤越过去。h = 10 ms（libuipc 的默认步长）。
+// 阶段 13 之前这里 Newton 每步都撞上限（惯性 Hessian 只有 M / h^2，notes/16_inertia_curvature.md），现在每步 2–3 次。
 TEST(Drift, WreckingBallClearsWall) {
   REQUIRE_GPU();
   const Model M = load("wrecking_ball.xml");
@@ -674,7 +722,7 @@ TEST(Drift, WreckingBallClearsWall) {
   const Vector3d c_local(0.095, 0.0, 0.0);
   const double half = 0.08, wall_x = 0.03, wall_top = 0.3;
   StepParams P;
-  P.h = 0.002;
+  P.h = 0.01;
   P.mu = 0.2;
   P.eps_v = 0.01;
   P.tol = 0.01;
@@ -684,9 +732,11 @@ TEST(Drift, WreckingBallClearsWall) {
   SolverState S;
   double clearance = 1e9;
   bool started_right = false, crossed = false;
-  for (int k = 0; k < 400; ++k) {
+  int newton_max = 0;
+  for (int k = 0; k < 80; ++k) {
     const StepResult r = G.step(P, q, v, &S);
     ASSERT_GT(r.min_distance, 0.0) << "step " << k;
+    newton_max = std::max(newton_max, r.newton);
     q = r.q;
     v = r.v;
     const Frames F = forward_kinematics(M, q);
@@ -706,5 +756,6 @@ TEST(Drift, WreckingBallClearsWall) {
   }
   EXPECT_TRUE(started_right);
   EXPECT_TRUE(crossed);           // 0.8 s 内越过了墙
-  EXPECT_GT(clearance, 0.005);    // 名义 2 cm；摆锤绕自己的铰链转一点，最低的角约低 9 mm
+  EXPECT_GT(clearance, 0.005);    // 名义 2 cm；摆锤绕自己的铰链转一点，最低的角低几毫米
+  EXPECT_LE(newton_max, 10);      // 阶段 13 之前是 50（上限）
 }

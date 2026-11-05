@@ -40,4 +40,18 @@ Eigen::VectorXd inertia_gradient(const Model& model, const Frames& frames, const
 // 和目标无关，所以不需要 targets。
 Eigen::MatrixXd inertia_hessian(const Model& model, const Frames& frames, double h);
 
+// 阶段 13（笔记 notes/16_inertia_curvature.md）：Gauss-Newton 丢掉的那一项 K，nv x nv，对称。
+//   精确的 Hessian（E(q ⊕ delta) 在 delta = 0 处的二阶导数）= inertia_hessian + K。
+//   K_ij = sum_p f_p . d^2 x_p / (d delta_i d delta_j)，x_p 是刚体上的质点，f_p = m_p (x_p - x~_p) / h^2 是它的“残差力”。
+//   刚体正好在目标上时 K = 0；链被拉紧时 K 是绳子的几何刚度（半正定）；被压缩时可能不定。
+//   rot = false 时只要质心那一部分（f_b . d^2 c_b，力经过链传下去的几何刚度），不要转动那一部分（笔记 16 第 5 节）。
+Eigen::MatrixXd inertia_curvature(const Model& model, const Frames& frames, const InertiaTargets& targets, double h,
+                                  bool rot = true);
+
+// 把 K 一棵树一棵树地加进 H（nv x nv）：只有 floor * Mh + K 在这棵树的块上正定时才加，否则这棵树退回 Gauss-Newton。
+//   Mh 是 inertia_hessian（M / h^2）。H 里其余的项（接触、限位、驱动）都是半正定的，所以加了以后 H 仍然正定，
+//   而且 K 最多抵掉质量矩阵 floor 那么多的曲率（默认 99%；笔记 16 第 5 节比较了 0.01）。返回没有加 K 的树的个数。
+int add_inertia_curvature(const Model& model, const Eigen::MatrixXd& Mh, const Eigen::MatrixXd& K, Eigen::MatrixXd* H,
+                          double floor = 0.99);
+
 }  // namespace rcipc

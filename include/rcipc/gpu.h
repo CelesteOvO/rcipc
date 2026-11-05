@@ -50,6 +50,7 @@ class Stepper {
     long ccd_windows = 0;                // 其中重新求候选（刚体对和剔除）的段数，见 set_ccd_reuse
     long ccd_tail = 0, ccd_tail_proved = 0, ccd_tail_serial = 0;  // ACCD 的尾巴：交出去的对、证出返回 1 的、接着串行走的
     long ccd_prefiltered = 0;            // 单精度预筛跳过的对（set_ccd_prefilter）
+    long curv_dropped = 0;               // 阶段 13：惯性的曲率项因为不正定没加的次数（树 x 迭代；StepResult 里的是 0）
   };
   const Timers& timers() const;
   void reset_timers();

@@ -1,5 +1,9 @@
 #include "rcipc/inertia.h"
 
+#include <cmath>
+
+#include <Eigen/Cholesky>
+
 // body 形式的惯性项。推导见 notes/03_inertia.md，测试见 tests/test_inertia.cc。
 //
 // Eigen 的几个写法，下面会用到：
@@ -136,6 +140,108 @@ MatrixXd inertia_hessian(const Model& model, const Frames& frames, double h) {
     H += B.mass * V.transpose() * V + W.transpose() * I_world * W;
   }
   return H / (h * h);
+}
+
+namespace {
+
+// a^T Q b - (a . b) tr Q = sum_p f_p . (a x (b x r_p))，Q = sum_p r_p f_p^T（笔记 16 第 2 节）。
+double rot_rot(const Vector3d& a, const Matrix3d& Q, const Vector3d& b) {
+  return a.dot(Q * b) - a.dot(b) * Q.trace();
+}
+
+}  // namespace
+
+MatrixXd inertia_curvature(const Model& model, const Frames& frames, const InertiaTargets& targets, double h,
+                          bool rot) {
+  // Gauss-Newton 丢掉的那一项（笔记 16 第 2 节）。
+  //
+  // 把刚体看成一群质点：E_b = sum_p m_p / (2 h^2) |x_p - x~_p|^2（展开就是 inertia_energy 里的两项）。
+  // 二阶导数 = sum_p m_p / h^2 (J_p^T J_p + (x_p - x~_p) . d^2 x_p)，前一半是 M / h^2，后一半就是 K：
+  //   K_ij = sum_p f_p . d^2 x_p / (d delta_i d delta_j)，f_p = m_p (x_p - x~_p) / h^2。
+  //
+  // 质点的二阶导数（自由度 i 在 j 的上游，也就是 i 的刚体是 j 的刚体的祖先）：
+  //   i 转动、j 转动：a_i x (a_j x (x - o_j))   （转 i 时，下游的轴 a_j、锚点 o_j、点 x 一起绕 a_i 转）
+  //   i 转动、j 平移：a_i x a_j
+  //   i 平移：0                                  （平移不改变下游的轴，也不改变 x - o_j）
+  // 同一个关节里的两个转动自由度（球关节、自由关节）：增量是 R exp([delta])，二阶导数取对称的一半
+  //   1/2 (a_i x (a_j x r) + a_j x (a_i x r))；铰链 i = j 就是 a x (a x r)。同一个关节里有平移的：0。
+  //
+  // 对质点求和：sum_p f_p . (a x (b x r_p)) = a^T Q b - (a . b) tr Q，Q = sum_p r_p f_p^T，r_p = x_p - o。
+  //   x_p = c + R X_p、x~_p = c~ + A~ X_p，sum_p m_p X_p = 0，sum_p m_p X_p X_p^T = S，所以
+  //   Q = (c - o) f^T + P，f = m (c - c~) / h^2（刚体的“力”，同 inertia_gradient），P = R S (R - A~)^T / h^2；
+  //   sum_p f_p = f。
+  const int nv = model.nv;
+  MatrixXd K = MatrixXd::Zero(nv, nv);
+  for (int b = 1; b < model.nbody(); ++b) {
+    const Body& B = model.bodies[b];
+    const Vector3d c = body_com(model, frames, b);
+    const Matrix3d R = frames.xquat[b].toRotationMatrix();
+    const Vector3d f = B.mass * (c - targets.c[b]) / (h * h);
+    const Matrix3d P = rot ? Matrix3d(R * B.S * (R - targets.A[b]).transpose() / (h * h)) : Matrix3d::Zero();
+
+    // b 的链上的自由度（从 b 往根走）。
+    std::vector<int> chain;
+    for (int x = b; x != 0; x = model.bodies[x].parent) {
+      const int j = model.bodies[x].joint;
+      if (j < 0) continue;
+      for (int k = 0; k < model.joints[j].nv; ++k) chain.push_back(model.joints[j].dadr + k);
+    }
+
+    for (size_t u = 0; u < chain.size(); ++u) {
+      for (size_t w = u; w < chain.size(); ++w) {
+        int i = chain[u], j = chain[w];
+        double term = 0;
+        if (model.dof_joint[i] == model.dof_joint[j]) {
+          // 同一个关节：只有两个都是转动时不为 0（锚点相同）。
+          if (model.dof_rot[i] && model.dof_rot[j]) {
+            const Vector3d& ai = frames.dof_axis[i];
+            const Vector3d& aj = frames.dof_axis[j];
+            const Matrix3d Q = (c - frames.dof_anchor[j]) * f.transpose() + P;
+            term = 0.5 * (rot_rot(ai, Q, aj) + rot_rot(aj, Q, ai));
+          }
+        } else {
+          // 不同的关节：chain 是从 b 往根排的，所以排在后面的 j 在上游。换成 up（上游）、dn（下游）。
+          const int up = j, dn = i;
+          const Vector3d& au = frames.dof_axis[up];
+          const Vector3d& ad = frames.dof_axis[dn];
+          if (model.dof_rot[up]) {
+            if (model.dof_rot[dn]) {
+              const Matrix3d Q = (c - frames.dof_anchor[dn]) * f.transpose() + P;
+              term = rot_rot(au, Q, ad);
+            } else {
+              term = au.cross(ad).dot(f);
+            }
+          }
+        }
+        K(i, j) += term;
+        if (i != j) K(j, i) += term;
+      }
+    }
+  }
+  return K;
+}
+
+int add_inertia_curvature(const Model& model, const MatrixXd& Mh, const MatrixXd& K, MatrixXd* H, double floor) {
+  // 一棵树一棵树地试：floor * Mh + K 在这棵树的块上正定（Jacobi 缩放以后 LLT 成功）才把 K 加进 H。
+  int dropped = 0;
+  std::vector<std::vector<int>> dofs(model.ntree);
+  for (int d = 0; d < model.nv; ++d) dofs[model.dof_tree[d]].push_back(d);
+  for (int t = 0; t < model.ntree; ++t) {
+    const std::vector<int>& D = dofs[t];
+    const int n = static_cast<int>(D.size());
+    MatrixXd B(n, n);
+    VectorXd s(n);
+    for (int i = 0; i < n; ++i) s[i] = 1.0 / std::sqrt(Mh(D[i], D[i]));
+    for (int i = 0; i < n; ++i)
+      for (int j = 0; j < n; ++j) B(i, j) = s[i] * (floor * Mh(D[i], D[j]) + K(D[i], D[j])) * s[j];
+    if (Eigen::LLT<MatrixXd>(B).info() != Eigen::Success) {
+      ++dropped;
+      continue;
+    }
+    for (int i = 0; i < n; ++i)
+      for (int j = 0; j < n; ++j) (*H)(D[i], D[j]) += K(D[i], D[j]);
+  }
+  return dropped;
 }
 
 }  // namespace rcipc

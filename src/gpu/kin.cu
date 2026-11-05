@@ -298,6 +298,126 @@ __global__ void k_inertia_hessian(DModel m, DFrames F, double h, double* Hk) {
   }
 }
 
+__device__ inline double rot_rot(V3 a, const double* G, V3 o, V3 f, V3 b) {
+  // a^T Q b - (a . b) tr Q，Q = G - o f^T（inertia.cc 的 rot_rot，Q 写成子树之和 G 减去锚点那一项）。
+  const double aGb = a.x * (G[0] * b.x + G[1] * b.y + G[2] * b.z) + a.y * (G[3] * b.x + G[4] * b.y + G[5] * b.z) +
+                     a.z * (G[6] * b.x + G[7] * b.y + G[8] * b.z);
+  const double trQ = G[0] + G[4] + G[8] - dot(o, f);
+  return aGb - dot(a, o) * dot(f, b) - dot(a, b) * trQ;
+}
+
+__global__ void k_inertia_curvature(DModel m, DFrames F, const double* tc, const double* tA, double h, double rot,
+                                    double floor, double* Hk, double* K, unsigned long long* dropped) {
+  // 阶段 13：inertia_curvature + add_inertia_curvature（inertia.cc）。一个线程块一棵树 t。
+  //   1. 每个刚体 b：f_b = m (c - c~) / h^2，G_b = R S (R - A~)^T / h^2 + c_b f_b^T；再对子树求和 Gbar、fbar。
+  //      刚体 b 的 Q(o) = G_b - o f_b^T，子树上的和就是 Gbar - o fbar^T：每个元素 O(1)，不用逐个刚体加（同 CRBA）。
+  //   2. K 的每个元素（i、j 在一条链上；dn 是刚体较深的那个，求和的范围是 dn 的子树）：
+  //        同一个关节、都是转动：1/2 (rot_rot(a_i, Q, a_j) + rot_rot(a_j, Q, a_i))，o 是这个关节的锚点；
+  //        不同关节、上游转动：下游转动是 rot_rot(a_up, Q(o_dn), a_dn)，下游平移是 (a_up x a_dn) . fbar；
+  //        其余是 0。写到 K（ntree x TD x TD）。
+  //   3. B = S (floor Hk + K) S（S = diag(Hk)^-1/2；这时 Hk 里只有 M / h^2）在共享内存里做 LDL^T（同 k_precond_factor_sh），
+  //      主元都 > 0 才 Hk += K；否则这棵树不加，*dropped 加一。
+  extern __shared__ double sh[];
+  const int t = blockIdx.x;
+  const int TD = m.TD, n = m.tndof[t], d0 = m.tdof0[t], b0 = m.tbody0[t], nb = m.tnbody[t];
+  double* G = sh;               // TB x 12：每个刚体的 G_b（9 个）和 f_b（3 个）
+  double* Gs = G + 12 * m.TB;   // TB x 12：子树之和
+  double* sa = Gs + 12 * m.TB;  // TD x 3：轴
+  double* so = sa + 3 * TD;     // TD x 3：锚点
+  double* sc = so + 3 * TD;     // TD：缩放
+  double* B = sc + TD;          // n x n
+  __shared__ int ok;
+  double* Kt = K + static_cast<size_t>(t) * TD * TD;
+  double* Ht = Hk + static_cast<size_t>(t) * TD * TD;
+  const double ih2 = 1.0 / (h * h);
+  for (int k = threadIdx.x; k < nb; k += blockDim.x) {
+    const int b = b0 + k;
+    const V3 c = com(m, F, b);
+    const V3 f = (m.mass[b] * (c - v3load(tc + 3 * b))) * ih2;
+    const M3 R = qmat(q4load(F.xquat + 4 * b));
+    M3 Dt;  // (R - A~)^T
+    for (int i = 0; i < 3; ++i)
+      for (int j = 0; j < 3; ++j) Dt.m[3 * i + j] = R.m[3 * j + i] - tA[9 * b + 3 * j + i];
+    const M3 P = mm(mm(R, mload(m.S + 9 * b)), Dt);
+    const double cv[3] = {c.x, c.y, c.z}, fv[3] = {f.x, f.y, f.z};
+    double* g = G + 12 * k;
+    for (int i = 0; i < 3; ++i)
+      for (int j = 0; j < 3; ++j) g[3 * i + j] = rot * P.m[3 * i + j] * ih2 + cv[i] * fv[j];  // rot = 0：不要转动那一部分
+    g[9] = f.x;
+    g[10] = f.y;
+    g[11] = f.z;
+  }
+  for (int li = threadIdx.x; li < n; li += blockDim.x) {
+    for (int c = 0; c < 3; ++c) {
+      sa[3 * li + c] = F.daxis[3 * (d0 + li) + c];
+      so[3 * li + c] = F.danchor[3 * (d0 + li) + c];
+    }
+    const double dg = Ht[li * TD + li];
+    sc[li] = dg > 0 ? 1.0 / sqrt(dg) : 1.0;
+  }
+  if (threadIdx.x == 0) ok = 1;
+  __syncthreads();
+  for (int e = threadIdx.x; e < nb * 12; e += blockDim.x) {
+    const int k = e / 12, a = e % 12, b = b0 + k;
+    double s = 0;
+    for (int c = b; c < m.bsub_end[b]; ++c) s += G[12 * (c - b0) + a];
+    Gs[e] = s;
+  }
+  __syncthreads();
+  for (int e = threadIdx.x; e < n * n; e += blockDim.x) {
+    const int li = e / n, lj = e % n;
+    if (lj < li) continue;  // 上三角算，两边都写
+    const int i = d0 + li, j = d0 + lj;
+    const int bi = m.dbody[i], bj = m.dbody[j];
+    const int lo = max(bi, bj);
+    double v = 0;
+    if (lo < min(m.bsub_end[bi], m.bsub_end[bj])) {
+      const double* gs = Gs + 12 * (lo - b0);
+      const V3 fs = v3(gs[9], gs[10], gs[11]);
+      if (bi == bj) {  // 同一个关节
+        if (m.drot[i] && m.drot[j]) {
+          const V3 ai = v3load(sa + 3 * li), aj = v3load(sa + 3 * lj), o = v3load(so + 3 * lj);
+          v = 0.5 * (rot_rot(ai, gs, o, fs, aj) + rot_rot(aj, gs, o, fs, ai));
+        }
+      } else {
+        const int up = bi < bj ? li : lj, dn = bi < bj ? lj : li;
+        if (m.drot[d0 + up]) {
+          const V3 au = v3load(sa + 3 * up), ad = v3load(sa + 3 * dn);
+          v = m.drot[d0 + dn] ? rot_rot(au, gs, v3load(so + 3 * dn), fs, ad) : dot(cross(au, ad), fs);
+        }
+      }
+    }
+    Kt[li * TD + lj] = v;
+    Kt[lj * TD + li] = v;
+    B[lj * n + li] = sc[lj] * (floor * Ht[lj * TD + li] + v) * sc[li];  // 下三角
+  }
+  __syncthreads();
+  for (int j = 0; j < n; ++j) {
+    const double d = B[j * n + j];
+    if (!(d > 1e-12)) {  // 不正定（或 NaN）：所有线程读到的是同一个主元，一起退出
+      if (threadIdx.x == 0) ok = 0;
+      break;
+    }
+    const double rd = 1.0 / d;
+    const int w = n - 1 - j;
+    for (int e = threadIdx.x; e < w * w; e += blockDim.x) {
+      const int i = j + 1 + e / w, k = j + 1 + e % w;
+      if (k > i) continue;
+      B[i * n + k] -= B[i * n + j] * B[k * n + j] * rd;
+    }
+    __syncthreads();
+  }
+  __syncthreads();
+  if (!ok) {
+    if (threadIdx.x == 0) atomicAdd(dropped, 1ULL);
+    return;
+  }
+  for (int e = threadIdx.x; e < n * n; e += blockDim.x) {
+    const int li = e / n, lj = e % n;
+    Ht[li * TD + lj] += Kt[li * TD + lj];
+  }
+}
+
 __global__ void k_limits(DModel m, const double* q, double k, double dhat, double* e, double* g, double* Hk) {
   // limits.cc：到两端的距离各一个一维障碍。
   const int j = blockIdx.x * blockDim.x + threadIdx.x;
@@ -392,6 +512,7 @@ void launch_fk(const DModel& m, const double* q, const DFrames& F) {
 
 void launch_targets(const DModel& m, const DFrames& now, const DFrames& prev, double h, double* tc, double* tA) {
   k_targets<<<blocks(m.nbody), kThreads>>>(m, now, prev, h, tc, tA);
+
 }
 
 void launch_inertia_energy(const DModel& m, const DFrames& F, const double* tc, const double* tA, double h, double* e) {
@@ -411,6 +532,31 @@ void launch_inertia_hessian(const DModel& m, const DFrames& F, double h, double*
   }
   const size_t smem = sizeof(double) * (12 * static_cast<size_t>(m.TB) + 6 * static_cast<size_t>(m.TD));
   k_inertia_hessian<<<m.ntree, 256, smem>>>(m, F, h, Hk);
+}
+
+size_t inertia_curvature_smem(const DModel& m) {
+  return sizeof(double) * (24 * static_cast<size_t>(m.TB) + 7 * static_cast<size_t>(m.TD) +
+                           static_cast<size_t>(m.TD) * m.TD);
+}
+
+bool inertia_curvature_fits(const DModel& m) {
+  static int optin = -1;
+  if (optin < 0) {
+    int dev = 0;
+    cudaGetDevice(&dev);
+    cudaDeviceGetAttribute(&optin, cudaDevAttrMaxSharedMemoryPerBlockOptin, dev);
+  }
+  const size_t need = inertia_curvature_smem(m);
+  if (need > static_cast<size_t>(optin)) return false;
+  if (need > 48 * 1024)
+    cudaFuncSetAttribute(k_inertia_curvature, cudaFuncAttributeMaxDynamicSharedMemorySize, static_cast<int>(need));
+  return true;
+}
+
+void launch_inertia_curvature(const DModel& m, const DFrames& F, const double* tc, const double* tA, double h, bool rot,
+                              double floor, double* Hk, double* K, unsigned long long* dropped) {
+  if (m.ntree == 0) return;
+  k_inertia_curvature<<<m.ntree, 256, inertia_curvature_smem(m)>>>(m, F, tc, tA, h, rot ? 1.0 : 0.0, floor, Hk, K, dropped);
 }
 
 void launch_drives(const DModel& m, const DDrive& D, const double* q, double* e, double* g, double* Hk) {

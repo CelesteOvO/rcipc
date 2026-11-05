@@ -274,6 +274,11 @@ struct Stepper::Impl {
   DBuf<double> drv_F, drv_c;
   double drv_h = 0, drv_eps = 0;
   DBuf<unsigned long long> tail_stats;  // 累计的四个计数（DTail::stats），timers() 时读回
+  // 阶段 13：惯性的曲率项。Kc 是 launch_inertia_curvature 的工作区（ntree x TD x TD），curv_stats 累计没加上的（树 x 迭代）
+  // 次数，timers() 时读回。icurv_fits：共享内存放不放得下（放不下时这一项不加，退回 M / h^2）。
+  DBuf<double> Kc;
+  DBuf<unsigned long long> curv_stats;
+  bool icurv_fits = false;
   double last_eval_dmin = 0;  // energy_at 最后一次检测到的接触里最小的距离
   DBuf<double> pcg_acc;
 
@@ -290,12 +295,13 @@ struct Stepper::Impl {
     long gen = -1;
     double h = 0, dhat = 0, mu = 0, eps_v = 0, curv = 0, limit_k = 0, limit_dhat = 0, c = 0, tol = 0, pcg_tol = 0;
     int pcg_max = 0;
-    bool tight = true, reuse = true, tail = true, prefilter = true;
+    bool tight = true, reuse = true, tail = true, prefilter = true, icurv = true, icurv_rot = false;
+    double icurv_floor = 0;
     bool operator==(const GraphKey& o) const {
       return gen == o.gen && h == o.h && dhat == o.dhat && mu == o.mu && eps_v == o.eps_v && curv == o.curv &&
              limit_k == o.limit_k && limit_dhat == o.limit_dhat && c == o.c && tol == o.tol && pcg_tol == o.pcg_tol &&
              pcg_max == o.pcg_max && tight == o.tight && reuse == o.reuse && tail == o.tail &&
-             prefilter == o.prefilter;
+             prefilter == o.prefilter && icurv == o.icurv && icurv_rot == o.icurv_rot && icurv_floor == o.icurv_floor;
     }
   };
   GraphKey graph_key;
@@ -307,8 +313,10 @@ struct Stepper::Impl {
     coop = pcg_coop_supported();
     d_it.reserve(1);
     tail_stats.reserve(4);
+    curv_stats.reserve(1);
     setup_drives();
     check(cudaMemset(tail_stats.get(), 0, 4 * sizeof(unsigned long long)), "memset");
+    check(cudaMemset(curv_stats.get(), 0, sizeof(unsigned long long)), "memset");
     check(cudaMallocHost(&h_it, sizeof(DIter)), "cudaMallocHost");
     *h_it = DIter();
   }
@@ -557,6 +565,8 @@ struct Stepper::Impl {
     for (DBuf<double>* b : {&q, &q0, &qprev, &qtrial}) b->reserve(nq);
     for (DBuf<double>* b : {&p, &g, &ge0, &gb, &scale, &rhs}) b->reserve(nv);
     Hk.reserve(std::max(m.ntree, 1) * m.TD * m.TD);
+    Kc.reserve(std::max(m.ntree, 1) * m.TD * m.TD);
+    icurv_fits = inertia_curvature_fits(m);
     P.reserve(2 * std::max(m.ntree, 1) * m.TD * m.TD);  // 逆 + 工作区（launch_precond_build）
     work.reserve(4 * nv + 18 * nb);  // PCG：r、z、p、Ap，加上力旋量形式的行用的工作区（launch_matvec）
     scal.reserve(16);
@@ -639,6 +649,9 @@ struct Stepper::Impl {
     timers.ccd_tail_proved = static_cast<long>(h[1]);
     timers.ccd_tail_serial = static_cast<long>(h[2]);
     timers.ccd_prefiltered = static_cast<long>(h[3]);
+    unsigned long long dc = 0;
+    curv_stats.download(&dc, 1);
+    timers.curv_dropped = static_cast<long>(dc);
   }
   // 行数每次组装都在变，按 1.5 倍扩容：每次只扩到刚好够用时，接触一多就要重新分配，cudaFree 会让整个设备同步。
   void grow_rows(int n) {
@@ -797,6 +810,10 @@ struct Stepper::Impl {
     cudaMemsetAsync(scal.get(), 0, sizeof(double));
     cudaMemsetAsync(g.get(), 0, sizeof(double) * m.nv);
     launch_inertia_hessian(m, F.view(), h, Hk.get());
+    if (Pm.inertia_curvature && icurv_fits)
+      launch_inertia_curvature(m, F.view(), tc.get(), tA.get(), h, Pm.inertia_curvature_rot, Pm.inertia_curvature_floor,
+                                 Hk.get(), Kc.get(),
+                                 curv_stats.get());
     launch_inertia_energy(m, F.view(), tc.get(), tA.get(), h, scal.get());
     launch_inertia_gradient(m, F.view(), tc.get(), tA.get(), h, g.get());
     grow_rows(nc + 2 * nf);
@@ -1042,6 +1059,10 @@ struct Stepper::Impl {
       cudaMemsetAsync(sc, 0, sizeof(double));
       cudaMemsetAsync(g.get(), 0, sizeof(double) * m.nv);
       launch_inertia_hessian(m, F.view(), h, Hk.get());
+      if (Pm.inertia_curvature && icurv_fits)
+        launch_inertia_curvature(m, F.view(), tc.get(), tA.get(), h, Pm.inertia_curvature_rot, Pm.inertia_curvature_floor,
+                                 Hk.get(), Kc.get(),
+                                 curv_stats.get());
       launch_inertia_energy(m, F.view(), tc.get(), tA.get(), h, sc);
       launch_inertia_gradient(m, F.view(), tc.get(), tA.get(), h, g.get());
       launch_contact_terms(m, F.view(), q.get(), contacts.get(), nc_d, kappa_d, Pm.dhat, Pm.curv_scale, sc, g.get(),
@@ -1161,6 +1182,9 @@ struct Stepper::Impl {
     k.reuse = reuse;
     k.tail = tail;
     k.prefilter = prefilter;
+    k.icurv = Pm.inertia_curvature;
+    k.icurv_rot = Pm.inertia_curvature_rot;
+    k.icurv_floor = Pm.inertia_curvature_floor;
     return k;
   }
 
@@ -1413,6 +1437,7 @@ bool Stepper::set_cooperative_pcg(bool on) {
 void Stepper::reset_timers() {
   impl_->timers = Timers();
   check(cudaMemset(impl_->tail_stats.get(), 0, 4 * sizeof(unsigned long long)), "memset");
+  check(cudaMemset(impl_->curv_stats.get(), 0, sizeof(unsigned long long)), "memset");
 }
 void Stepper::set_graphs(bool on) { impl_->graphs = on; }
 void Stepper::set_ccd_reuse(bool on) { impl_->reuse = on; }
