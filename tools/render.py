@@ -180,9 +180,12 @@ class Shot:
             dr.text((pad, pad), self.title, fill=(30, 34, 40), font=self.f_big)
         gap = self.gaps[i]
         gtxt = f"最小间隙 {gap * 1e6:.2f} μm" if np.isfinite(gap) and gap < 1 else "附近没有接触"
+        if np.isfinite(gap) and gap < 0:  # MuJoCo 的轨迹（tools/mujoco_traj.py）：负的是穿透深度
+            gtxt = f"最深穿透 {-gap * 1e3:.2f} mm"
         txt = f"t = {self.ts[i]:.2f} s    {gtxt}"
         tw = dr.textlength(txt, font=self.f_small)
-        dr.text((self.w - tw - pad, self.h - pad - self.f_small.size * 1.3), txt, fill=(30, 34, 40), font=self.f_small)
+        color = (200, 40, 30) if np.isfinite(gap) and gap < 0 else (30, 34, 40)
+        dr.text((self.w - tw - pad, self.h - pad - self.f_small.size * 1.3), txt, fill=color, font=self.f_small)
         return np.asarray(img)
 
 
