@@ -14,6 +14,11 @@ CSV 的格式见 toys/scenes/main.cc：每行 t, min_distance, min_limit, newton
 - --glass 前缀：世界上名字以这些前缀开头的几何体画成半透明（搅拌机的罐子，notes/14_visible.md）。
 - --status 文件：tools/topology.py --status 写的每帧一行“t<TAB>文字”，写在左下角；文字以 ! 开头的画成红色。
 - --t0、--T：只渲染这一段时间。
+- --keep_rgba 前缀：名字以这些前缀开头的几何体保留 MJCF 里写的颜色（摆锤场景的孔和销子）。
+- --affine（右边是 --affine2）：libuipc 的轨迹（compare/libuipc/run_uipc_scene.py 写的 npz，每帧每个刚体的仿射变换）。
+  这时 CSV 里的 qpos 不用，每个几何体的位置、朝向、大小直接由所属刚体的仿射变换 A 算：位置 = A p + t，
+  朝向取 A R_g 的极分解里的转动，盒子三个方向的半长乘上 A R_g 各列的长度（沿这三个方向的伸长）。
+  所以 libuipc 的关节拉开、钢条伸长都按它算出来的样子画（剪切画不出来，这个场景里很小）。CSV 里间隙是 nan 时不写间隙。
 需要 mujoco、numpy、imageio（带 imageio-ffmpeg）、Pillow。
 """
 import argparse
@@ -53,10 +58,21 @@ def font(size):
 class Shot:
     """一个场景：模型、轨迹、相机。frame(t) 返回 t 时刻的画面（h x w x 3）。"""
 
-    def __init__(self, xml, csv_path, w, h, az, el, dist, target, title, range_m=None, glass=(), status=None):
+    def __init__(self, xml, csv_path, w, h, az, el, dist, target, title, range_m=None, glass=(), status=None, affine=None,
+                 keep=()):
         self.m = mujoco.MjModel.from_xml_path(xml)
         self.d = mujoco.MjData(self.m)
         self.ts, self.gaps, self.qs = load_csv(csv_path, self.m.nq)
+        self.aff = None
+        if affine:
+            z = np.load(affine)
+            if len(z["t"]) != len(self.ts):
+                raise ValueError(f"{affine}: {len(z['t'])} frames, {csv_path} has {len(self.ts)}")
+            self.aff = z["T"]
+            self.size0 = self.m.geom_size.copy()
+            self.gR = np.zeros((self.m.ngeom, 9))
+            for gi in range(self.m.ngeom):
+                mujoco.mju_quat2Mat(self.gR[gi], self.m.geom_quat[gi])
         self.q0 = self.m.qpos0.copy()
         self.w, self.h, self.title = w, h, title
         m = self.m
@@ -67,6 +83,9 @@ class Shot:
         roots = sorted({r for r in root if r != 0})
         for gi in range(m.ngeom):
             b = m.geom_bodyid[gi]
+            gname = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_GEOM, gi) or ""
+            if any(gname.startswith(k) for k in keep):
+                continue  # --keep_rgba：保留 MJCF 里写的颜色
             if m.geom_type[gi] == mujoco.mjtGeom.mjGEOM_PLANE:
                 m.geom_rgba[gi] = [0, 0, 0, 0]  # 地面由 floor() 画
             elif root[b] == 0:
@@ -125,6 +144,31 @@ class Shot:
     def set_q(self, i):
         self.d.qpos[:] = self.qs[i]
         mujoco.mj_kinematics(self.m, self.d)
+        if self.aff is None:
+            return
+        m, d = self.m, self.d
+        for gi in range(m.ngeom):
+            b = m.geom_bodyid[gi]
+            if b == 0:
+                continue
+            W = self.aff[i, b]
+            M = W[:3, :3] @ self.gR[gi].reshape(3, 3)
+            U, _, Vt = np.linalg.svd(M)
+            R = U @ Vt
+            if np.linalg.det(R) < 0:
+                U[:, -1] *= -1
+                R = U @ Vt
+            c = np.linalg.norm(M, axis=0)  # 沿几何体三个轴的伸长
+            d.geom_xpos[gi] = W[:3, :3] @ m.geom_pos[gi] + W[:3, 3]
+            d.geom_xmat[gi] = R.ravel()
+            s0 = self.size0[gi]
+            t = m.geom_type[gi]
+            if t == mujoco.mjtGeom.mjGEOM_BOX:
+                m.geom_size[gi] = s0 * c
+            elif t in (mujoco.mjtGeom.mjGEOM_CYLINDER, mujoco.mjtGeom.mjGEOM_CAPSULE):
+                m.geom_size[gi] = [s0[0] * 0.5 * (c[0] + c[1]), s0[1] * c[2], 0]
+            elif t == mujoco.mjtGeom.mjGEOM_SPHERE:
+                m.geom_size[gi] = [s0[0] * c.mean(), 0, 0]
 
     def floor(self, scn):
         # 地面：平面所在的位置铺棋盘格（法向取平面的 z 轴）。
@@ -196,6 +240,8 @@ class Shot:
             dr.text((pad, pad), self.title, fill=(30, 34, 40), font=self.f_big)
         gap = self.gaps[i]
         gtxt = f"最小间隙 {gap * 1e6:.2f} μm" if np.isfinite(gap) and gap < 1 else "附近没有接触"
+        if np.isnan(gap):  # libuipc 的轨迹：不量间隙
+            gtxt = ""
         if np.isfinite(gap) and gap < 0:  # MuJoCo 的轨迹（tools/mujoco_traj.py）：负的是穿透深度
             gtxt = f"最深穿透 {-gap * 1e3:.2f} mm"
         txt = f"t = {self.ts[i]:.2f} s    {gtxt}"
@@ -238,6 +284,9 @@ def main():
     ap.add_argument("--glass", default="", help="半透明的世界几何体的名字前缀，逗号分开")
     ap.add_argument("--status", default=None)
     ap.add_argument("--status2", default=None)
+    ap.add_argument("--affine", default=None, help="左边是 libuipc 的轨迹：每帧每个刚体的仿射变换（npz）")
+    ap.add_argument("--keep_rgba", default="", help="保留 MJCF 颜色的几何体的名字前缀，逗号分开")
+    ap.add_argument("--affine2", default=None, help="右边是 libuipc 的轨迹")
     ap.add_argument("--t0", type=float, default=0.0)
     ap.add_argument("--T", type=float, default=None)
     a = ap.parse_args()
@@ -245,15 +294,16 @@ def main():
     w = a.w // 2 if a.pair else a.w
     target2 = [float(x) for x in a.target2.split(",")] if a.target2 else target
     glass = tuple(x for x in a.glass.split(",") if x)
-    specs = [(a.model, a.csv, a.az, a.el, a.dist, a.title, target, a.range, a.status)]
+    keep = tuple(x for x in a.keep_rgba.split(",") if x)
+    specs = [(a.model, a.csv, a.az, a.el, a.dist, a.title, target, a.range, a.status, a.affine)]
     if a.pair:
         specs.append((a.pair[0], a.pair[1], a.az if a.az2 is None else a.az2, a.el if a.el2 is None else a.el2,
-                      a.dist if a.dist2 is None else a.dist2, a.title2, target2, a.range2 or a.range, a.status2))
+                      a.dist if a.dist2 is None else a.dist2, a.title2, target2, a.range2 or a.range, a.status2, a.affine2))
     # 一次只开一个渲染器（同一个进程里同时开两个，后一个的 OpenGL 上下文会出问题，画面全黑）：
     # 并排时先把左边的帧全部渲染出来，关掉，再渲染右边的。
     frames, T = [], None
-    for xml, csv_path, az, el, dist, title, tg, rng, st in specs:
-        s = Shot(xml, csv_path, w, a.h, az, el, dist, tg, title, rng, glass, st)
+    for xml, csv_path, az, el, dist, title, tg, rng, st, aff in specs:
+        s = Shot(xml, csv_path, w, a.h, az, el, dist, tg, title, rng, glass, st, aff, keep)
         if T is None:
             T = min(s.ts[-1], a.T) if a.T else s.ts[-1]
         nframes = int((T - a.t0) / a.speed * a.fps) + 1

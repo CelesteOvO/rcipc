@@ -7,6 +7,7 @@
 //   Ccd.*     CCD 的步长上限（地面、刚体之间、网格）
 //   Step.*    整步：落地盒子、堆叠、布娃娃，和 CPU 版的轨迹一致；网格布娃娃堆不穿透
 //   Topology.*  穿透会改变拓扑的两个场景：锁链的环绕数不变、搅拌机的球不出罐子（notes/14_visible.md）
+//   Drift.*     摆锤越过矮墙：轻链吊重物，关节精确、刚体刚性，链不会被拉长（notes/15_drift.md）
 // GPU 的原子加让求和顺序不固定，所以都按相对误差比（1e-9 量级），不要求逐位相同。没有显卡时整组跳过。
 #include "rcipc/gpu.h"
 
@@ -635,6 +636,7 @@ TEST(Topology, BlenderKeepsBallsInside) {
   VectorXd q = M.key_qpos, v = VectorXd::Zero(M.nv);
   SolverState S;
   std::vector<double> top_speed(balls.size(), 0.0);
+  double rotor_max = 0.0;
   for (int k = 0; k < 120; ++k) {
     P.ctrl = ctrl_at(M, (k + 1) * P.h);
     const StepResult r = G.step(P, q, v, &S);
@@ -651,10 +653,58 @@ TEST(Topology, BlenderKeepsBallsInside) {
       const int d = M.joints[M.bodies[balls[i]].joint].dadr;  // 自由关节：前 3 个自由度是平移
       top_speed[i] = std::max(top_speed[i], v.segment<3>(d).norm());
     }
+    rotor_max = std::max(rotor_max, v[0]);
   }
-  // 转子的角速度：0.24 s 时约 87 rad/s。低于 100 是因为刚加速完、正在打球，另外惯性项的阻力（阶段 12 笔记第 4 节）
-  // 让它的稳态停在约 97 rad/s。
-  EXPECT_GT(v[0], 80.0);
+  // 转子确实转起来了：整段的最大角速度。低于 100 rad/s 是因为惯性项的阻力（阶段 12 笔记第 4 节）让稳态停在约 97，
+  // 而且 0.2 s 以后一直在打球。不看最后一步的值：打球是混沌的，GPU 每次的求和顺序不同，0.24 s 时在 64–88 rad/s 之间。
+  EXPECT_GT(rotor_max, 80.0);
   EXPECT_GE(std::count_if(top_speed.begin(), top_speed.end(), [](double s) { return s > 5.0; }), 10);
   EXPECT_GT(*std::max_element(top_speed.begin(), top_speed.end()), 15.0);
+}
+
+// 摆锤（tools/make_wrecking_ball.py）：30 kg 的钢块挂在 10 节 23 g 的钢条连成的 1 m 长的链上，从水平位置释放。
+// 链竖直时摆锤底面比矮墙的墙顶高 2 cm。libuipc 的罚函数关节和仿射体在这里把链拉长约 10 cm，摆锤撞墙；
+// 我们的关节就是坐标、刚体由正运动学生成，链长不变，摆锤越过去。h = 2 ms（h = 10 ms 时 Newton 常撞上限，见笔记）。
+TEST(Drift, WreckingBallClearsWall) {
+  REQUIRE_GPU();
+  const Model M = load("wrecking_ball.xml");
+  const int wb = M.nbody() - 1;  // 摆锤是最后一个刚体（链的末端）
+  ASSERT_EQ(M.nbody(), 12);
+  // 摆锤的立方体：中心在刚体坐标系的 (0.015 + 0.08, 0, 0)，半边长 0.08；墙：|x| <= 0.03，墙顶 z = 0.3。
+  const Vector3d c_local(0.095, 0.0, 0.0);
+  const double half = 0.08, wall_x = 0.03, wall_top = 0.3;
+  StepParams P;
+  P.h = 0.002;
+  P.mu = 0.2;
+  P.eps_v = 0.01;
+  P.tol = 0.01;
+  P.semi_implicit = true;
+  gpu::Stepper G(M);
+  VectorXd q = M.qpos0, v = VectorXd::Zero(M.nv);  // 没有关键帧：从 MJCF 里写的姿态（链水平）开始
+  SolverState S;
+  double clearance = 1e9;
+  bool started_right = false, crossed = false;
+  for (int k = 0; k < 400; ++k) {
+    const StepResult r = G.step(P, q, v, &S);
+    ASSERT_GT(r.min_distance, 0.0) << "step " << k;
+    q = r.q;
+    v = r.v;
+    const Frames F = forward_kinematics(M, q);
+    const Vector3d c = world_point(F, wb, c_local);
+    if (k == 0) started_right = c.x() > 0.5;
+    crossed = crossed || c.x() < -half - wall_x;
+    double low = 1e9, xmin = 1e9, xmax = -1e9;
+    for (int sx = -1; sx <= 1; sx += 2)
+      for (int sy = -1; sy <= 1; sy += 2)
+        for (int sz = -1; sz <= 1; sz += 2) {
+          const Vector3d x = world_point(F, wb, c_local + half * Vector3d(sx, sy, sz));
+          low = std::min(low, x.z());
+          xmin = std::min(xmin, x.x());
+          xmax = std::max(xmax, x.x());
+        }
+    if (xmin < wall_x && xmax > -wall_x) clearance = std::min(clearance, low - wall_top);  // 摆锤在墙的正上方
+  }
+  EXPECT_TRUE(started_right);
+  EXPECT_TRUE(crossed);           // 0.8 s 内越过了墙
+  EXPECT_GT(clearance, 0.005);    // 名义 2 cm；摆锤绕自己的铰链转一点，最低的角约低 9 mm
 }

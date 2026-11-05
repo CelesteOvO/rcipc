@@ -1,0 +1,92 @@
+<!--
+  摆锤：30 kg 的钢块挂在 10 节 5 mm 粗的钢条连成的链上，从水平位置释放；链竖直时摆锤底面比矮墙的墙顶高 20 mm。
+  由 tools/make_wrecking_ball.py 生成（命令：默认参数），笔记 notes/15_drift.md。
+-->
+
+<mujoco model="wrecking_ball">
+  <compiler angle="radian"/>
+  <option gravity="0 0 -9.81" timestep="0.01">
+    <flag filterparent="disable"/>
+  </option>
+  <default>
+    <geom friction="0.2 0.005 0.0001" density="7800"/>
+    <default class="visual"><geom contype="0" conaffinity="0" density="0" group="1"/></default>
+    <default class="eye"><geom type="cylinder" size="0.0065" rgba="0.15 0.17 0.2 1" contype="0" conaffinity="0" density="0" group="1"/></default>
+    <default class="pin"><geom type="cylinder" size="0.003" rgba="0.95 0.55 0.1 1" contype="0" conaffinity="0" density="0" group="1"/></default>
+  </default>
+  <worldbody>
+    <geom name="floor" type="plane" size="0 0 1"/>
+    <geom name="wall" type="box" pos="0 0 0.15" size="0.03 0.25 0.15"/>
+    <geom name="bracket" type="box" pos="0 -0.0215 1.495" size="0.02 0.01 0.02"/>
+    <geom class="eye" name="eye0" fromto="0 -0.008 1.495 0 0.008 1.495"/>
+    <geom class="visual" name="hanger" type="box" pos="0 -0.0215 1.58" size="0.006 0.006 0.065"/>
+    <geom class="visual" name="beam" type="box" pos="0 -0.0215 1.645" size="1.38 0.015 0.015"/>
+    <geom class="visual" name="postl" type="box" pos="-1.35 -0.0215 0.83" size="0.015 0.015 0.83"/>
+    <geom class="visual" name="postr" type="box" pos="1.35 -0.0215 0.83" size="0.015 0.015 0.83"/>
+    <body name="link0" pos="0 0 1.495">
+      <joint name="hinge0" type="hinge" axis="0 1 0"/>
+      <geom name="bar0" type="box" pos="0.05 0.005 0" size="0.06 0.0025 0.0025"/>
+      <geom class="pin" name="pin0" fromto="0 -0.0095 0 0 0.0095 0"/>
+      <geom class="eye" name="eye1" fromto="0.1 -0.008 0 0.1 0.008 0"/>
+      <body name="link1" pos="0.1 0 0">
+        <joint name="hinge1" type="hinge" axis="0 1 0"/>
+        <geom name="bar1" type="box" pos="0.05 -0.005 0" size="0.06 0.0025 0.0025"/>
+        <geom class="pin" name="pin1" fromto="0 -0.0095 0 0 0.0095 0"/>
+        <geom class="eye" name="eye2" fromto="0.1 -0.008 0 0.1 0.008 0"/>
+        <body name="link2" pos="0.1 0 0">
+          <joint name="hinge2" type="hinge" axis="0 1 0"/>
+          <geom name="bar2" type="box" pos="0.05 0.005 0" size="0.06 0.0025 0.0025"/>
+          <geom class="pin" name="pin2" fromto="0 -0.0095 0 0 0.0095 0"/>
+          <geom class="eye" name="eye3" fromto="0.1 -0.008 0 0.1 0.008 0"/>
+          <body name="link3" pos="0.1 0 0">
+            <joint name="hinge3" type="hinge" axis="0 1 0"/>
+            <geom name="bar3" type="box" pos="0.05 -0.005 0" size="0.06 0.0025 0.0025"/>
+            <geom class="pin" name="pin3" fromto="0 -0.0095 0 0 0.0095 0"/>
+            <geom class="eye" name="eye4" fromto="0.1 -0.008 0 0.1 0.008 0"/>
+            <body name="link4" pos="0.1 0 0">
+              <joint name="hinge4" type="hinge" axis="0 1 0"/>
+              <geom name="bar4" type="box" pos="0.05 0.005 0" size="0.06 0.0025 0.0025"/>
+              <geom class="pin" name="pin4" fromto="0 -0.0095 0 0 0.0095 0"/>
+              <geom class="eye" name="eye5" fromto="0.1 -0.008 0 0.1 0.008 0"/>
+              <body name="link5" pos="0.1 0 0">
+                <joint name="hinge5" type="hinge" axis="0 1 0"/>
+                <geom name="bar5" type="box" pos="0.05 -0.005 0" size="0.06 0.0025 0.0025"/>
+                <geom class="pin" name="pin5" fromto="0 -0.0095 0 0 0.0095 0"/>
+                <geom class="eye" name="eye6" fromto="0.1 -0.008 0 0.1 0.008 0"/>
+                <body name="link6" pos="0.1 0 0">
+                  <joint name="hinge6" type="hinge" axis="0 1 0"/>
+                  <geom name="bar6" type="box" pos="0.05 0.005 0" size="0.06 0.0025 0.0025"/>
+                  <geom class="pin" name="pin6" fromto="0 -0.0095 0 0 0.0095 0"/>
+                  <geom class="eye" name="eye7" fromto="0.1 -0.008 0 0.1 0.008 0"/>
+                  <body name="link7" pos="0.1 0 0">
+                    <joint name="hinge7" type="hinge" axis="0 1 0"/>
+                    <geom name="bar7" type="box" pos="0.05 -0.005 0" size="0.06 0.0025 0.0025"/>
+                    <geom class="pin" name="pin7" fromto="0 -0.0095 0 0 0.0095 0"/>
+                    <geom class="eye" name="eye8" fromto="0.1 -0.008 0 0.1 0.008 0"/>
+                    <body name="link8" pos="0.1 0 0">
+                      <joint name="hinge8" type="hinge" axis="0 1 0"/>
+                      <geom name="bar8" type="box" pos="0.05 0.005 0" size="0.06 0.0025 0.0025"/>
+                      <geom class="pin" name="pin8" fromto="0 -0.0095 0 0 0.0095 0"/>
+                      <geom class="eye" name="eye9" fromto="0.1 -0.008 0 0.1 0.008 0"/>
+                      <body name="link9" pos="0.1 0 0">
+                        <joint name="hinge9" type="hinge" axis="0 1 0"/>
+                        <geom name="bar9" type="box" pos="0.0435 -0.005 0" size="0.0535 0.0025 0.0025"/>
+                        <geom class="pin" name="pin9" fromto="0 -0.0095 0 0 0.0095 0"/>
+                        <geom class="eye" name="eye10" fromto="0.1 -0.008 0 0.1 0.008 0"/>
+                        <body name="weight" pos="0.1 0 0">
+                          <joint name="hinge10" type="hinge" axis="0 1 0"/>
+                          <geom name="weight" type="box" pos="0.095 0 0" size="0.08 0.08 0.08" density="7324.22"/>
+                          <geom class="pin" name="pin10" fromto="0 -0.0095 0 0 0.0095 0"/>
+                        </body>
+                      </body>
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>

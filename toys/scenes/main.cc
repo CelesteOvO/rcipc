@@ -2,16 +2,18 @@
 //
 // 用法（参数都可以省略，写成 名字=值）：
 //   scene_demo model=ragdoll.xml [T=2] [h=..] [dhat=..] [mu=..] [eps_v=..] [tol=..] [semi=0|1] [adapt=0|1] [ldlt=0|1]
-//              [check=0|1] [debug=0|1] [gpu=0|1] [timing=0|1] [pcg_tol=..] [out=traj.csv]
+//              [check=0|1] [debug=0|1|2] [gpu=0|1] [timing=0|1] [pcg_tol=..] [out=traj.csv]
 //   gpu=1：用 GPU 版（阶段 11，需要编译时打开了 CUDA）。check 在 GPU 上不支持。
 //   timing=0：GPU 版不做分段计时（分段计时每段都要等 GPU，会拖慢整步；量墙钟时间时关掉）。
 //
 //   model：models/ 下的文件名（或绝对路径）。有的场景：ragdoll.xml、ragdoll_pile.xml、chain.xml、stack.xml、ledge.xml，
 //          阶段 12 之后：gears.xml（用 mu=0 gpu=1）、gripper.xml（用 mu=0.5）、cylinders.xml，
 //          以及 tools/make_robot_pile.py 生成的 models/local/go2_pile.xml；穿透会改变拓扑的 ring_chain.xml、blender.xml
-//          （tools/make_stress.py，notes/14_visible.md）。
+//          （tools/make_stress.py，notes/14_visible.md）；轻链吊重物的 wrecking_ball.xml（tools/make_wrecking_ball.py，
+//          notes/15_drift.md）。
 //   模型有关键帧时，从第一个关键帧的 qpos 开始（没有时从 qpos0）。
 //   check=1：每次接受的 Newton 迭代都沿真实轨迹采样最小距离（慢，但验证的是 CCD 真正保证的东西）。
+//   debug=1：第一次穿模的那一步打印每次迭代；debug=2 另外打印每个撞上 Newton 上限的步（间隙、|dx|/h、CCD 和线搜索的步长）。
 //   out：每行 t, min_distance, min_limit, newton, pcg, 然后是 nq 个 qpos。用 tools/replay.py 在 MuJoCo 的窗口里回放。
 //
 // 阶段 12：有驱动的场景，每一步的控制量按 MJCF 的关键帧插值（ctrl_at，取这一步结束的时刻）。
@@ -157,6 +159,13 @@ int main(int argc, char** argv) {
         std::printf("first penetration at step %ld (t = %.4f): type %d bodies %d %d d %.3e verts %d %d %d %d\n", nstep, t + P.h,
                     int(worst->type), worst->bodyA, worst->bodyB, worst->d, worst->verts[0], worst->verts[1], worst->verts[2],
                     worst->verts[3]);
+        for (size_t k = 0; k < trace.size(); ++k)
+          std::printf("  it %2zu: gap %.3e |dx|/h %.3e alpha_max %.4f alpha %.4f pcg %d\n", k + 1, trace[k].min_distance,
+                      trace[k].step, trace[k].alpha_max, trace[k].alpha, trace[k].pcg);
+      }
+      if (a.debug >= 2 && r.newton >= P.max_newton) {
+        // debug=2：撞上 Newton 上限的步，打印每次迭代的间隙、|dx|/h（收敛判据）、CCD 允许的最大步长和线搜索取的步长。
+        std::printf("step %ld (t = %.4f) hit the Newton cap:\n", nstep + 1, t + P.h);
         for (size_t k = 0; k < trace.size(); ++k)
           std::printf("  it %2zu: gap %.3e |dx|/h %.3e alpha_max %.4f alpha %.4f pcg %d\n", k + 1, trace[k].min_distance,
                       trace[k].step, trace[k].alpha_max, trace[k].alpha, trace[k].pcg);
