@@ -61,7 +61,7 @@ StepResult step(const Model& model, const StepParams& P, const VectorXd& q0, con
       P.mu > 0 ? lag_friction(model, F0, find_contacts(model, F0, P.dhat), state->kappa, P.dhat)
                : std::vector<FrictionContact>();
   // 阶段 12：驱动、阻尼、armature 的系数（步首的 q0、v0 和这一步的控制量定下来，这一步里不变）。
-  const DriveTerms D = drive_terms(model, q0, v0, P.ctrl, h);
+  const DriveTerms D = drive_terms(model, q0, v0, P.ctrl, h, P.eps_v);
 
   // 能量作为 q 的函数：先做 FK，重新找活跃的接触（换了位置，活跃的接触可能变了），再把各项加起来。线搜索里反复用。
   const auto energy_at = [&](const VectorXd& q, double kappa) {

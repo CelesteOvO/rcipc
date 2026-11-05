@@ -2,7 +2,7 @@
 
 **目标：** 有了这三样，才能跑被驱动的机构（齿轮、夹爪、手、机械臂）和真实的机器人模型。三者都只作用在单个自由度上，所以和阶段 10 的关节限位一样：能量是这个自由度的一元凸函数，梯度和 Hessian 只落在对角上，进树块 $H_k$。
 
-代码：`include/rcipc/drive.h`、`src/drive.cc`（CPU），`src/gpu/kin.cu` 的 `k_drives`（GPU）；模型 `models/drives.xml`；测试 `tests/test_drives.cc`、`tests/test_gpu.cc` 的 `Step.DrivesMatchCpu`。
+代码：`include/rcipc/drive.h`、`src/drive.cc`（CPU），`src/gpu/kin.cu` 的 `k_drives`（GPU）；模型 `models/drives.xml`、`models/joint_friction.xml`（第 5 节，后来为 G1 补的）；测试 `tests/test_drives.cc`、`tests/test_gpu.cc` 的 `Step.DrivesMatchCpu`。
 
 ---
 
@@ -91,10 +91,53 @@ $$
 
 ---
 
-## 5. 思考题
+## 5. 关节的干摩擦和 actuatorfrcrange（为 G1 补的）
+
+Unitree G1（笔记 13 第 7 节）的 29 个铰链都有 `frictionloss="0.3"`（干摩擦，N m）和 `actuatorfrcrange`（关节上驱动力矩的上下限，腿 88–139 N m，手腕 5 N m）。原来这两样读模型时只记进 `ignored`，机器人会比 MuJoCo 里的更“滑”、关节力矩也没有上限。两样都只作用在单个自由度上，所以和前面几项一样进对角。
+
+**干摩擦。** 一个大小固定为 $F$、方向和速度相反的力，耗散函数是 $F|\dot q|$。照第 1 节阻尼的写法乘 $h$、把速度换成 $v = (q - q_0)/h$，再用阶段 8 接触摩擦的光滑化（`friction_f0`，宽度 $\epsilon_v$）：
+
+$$
+E = h F f_0(|v|),\qquad \frac{\partial E}{\partial q} = F f_1(|v|)\,\mathrm{sign}(v),\qquad \frac{\partial^2 E}{\partial q^2} = \frac{F}{h} f_1'(|v|)
+$$
+
+$f_1' = 2(\epsilon_v - y)/\epsilon_v^2$（$y < \epsilon_v$），之后是 0。$f_0$ 凸，所以 $E$ 凸。和接触摩擦不同的是 $F$ 是常数：接触摩擦的法向力要取步首的值（“滞后”，阶段 8），这里不用，所以这一项就是精确的势能。
+
+- **推得动**（推力 $f > F$，速度超过 $\epsilon_v$ 以后）：摩擦正好是 $F$，$m(v_1 - v_0)/h = f - F$。
+- **推不动**（$f < F$）：停在 $F f_1(|v|) = f$ 的蠕动速度上，$|v| = \epsilon_v\big(1 - \sqrt{1 - f/F}\big)$。$f = 0.75F$ 时是 $\epsilon_v/2$。这和接触摩擦的“静止时允许 $\epsilon_v$ 以下的蠕动”是同一回事。
+- 球关节、自由关节上的干摩擦和阻尼一样不支持，记进 `ignored`。
+
+MuJoCo 的处理不同：`frictionloss` 是约束求解器里的一个带上下限的约束，静止时可以真的不动，代价是它也是软的（有正则化）。
+
+**actuatorfrcrange。** MuJoCo 把一个关节上所有驱动的力矩加起来，再夹在这个范围里。关节上只有一个驱动（G1 就是）时：
+
+$$
+\mathrm{clamp}\big(s\,\mathrm{clamp}(f, \text{forcerange}),\ [lo, hi]\big) = s\,\mathrm{clamp}\big(f,\ \text{forcerange} \cap [lo, hi]/s\big)
+$$
+
+（$s < 0$ 时上下限对调）。所以读模型时直接并进那个驱动的 `force_range`，用第 2 节的 Huber 形状，别的什么都不用改。几个驱动共用一个关节时夹的是它们的和，拆不开，记进 `ignored`。
+
+**GPU。** `k_drives` 的前 nv 个线程多算一项干摩擦。$h$、$\epsilon_v$ 作为内核参数录进 CUDA graph，它们都在 `GraphKey` 里，变了会重新录图。
+
+**测试**（`models/joint_friction.xml`，没有重力的几个滑块）：
+
+| 测试 | 检验什么 |
+|---|---|
+| `JointFriction.ReadsModel` | gear 2、±1 N 的关节限制和 forcerange [−0.4, 3] 合成 [−0.4, 0.5]；两个驱动共用一个关节时记进 `ignored` |
+| `JointFriction.Derivatives` | 能量、梯度、Hessian 和有限差分，位移在光滑化的那一段里和外面都取 |
+| `JointFriction.StickAndSlip` | 推力 1.5 N、摩擦 2 N：蠕动速度 $\epsilon_v/2$，1e-9；推力 3 N、摩擦 1 N：每步速度加 $h(3-1)/m$，1e-10；被夹住的驱动减去干摩擦的匀加速 |
+| `Step.DrivesMatchCpu`（GPU） | 加上这个模型：逐个发射和图版都和 CPU 逐步比 300 步 |
+
+`limited` 那个用的是滑动，不是铰链：铰链从静止转 $\theta$ 时，阶段 3 的惯性项给的是 $\sin\theta$ 而不是 $\theta$，加速度会差 $\theta^2/6$ 倍（第一版测试就差了 3.8e-6）。
+
+---
+
+## 6. 思考题
 
 1. 阻尼的能量为什么是 $\frac{b}{2h}(q-q_0)^2$，而不是 $\frac b2 \dot q^2$？两者差在哪里，哪一个的梯度才是“力乘 $h$”的那个量纲？
 2. position 驱动在 MuJoCo 的 `implicitfast` 里，$k_p$ 那一项是显式的。$k_p$ 很大、$h$ 不变时，两种处理各会怎样？
 3. 力限制的能量是 Huber 形状，Hessian 在范围外是 0。如果一个自由度上只有一个被夹住的驱动、没有别的项（比如惯性），Newton 法会出什么问题？实际场景里为什么不会？
 4. 第 4 节的阻力 $\approx I\theta^3/h^2$。固定转速 $\omega$，把 $h$ 减半，阻力怎么变？这说明惯性项的这个误差是几阶的？
 5. 球关节的阻尼要在切空间里做。写出 $E = \frac{b}{2h}\lVert\log(R_0^{\mathsf T}R)\rVert^2$ 对增量的梯度，和铰链的情况比，多了什么？
+6. 干摩擦推不动时的蠕动速度是 $\epsilon_v(1 - \sqrt{1 - f/F})$。推力从 0 慢慢加到 $F$，蠕动速度怎么变？在 $f = F$ 时它是多少，和“推得动”的那一支接得上吗？
+7. 干摩擦为什么不用像接触摩擦那样取步首的值（滞后）？如果关节的摩擦力随传递的力矩变（比如齿轮箱），还能写成一个凸的势能吗？

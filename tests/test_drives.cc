@@ -8,6 +8,8 @@
 //   Drive.ForceLimit        motor 的力被夹在 ±2 N：匀加速
 //   Drive.VelocityServo     速度伺服：角速度收敛到目标
 //   Drive.GravityBalance    摆在重力下由 position 驱动托住：停在力矩平衡的角度
+//   JointFriction.*         关节的干摩擦（frictionloss）和 actuatorfrcrange（joint_friction.xml，G1 之后）：
+//                           读模型、有限差分、推不动时只剩蠕动、推得动时按 (f - F) / m 匀加速
 #include <cmath>
 #include <random>
 
@@ -80,7 +82,7 @@ TEST(Drive, Derivatives) {
     for (int i = 0; i < M.nq; ++i) q[i] = q0[i] + 0.2 * u(rng);
     VectorXd ctrl(4);
     ctrl << 0.3 * u(rng), 30 * u(rng), 2 * u(rng), u(rng);
-    const DriveTerms D = drive_terms(M, q0, v0, ctrl, M.timestep);
+    const DriveTerms D = drive_terms(M, q0, v0, ctrl, M.timestep, 1e-3);
     const VectorXd g = drive_gradient(M, D, q), H = drive_hessian_diagonal(M, D, q);
     for (int d = 0; d < M.nv; ++d) {
       const double eps = 1e-6;
@@ -204,4 +206,82 @@ TEST(Drive, GravityBalance) {
   // 绕 y 轴转正角时，杆端（在 -z 方向）向 -x 方向摆起：重力力矩是 -mgl sin(th)。
   EXPECT_NEAR(q[M.joints[kArm].qadr], th, 1e-6);
   EXPECT_NEAR(v[kArm], 0.0, 1e-6);
+}
+
+// ---------- 关节的干摩擦、actuatorfrcrange（joint_friction.xml，笔记 notes/12_drives.md 第 5 节） ----------
+
+namespace {
+constexpr int kStuck = 0, kSlips = 1, kLimited = 2;
+}  // namespace
+
+TEST(JointFriction, ReadsModel) {
+  const Model M = load("joint_friction.xml");
+  ASSERT_EQ(M.nv, 4);
+  EXPECT_EQ(M.dof_frictionloss[kStuck], 2.0);
+  EXPECT_EQ(M.dof_frictionloss[kSlips], 1.0);
+  // gear 2，关节力矩 ±1 -> 驱动力 ±0.5，和 forcerange [-0.4, 3] 取交集。
+  const Actuator& a = M.actuators[2];
+  EXPECT_TRUE(a.force_limited);
+  EXPECT_DOUBLE_EQ(a.force_range[0], -0.4);
+  EXPECT_DOUBLE_EQ(a.force_range[1], 0.5);
+  // 两个 motor 共用一个关节：没有并进去，记进 ignored。
+  EXPECT_FALSE(M.actuators[3].force_limited);
+  ASSERT_EQ(M.ignored.size(), 1u);
+  EXPECT_NE(M.ignored[0].find("several actuators"), std::string::npos);
+}
+
+// 有限差分：步内的位移落在光滑化的那一段（|q - q0| < eps_v h）里和外面都取。
+TEST(JointFriction, Derivatives) {
+  const Model M = load("joint_friction.xml");
+  const double h = M.timestep, eps_v = 0.01, band = eps_v * h;
+  std::mt19937 rng(5);
+  std::uniform_real_distribution<double> u(-1, 1);
+  for (int trial = 0; trial < 40; ++trial) {
+    VectorXd q0(M.nq), q(M.nq);
+    for (int i = 0; i < M.nq; ++i) q0[i] = 0.3 * u(rng);
+    for (int i = 0; i < M.nq; ++i) q[i] = q0[i] + 3 * band * u(rng);
+    const DriveTerms D = drive_terms(M, q0, VectorXd::Zero(M.nv), VectorXd::Zero(M.nu()), h, eps_v);
+    const VectorXd g = drive_gradient(M, D, q), H = drive_hessian_diagonal(M, D, q);
+    for (int d = 0; d < 2; ++d) {  // 两个只有干摩擦的滑块
+      const double eps = 1e-9;
+      VectorXd qp = q, qm = q;
+      qp[d] += eps;
+      qm[d] -= eps;
+      const double fd = (drive_energy(M, D, qp) - drive_energy(M, D, qm)) / (2 * eps);
+      EXPECT_NEAR(g[d], fd, 1e-5 * (1 + std::abs(fd))) << "trial " << trial << " dof " << d;
+      const double fdh = (drive_gradient(M, D, qp)[d] - drive_gradient(M, D, qm)[d]) / (2 * eps);
+      if (std::abs(std::abs(q[d] - q0[d]) - band) > 1e-7) {  // f1' 在 |v| = eps_v 处不连续
+        EXPECT_NEAR(H[d], fdh, 1e-4 * (1 + std::abs(fdh))) << "trial " << trial << " dof " << d;
+      }
+      EXPECT_GE(H[d], 0.0);
+    }
+  }
+}
+
+// 推力 1.5 N 小于干摩擦 2 N：停在 F f1(|v|) = 1.5 的蠕动速度上，f1(y) = 2 y/eps - y^2/eps^2 = 0.75，y = eps / 2。
+// 推力 3 N 大于干摩擦 1 N：滑起来以后 m (v1 - v0) / h = 3 - 1，每步速度加 h。
+TEST(JointFriction, StickAndSlip) {
+  const Model M = load("joint_friction.xml");
+  StepParams P = params(M);
+  P.eps_v = 0.01;
+  VectorXd q = M.qpos0, v = VectorXd::Zero(M.nv);
+  double v_prev = 0;
+  int sliding = 0;
+  for (int i = 0; i < 100; ++i) {
+    P.ctrl = ctrl_at(M, (i + 1) * P.h);
+    const StepResult r = step(M, P, q, v);
+    q = r.q;
+    v = r.v;
+    if (v_prev > P.eps_v) {
+      ASSERT_NEAR(v[kSlips] - v_prev, P.h * (3.0 - 1.0) / 2.0, 1e-10) << "step " << i;
+      ++sliding;
+    }
+    v_prev = v[kSlips];
+    // limited：开始的几步驱动力远超上限，被夹在 0.5（关节上的力 1），减去干摩擦 0.05，质量 0.02 的加速度是
+    // (1 - 0.05) / 0.02（第一步就超过 eps_v，干摩擦就是 0.05）。之后阻尼项让力降下来。用滑动而不是铰链：
+    // 铰链的惯性项从静止转 theta 时梯度是 sin(theta) 而不是 theta（阶段 3），会差 theta^2 / 6 倍。
+    if (i < 5) ASSERT_NEAR(v[kLimited], (i + 1) * P.h * (1.0 - 0.05) / 0.02, 1e-9) << "step " << i;
+  }
+  EXPECT_GT(sliding, 90);
+  EXPECT_NEAR(v[kStuck], 0.5 * P.eps_v, 1e-9);
 }

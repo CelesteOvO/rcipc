@@ -313,17 +313,27 @@ __global__ void k_limits(DModel m, const double* q, double k, double dhat, doubl
 }
 
 __global__ void k_drives(DModel m, DDrive D, const double* q, double* e, double* g, double* Hk) {
-  // drive.cc：前 nv 个线程是阻尼和 armature（K/2 (q - r)^2），后 nact 个是驱动（Huber 形状的一元凸函数）。
+  // drive.cc：前 nv 个线程是阻尼和 armature（K/2 (q - r)^2）加干摩擦（h F f0(|v|)），
+  // 后 nact 个是驱动（Huber 形状的一元凸函数）。
   const int i = blockIdx.x * blockDim.x + threadIdx.x;
   int d = -1;
   double de = 0, dg = 0, dh = 0;
   if (i < D.nv) {
-    if (D.K[i] == 0) return;
+    const double F = D.F ? D.F[i] : 0.0;
+    if (D.K[i] == 0 && F == 0) return;
     d = i;
     const double x = q[D.dqadr[i]] - D.r[i];
     de = 0.5 * D.K[i] * x * x;
     dg = D.K[i] * x;
     dh = D.K[i];
+    if (F != 0) {
+      // friction.h 的 f0、f1 和 f1'（宽度 eps_v），v = (q - c) / h。
+      const double v = (q[D.dqadr[i]] - D.c[i]) / D.h, y = fabs(v), eps = D.eps_v;
+      const bool in = y < eps;
+      de += D.h * F * (in ? -y * y * y / (3 * eps * eps) + y * y / eps + eps / 3 : y);
+      dg += F * (in ? 2 * y / eps - y * y / (eps * eps) : 1.0) * (v < 0 ? -1.0 : 1.0);
+      if (in) dh += F * 2 * (eps - y) / (eps * eps) / D.h;
+    }
   } else if (i < D.nv + D.nact) {
     const int k = i - D.nv;
     d = D.adof[k];

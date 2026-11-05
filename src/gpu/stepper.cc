@@ -269,6 +269,10 @@ struct Stepper::Impl {
   bool drives_on = false;
   DBuf<double> drv_K, drv_r, drv_act;
   DBuf<int> drv_qadr, drv_dof;
+  // G1 之后：关节的干摩擦。drv_fric 为 false 时不分配，DDrive::F 是空指针。h、eps_v 在 GraphKey 里，变了会重新录图。
+  bool drv_fric = false;
+  DBuf<double> drv_F, drv_c;
+  double drv_h = 0, drv_eps = 0;
   DBuf<unsigned long long> tail_stats;  // 累计的四个计数（DTail::stats），timers() 时读回
   double last_eval_dmin = 0;  // energy_at 最后一次检测到的接触里最小的距离
   DBuf<double> pcg_acc;
@@ -711,11 +715,16 @@ struct Stepper::Impl {
       const Joint& j = model.joints[model.dof_joint[d]];
       if (j.type == JointType::kHinge || j.type == JointType::kSlide) qadr[d] = j.qadr;
       any = any || model.dof_damping[d] != 0 || model.dof_armature[d] != 0;
+      drv_fric = drv_fric || model.dof_frictionloss[d] != 0;
     }
-    drives_on = any;
-    if (!any) return;
+    drives_on = any || drv_fric;
+    if (!drives_on) return;
     drv_K.reserve(m.nv);
     drv_r.reserve(m.nv);
+    if (drv_fric) {
+      drv_F.reserve(m.nv);
+      drv_c.reserve(m.nv);
+    }
     drv_qadr.upload(qadr);
     drv_act.reserve(6 * std::max(model.nu(), 1));
     drv_dof.reserve(std::max(model.nu(), 1));
@@ -729,6 +738,12 @@ struct Stepper::Impl {
     D.dqadr = drv_qadr.get();
     D.act = drv_act.get();
     D.adof = drv_dof.get();
+    if (drv_fric) {
+      D.F = drv_F.get();
+      D.c = drv_c.get();
+      D.h = drv_h;
+      D.eps_v = drv_eps;
+    }
     return D;
   }
 
@@ -746,9 +761,15 @@ struct Stepper::Impl {
     launch_inertia_gradient(m, F0.view(), tc.get(), tA.get(), h, ge0.get());
     if (drives_on) {
       // 阶段 12：这一步的驱动系数，和 CPU 版同一个函数算，上传（同步的小拷贝）。
-      const DriveTerms D = drive_terms(model, q0h, v0h, Pm.ctrl, h);
+      const DriveTerms D = drive_terms(model, q0h, v0h, Pm.ctrl, h, Pm.eps_v);
       drv_K.upload(D.K.data(), m.nv);
       drv_r.upload(D.r.data(), m.nv);
+      if (drv_fric) {
+        drv_F.upload(D.F.data(), m.nv);
+        drv_c.upload(D.c.data(), m.nv);
+        drv_h = D.h;
+        drv_eps = D.eps_v;
+      }
       std::vector<double> act;
       std::vector<int> dof;
       for (const DriveTerms::Act& a : D.act) {

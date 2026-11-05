@@ -1,0 +1,45 @@
+<!--
+  关节的干摩擦（frictionloss）和关节上的驱动力矩限制（actuatorfrcrange）的测试模型（笔记 notes/12_drives.md 第 5 节）。
+  几个互不相干的刚体，没有重力。stuck 上有一个球（它几乎不动，碰不到别的），只为了让 GPU 的图版用得上（要有顶点）：
+    stuck  ：沿 x 滑动，质量 1，干摩擦 2 N，motor 推 1.5 N：推力小于摩擦，只剩光滑化允许的蠕动；
+    slips  ：沿 x 滑动，质量 2，干摩擦 1 N，motor 推 3 N：滑起来以后以 (3 - 1) / 2 m/s^2 匀加速；
+    limited：滑动（质量 0.02），position 驱动，gear 2，驱动力限制 [-0.4, 3]，关节力矩限制 actuatorfrcrange ±1：
+             合起来驱动力夹在 [-0.4, 0.5]；
+    shared ：铰链上两个 motor，加 actuatorfrcrange：限制的是两个的和，做不到，记进 Model::ignored。
+-->
+<mujoco model="joint_friction">
+  <compiler angle="radian"/>
+  <option gravity="0 0 0" timestep="0.01"/>
+
+  <worldbody>
+    <body name="stuck" pos="0 0 1">
+      <joint name="stuck" type="slide" axis="1 0 0" frictionloss="2"/>
+      <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01"/>
+      <geom type="sphere" size="0.05"/>
+    </body>
+    <body name="slips" pos="1 0 1">
+      <joint name="slips" type="slide" axis="1 0 0" frictionloss="1"/>
+      <inertial pos="0 0 0" mass="2" diaginertia="0.01 0.01 0.01"/>
+    </body>
+    <body name="limited" pos="2 0 1">
+      <joint name="limited" type="slide" axis="0 1 0" frictionloss="0.05" actuatorfrcrange="-1 1"/>
+      <inertial pos="0 0 0" mass="0.02" diaginertia="0.01 0.01 0.01"/>
+    </body>
+    <body name="shared" pos="3 0 1">
+      <joint name="shared" type="hinge" axis="0 0 1" actuatorfrcrange="-1 1"/>
+      <inertial pos="0 0 0" mass="1" diaginertia="0.02 0.02 0.02"/>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <motor name="stuck" joint="stuck"/>
+    <motor name="slips" joint="slips"/>
+    <position name="limited" joint="limited" kp="20" kv="1" gear="2" forcelimited="true" forcerange="-0.4 3"/>
+    <motor name="shared_a" joint="shared"/>
+    <motor name="shared_b" joint="shared"/>
+  </actuator>
+
+  <keyframe>
+    <key time="0" ctrl="1.5 3 1 0 0"/>
+  </keyframe>
+</mujoco>

@@ -193,6 +193,10 @@ struct DDrive {
   const int* dqadr = nullptr;   // nv：铰链、滑动的自由度在 q 里的下标，其余是 -1
   const double* act = nullptr;  // nact x 6：s、A、C、w、lo、hi（DriveTerms::Act）
   const int* adof = nullptr;    // nact：驱动的自由度
+  // G1 之后：关节的干摩擦 h F f0(|q - c| / h)（DriveTerms::F、c），没有干摩擦的模型 F 是空指针。
+  const double* F = nullptr;    // nv
+  const double* c = nullptr;    // nv
+  double h = 0, eps_v = 0;
 };
 
 // CCD 的“尾巴”（notes/11_gpu.md 第 14 节）：ACCD 串行走了 split 步还没走完的对，由整个 warp 一起先试着证明

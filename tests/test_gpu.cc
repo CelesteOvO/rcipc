@@ -408,26 +408,31 @@ TEST(Step, RagdollMatchesCpu) {
 
 // 阶段 12：驱动、阻尼、armature（drives.xml，控制量按关键帧插值），GPU 和 CPU 逐步一致。drives.xml 没有顶点，
 // 图版用不上（use_graph 要求有顶点），两种设置走的都是逐个发射；图版里的驱动由齿轮、夹爪的场景测试来比。
+// G1 之后：关节的干摩擦和 actuatorfrcrange（joint_friction.xml）。它有一个球（碰不到别的东西），所以图版用得上。
 TEST(Step, DrivesMatchCpu) {
   REQUIRE_GPU();
-  const Model M = load("drives.xml");
-  for (bool graphs : {true, false}) {
-    gpu::Stepper G(M);
-    G.set_graphs(graphs);
-    StepParams P;
-    P.h = M.timestep;
-    VectorXd qc = M.qpos0, vc = VectorXd::Zero(M.nv), qg = qc, vg = vc;
-    SolverState Sc, Sg;
-    for (int i = 0; i < 300; ++i) {
-      P.ctrl = ctrl_at(M, (i + 1) * P.h);
-      const StepResult rc = step(M, P, qc, vc, &Sc);
-      const StepResult rg = G.step(P, qg, vg, &Sg);
-      EXPECT_EQ(rc.newton, rg.newton) << "step " << i << " graphs " << graphs;
-      qc = rc.q;
-      vc = rc.v;
-      qg = rg.q;
-      vg = rg.v;
-      ASSERT_LT((qg - qc).norm(), 1e-9) << "step " << i << " graphs " << graphs;
+  for (const char* file : {"drives.xml", "joint_friction.xml"}) {
+    const Model M = load(file);
+    for (bool graphs : {true, false}) {
+      gpu::Stepper G(M);
+      G.set_graphs(graphs);
+      StepParams P;
+      P.h = M.timestep;
+      P.eps_v = 0.01;
+      VectorXd qc = M.qpos0, vc = VectorXd::Zero(M.nv), qg = qc, vg = vc;
+      SolverState Sc, Sg;
+      for (int i = 0; i < 300; ++i) {
+        P.ctrl = ctrl_at(M, (i + 1) * P.h);
+        const StepResult rc = step(M, P, qc, vc, &Sc);
+        const StepResult rg = G.step(P, qg, vg, &Sg);
+        EXPECT_EQ(rc.newton, rg.newton) << file << " step " << i << " graphs " << graphs;
+        qc = rc.q;
+        vc = rc.v;
+        qg = rg.q;
+        vg = rg.v;
+        ASSERT_LT((qg - qc).norm(), 1e-9) << file << " step " << i << " graphs " << graphs;
+      }
+      if (graphs && M.nvertex() > 0 && G.set_cooperative_pcg(true)) EXPECT_TRUE(G.used_graphs()) << file;
     }
   }
 }

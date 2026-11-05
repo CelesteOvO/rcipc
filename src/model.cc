@@ -252,19 +252,19 @@ Model from_mujoco(const mjModel* m) {
   if (m->npair > 0) M.ignored.push_back("explicit contact pairs (<contact><pair>)");
 
   // 阶段 12：关节阻尼、armature（只用在铰链和滑动上；球、自由关节上的记进 ignored）。
+  // G1 之后：关节的干摩擦 frictionloss（同样只用在铰链和滑动上）。
   M.dof_damping.assign(m->dof_damping, m->dof_damping + m->nv);
   M.dof_armature.assign(m->dof_armature, m->dof_armature + m->nv);
-  bool ignored_3d = false, ignored_friction = false;
+  M.dof_frictionloss.assign(m->dof_frictionloss, m->dof_frictionloss + m->nv);
+  bool ignored_3d = false;
   for (int d = 0; d < m->nv; ++d) {
     const JointType t = M.joints[M.dof_joint[d]].type;
     if (t == JointType::kBall || t == JointType::kFree) {
-      ignored_3d = ignored_3d || M.dof_damping[d] != 0 || M.dof_armature[d] != 0;
-      M.dof_damping[d] = M.dof_armature[d] = 0;
+      ignored_3d = ignored_3d || M.dof_damping[d] != 0 || M.dof_armature[d] != 0 || M.dof_frictionloss[d] != 0;
+      M.dof_damping[d] = M.dof_armature[d] = M.dof_frictionloss[d] = 0;
     }
-    ignored_friction = ignored_friction || m->dof_frictionloss[d] != 0;
   }
-  if (ignored_3d) M.ignored.push_back("damping / armature on ball and free joints");
-  if (ignored_friction) M.ignored.push_back("joint frictionloss");
+  if (ignored_3d) M.ignored.push_back("damping / armature / frictionloss on ball and free joints");
   for (int i = 0; i < m->njnt; ++i) {
     if (m->jnt_stiffness[i] != 0) {
       M.ignored.push_back("joint stiffness");
@@ -301,12 +301,30 @@ Model from_mujoco(const mjModel* m) {
     A.force_range[1] = m->actuator_forcerange[2 * i + 1];
     M.actuators.push_back(A);
   }
-  for (int i = 0; i < m->njnt; ++i) {
-    if (m->jnt_actfrclimited[i]) {
-      M.ignored.push_back("joint actuatorfrcrange");
-      break;
+  // 关节的 actuatorfrcrange：MuJoCo 把这个关节上所有驱动的力矩加起来再夹。关节上只有一个驱动时，
+  //   clamp(gear clamp(f, force_range), [lo, hi]) = gear clamp(f, force_range ∩ [lo, hi] / gear)，
+  //   所以并进那个驱动的 force_range（gear 为负时上下限对调）。几个驱动共用一个关节时做不到，记进 ignored。
+  std::vector<int> per_joint(m->njnt, 0);
+  for (const Actuator& A : M.actuators) ++per_joint[A.joint];
+  bool ignored_frc = false;
+  for (Actuator& A : M.actuators) {
+    if (!m->jnt_actfrclimited[A.joint]) continue;
+    if (per_joint[A.joint] != 1 || A.gear == 0) {
+      ignored_frc = true;
+      continue;
     }
+    double lo = m->jnt_actfrcrange[2 * A.joint] / A.gear, hi = m->jnt_actfrcrange[2 * A.joint + 1] / A.gear;
+    if (lo > hi) std::swap(lo, hi);
+    if (A.force_limited) {
+      lo = std::max(lo, A.force_range[0]);
+      hi = std::min(hi, A.force_range[1]);
+      if (lo > hi) throw std::runtime_error("actuator on joint " + std::to_string(A.joint) + ": forcerange and actuatorfrcrange do not overlap");
+    }
+    A.force_limited = true;
+    A.force_range[0] = lo;
+    A.force_range[1] = hi;
   }
+  if (ignored_frc) M.ignored.push_back("actuatorfrcrange on a joint with several actuators");
   // 关键帧里的控制量和时间。
   if (m->nu > 0) {
     for (int k = 0; k < m->nkey; ++k) {

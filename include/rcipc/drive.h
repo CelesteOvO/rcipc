@@ -21,10 +21,16 @@
 //     能量取 E = -∫ tau dq，梯度就是 -tau。b1、b2 <= 0（读模型时检查）时 dtau/dq = s^2 (b1 + b2/h) <= 0，E 是凸的。
 //     有力的上下限时 tau = s clamp(f, lo, hi)，E 变成 Huber 的形状：范围里二次，范围外一次，仍然凸、一阶连续。
 //     position 驱动（b1 = -kp，b2 = -kv）就是隐式的 PD 控制；velocity（b2 = -kv）是隐式的速度伺服；motor 是常力。
+//
+//   关节的干摩擦 frictionloss F（G1 之后，笔记 notes/12_drives.md 第 5 节）：耗散函数 F |v| 乘 h，v = (q - q0) / h，
+//     和阶段 8 的接触摩擦用同一个光滑化：E = h F f0(|v|)，f0 是 friction.h 的 friction_f0（宽度 eps_v）。
+//     梯度 F f1(|v|) sign(v)，Hessian F f1'(|v|) / h。F 是常数（不像接触摩擦的法向力要滞后），所以这一项是精确的凸势能。
 namespace rcipc {
 
 struct DriveTerms {
   Eigen::VectorXd K, r;  // 阻尼和 armature：每个自由度一个（球、自由关节的是 0）
+  Eigen::VectorXd F, c;  // 干摩擦：力（矩）F 和步首的位置 c = q0（每个自由度一个，没有的是 0）
+  double h = 0, eps_v = 0;
   struct Act {
     int dof;
     double s, A, C, w;   // w = b1 + b2 / h（<= 0），C = s w
@@ -33,9 +39,10 @@ struct DriveTerms {
   std::vector<Act> act;
 };
 
-// 一步开始时准备：q0、v0 是步首的状态，ctrl 是这一步的控制量（长度 nu；空表示全 0）。这一步里都是常数。
+// 一步开始时准备：q0、v0 是步首的状态，ctrl 是这一步的控制量（长度 nu；空表示全 0），eps_v 是摩擦光滑化的速度
+// （StepParams::eps_v，干摩擦用）。这一步里都是常数。
 DriveTerms drive_terms(const Model& model, const Eigen::VectorXd& q0, const Eigen::VectorXd& v0,
-                       const Eigen::VectorXd& ctrl, double h);
+                       const Eigen::VectorXd& ctrl, double h, double eps_v);
 
 double drive_energy(const Model& model, const DriveTerms& D, const Eigen::VectorXd& q);
 Eigen::VectorXd drive_gradient(const Model& model, const DriveTerms& D, const Eigen::VectorXd& q);

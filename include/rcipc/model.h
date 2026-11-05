@@ -98,6 +98,8 @@ struct Actuator {
   double ctrl_range[2] = {0, 0};
   bool force_limited = false;  // 驱动力 f 夹在 force_range 里
   double force_range[2] = {0, 0};
+  // 关节上的 actuatorfrcrange（G1 之后）：关节上只有这一个驱动时，把“关节力矩 gear f 夹在 [lo, hi]”
+  // 换成“f 夹在 [lo, hi] / gear”，和 force_range 取交集，所以 force_range 已经包含它。
 };
 
 // 阶段 12：控制量的时间表，来自 MJCF 的关键帧 <key time="..." ctrl="..."/>，按时间分段线性插值（drive.h 的 ctrl_at）。
@@ -130,6 +132,7 @@ struct Model {
   // 阶段 12：驱动、关节阻尼和 armature（drive.h）。阻尼和 armature 只用在铰链和滑动的自由度上。
   std::vector<double> dof_damping;   // 长度 nv（dof_damping，N s/m 或 N m s/rad）
   std::vector<double> dof_armature;  // 长度 nv（dof_armature，加在质量矩阵对角上的转子惯量）
+  std::vector<double> dof_frictionloss;  // 长度 nv：关节的干摩擦力（矩）（G1 之后，drive.h）。球、自由关节上的是 0
   std::vector<Actuator> actuators;
   std::vector<CtrlKey> ctrl_keys;    // 控制量的时间表（没有驱动或没有关键帧时为空）
   std::vector<std::string> ignored;  // 读到了、但不支持而被忽略的设置（比如关节的 frictionloss），演示程序会打印

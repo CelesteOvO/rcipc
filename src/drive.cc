@@ -4,7 +4,10 @@
 #include <cmath>
 #include <limits>
 
-// 驱动、关节阻尼和 armature（阶段 12）。推导见 notes/12_drives.md 第 1–3 节；测试见 tests/test_drives.cc。
+#include "rcipc/friction.h"
+
+// 驱动、关节阻尼和 armature（阶段 12），关节的干摩擦（G1 之后）。推导见 notes/12_drives.md 第 1–3、5 节；
+// 测试见 tests/test_drives.cc。
 namespace rcipc {
 
 using Eigen::VectorXd;
@@ -24,14 +27,31 @@ double force_of(const DriveTerms::Act& a, const Model& model, const VectorXd& q)
   return a.A + a.C * q[j.qadr];
 }
 
+// 干摩擦在自由度 d 上这一步的速度 v = (q - c) / h。
+double friction_speed(const DriveTerms& D, const Model& model, const VectorXd& q, int d) {
+  return (q[model.joints[model.dof_joint[d]].qadr] - D.c[d]) / D.h;
+}
+
+// f1 的导数：f1 = 2 y / eps - y^2 / eps^2（y < eps），所以 f1' = 2 (eps - y) / eps^2；y >= eps 时是 0。
+double friction_f1_slope(double y, double eps) { return y < eps ? 2 * (eps - y) / (eps * eps) : 0.0; }
+
 }  // namespace
 
-DriveTerms drive_terms(const Model& model, const VectorXd& q0, const VectorXd& v0, const VectorXd& ctrl, double h) {
+DriveTerms drive_terms(const Model& model, const VectorXd& q0, const VectorXd& v0, const VectorXd& ctrl, double h,
+                       double eps_v) {
   DriveTerms D;
   D.K = VectorXd::Zero(model.nv);
   D.r = VectorXd::Zero(model.nv);
+  D.F = VectorXd::Zero(model.nv);
+  D.c = VectorXd::Zero(model.nv);
+  D.h = h;
+  D.eps_v = eps_v;
   for (int d = 0; d < model.nv; ++d) {
     if (!scalar_dof(model, d)) continue;
+    if (model.dof_frictionloss[d] > 0) {
+      D.F[d] = model.dof_frictionloss[d];
+      D.c[d] = q0[model.joints[model.dof_joint[d]].qadr];
+    }
     const double b = model.dof_damping[d], a = model.dof_armature[d];
     if (b == 0 && a == 0) continue;
     // K/2 (q - r)^2 = b/(2h) (q - q0)^2 + a/(2h^2) (q - (q0 + h v0))^2 + 常数：K 是两个系数之和，r 是两个中心的加权平均。
@@ -60,6 +80,7 @@ DriveTerms drive_terms(const Model& model, const VectorXd& q0, const VectorXd& v
 double drive_energy(const Model& model, const DriveTerms& D, const VectorXd& q) {
   double e = 0;
   for (int d = 0; d < model.nv; ++d) {
+    if (D.F[d] != 0) e += D.h * D.F[d] * friction_f0(std::abs(friction_speed(D, model, q, d)), D.eps_v);
     if (D.K[d] == 0) continue;
     const double x = q[model.joints[model.dof_joint[d]].qadr] - D.r[d];
     e += 0.5 * D.K[d] * x * x;
@@ -83,6 +104,11 @@ VectorXd drive_gradient(const Model& model, const DriveTerms& D, const VectorXd&
   VectorXd g = VectorXd::Zero(model.nv);
   for (int d = 0; d < model.nv; ++d) {
     if (D.K[d] != 0) g[d] = D.K[d] * (q[model.joints[model.dof_joint[d]].qadr] - D.r[d]);
+    if (D.F[d] != 0) {
+      // d/dq [h F f0(|v|)] = F f1(|v|) sign(v)，dv/dq = 1/h。
+      const double v = friction_speed(D, model, q, d);
+      g[d] += D.F[d] * friction_f1(std::abs(v), D.eps_v) * (v < 0 ? -1.0 : 1.0);
+    }
   }
   const VectorXd tau = actuator_torques(model, D, q);
   for (size_t i = 0; i < D.act.size(); ++i) g[D.act[i].dof] -= tau[static_cast<int>(i)];
@@ -91,6 +117,9 @@ VectorXd drive_gradient(const Model& model, const DriveTerms& D, const VectorXd&
 
 VectorXd drive_hessian_diagonal(const Model& model, const DriveTerms& D, const VectorXd& q) {
   VectorXd H = D.K;
+  for (int d = 0; d < model.nv; ++d) {
+    if (D.F[d] != 0) H[d] += D.F[d] * friction_f1_slope(std::abs(friction_speed(D, model, q, d)), D.eps_v) / D.h;
+  }
   for (const DriveTerms::Act& a : D.act) {
     if (a.C == 0) continue;
     const double y = force_of(a, model, q);
