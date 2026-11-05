@@ -11,6 +11,9 @@ CSV 的格式见 toys/scenes/main.cc：每行 t, min_distance, min_limit, newton
   （斜面的模型里地面是水平的、重力是斜的，按重力摆相机，看起来就是地面斜了）。
 - 每棵运动树一个颜色；地面画成棋盘格；一盏带阴影的主光加一盏补光。
 - 左上角写场景名，右下角写时间和这一步结束时的最小间隙（scene_demo 记的；GPU 版只看 d-hat 以内的接触）。
+- --glass 前缀：世界上名字以这些前缀开头的几何体画成半透明（搅拌机的罐子，notes/14_visible.md）。
+- --status 文件：tools/topology.py --status 写的每帧一行“t<TAB>文字”，写在左下角；文字以 ! 开头的画成红色。
+- --t0、--T：只渲染这一段时间。
 需要 mujoco、numpy、imageio（带 imageio-ffmpeg）、Pillow。
 """
 import argparse
@@ -50,7 +53,7 @@ def font(size):
 class Shot:
     """一个场景：模型、轨迹、相机。frame(t) 返回 t 时刻的画面（h x w x 3）。"""
 
-    def __init__(self, xml, csv_path, w, h, az, el, dist, target, title, range_m=None):
+    def __init__(self, xml, csv_path, w, h, az, el, dist, target, title, range_m=None, glass=(), status=None):
         self.m = mujoco.MjModel.from_xml_path(xml)
         self.d = mujoco.MjData(self.m)
         self.ts, self.gaps, self.qs = load_csv(csv_path, self.m.nq)
@@ -67,12 +70,24 @@ class Shot:
             if m.geom_type[gi] == mujoco.mjtGeom.mjGEOM_PLANE:
                 m.geom_rgba[gi] = [0, 0, 0, 0]  # 地面由 floor() 画
             elif root[b] == 0:
-                m.geom_rgba[gi] = [0.55, 0.60, 0.68, 1]
+                name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_GEOM, gi) or ""
+                glassy = any(name.startswith(p) for p in glass)
+                m.geom_rgba[gi] = [0.62, 0.78, 0.90, 0.16] if glassy else [0.55, 0.60, 0.68, 1]
             else:
                 k = roots.index(root[b])
                 hue = (0.58 + 0.618034 * k) % 1.0
                 m.geom_rgba[gi] = list(colorsys.hsv_to_rgb(hue, 0.50, 0.92)) + [1.0]
         self.planes = [gi for gi in range(m.ngeom) if m.geom_type[gi] == mujoco.mjtGeom.mjGEOM_PLANE]
+        self.glass = bool(glass)  # 有半透明的罐子时主光不投影子（MuJoCo 里半透明的几何体也投出全黑的影子）
+        self.status = None
+        if status:
+            st_t, st_txt = [], []
+            with open(status, encoding="utf-8") as fh:
+                for line in fh:
+                    tt, txt = line.rstrip("\n").split("\t", 1)
+                    st_t.append(float(tt))
+                    st_txt.append(txt)
+            self.status = (np.array(st_t), st_txt)
         m.vis.headlight.ambient[:] = 0.25
         m.vis.headlight.diffuse[:] = 0.35
         m.vis.headlight.specular[:] = 0.05
@@ -80,8 +95,9 @@ class Shot:
         m.vis.global_.offwidth = max(w, 640)
         m.vis.global_.offheight = max(h, 480)
         # 场景的范围：抽几帧，取所有非平面几何的中心。
+        # 给了 --range 时只看第一帧：并排的两段起点相同，地面、背景就一样大（不会被飞出去的球撑大）。
         pts = []
-        for i in np.linspace(0, len(self.qs) - 1, 8).astype(int):
+        for i in ([0] if range_m else np.linspace(0, len(self.qs) - 1, 8).astype(int)):
             self.set_q(i)
             for gi in range(m.ngeom):
                 if gi not in self.planes:
@@ -161,7 +177,7 @@ class Shot:
             L.diffuse[:] = dif
             L.ambient[:] = 0.10 if k == 0 else 0.0
             L.specular[:] = 0.25 if k == 0 else 0.0
-            L.castshadow = sh
+            L.castshadow = sh and not self.glass
             L.headlight = 0
         for c in scn.camera:
             c.pos[:] = self.cam_pos
@@ -185,7 +201,15 @@ class Shot:
         txt = f"t = {self.ts[i]:.2f} s    {gtxt}"
         tw = dr.textlength(txt, font=self.f_small)
         color = (200, 40, 30) if np.isfinite(gap) and gap < 0 else (30, 34, 40)
-        dr.text((self.w - tw - pad, self.h - pad - self.f_small.size * 1.3), txt, fill=color, font=self.f_small)
+        y = self.h - pad - self.f_small.size * 1.3
+        dr.text((self.w - tw - pad, y), txt, fill=color, font=self.f_small)
+        if self.status is not None:
+            st_t, st_txt = self.status
+            k = int(np.clip(np.searchsorted(st_t, self.ts[i] - 1e-9), 0, len(st_txt) - 1))
+            s = st_txt[k]
+            bad = s.startswith("!")
+            dr.text((pad, y - self.f_small.size * 1.4), s.lstrip("!"), fill=(200, 40, 30) if bad else (20, 110, 50),
+                    font=self.f_small)
         return np.asarray(img)
 
 
@@ -211,23 +235,29 @@ def main():
     ap.add_argument("--target2", default=None)
     ap.add_argument("--title", default="")
     ap.add_argument("--title2", default="")
+    ap.add_argument("--glass", default="", help="半透明的世界几何体的名字前缀，逗号分开")
+    ap.add_argument("--status", default=None)
+    ap.add_argument("--status2", default=None)
+    ap.add_argument("--t0", type=float, default=0.0)
+    ap.add_argument("--T", type=float, default=None)
     a = ap.parse_args()
     target = [float(x) for x in a.target.split(",")] if a.target else None
     w = a.w // 2 if a.pair else a.w
     target2 = [float(x) for x in a.target2.split(",")] if a.target2 else target
-    specs = [(a.model, a.csv, a.az, a.el, a.dist, a.title, target, a.range)]
+    glass = tuple(x for x in a.glass.split(",") if x)
+    specs = [(a.model, a.csv, a.az, a.el, a.dist, a.title, target, a.range, a.status)]
     if a.pair:
         specs.append((a.pair[0], a.pair[1], a.az if a.az2 is None else a.az2, a.el if a.el2 is None else a.el2,
-                      a.dist if a.dist2 is None else a.dist2, a.title2, target2, a.range2 or a.range))
+                      a.dist if a.dist2 is None else a.dist2, a.title2, target2, a.range2 or a.range, a.status2))
     # 一次只开一个渲染器（同一个进程里同时开两个，后一个的 OpenGL 上下文会出问题，画面全黑）：
     # 并排时先把左边的帧全部渲染出来，关掉，再渲染右边的。
     frames, T = [], None
-    for xml, csv_path, az, el, dist, title, tg, rng in specs:
-        s = Shot(xml, csv_path, w, a.h, az, el, dist, tg, title, rng)
+    for xml, csv_path, az, el, dist, title, tg, rng, st in specs:
+        s = Shot(xml, csv_path, w, a.h, az, el, dist, tg, title, rng, glass, st)
         if T is None:
-            T = s.ts[-1]
-        nframes = int(T / a.speed * a.fps) + 1
-        frames.append([s.frame(k * a.speed / a.fps) for k in range(nframes)])
+            T = min(s.ts[-1], a.T) if a.T else s.ts[-1]
+        nframes = int((T - a.t0) / a.speed * a.fps) + 1
+        frames.append([s.frame(a.t0 + k * a.speed / a.fps) for k in range(nframes)])
         s.R.close()
     writer = imageio.get_writer(a.out, fps=a.fps, codec="libx264", quality=7, pixelformat="yuv420p", macro_block_size=8,
                                 ffmpeg_params=["-movflags", "+faststart"])

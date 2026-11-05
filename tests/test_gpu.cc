@@ -6,9 +6,11 @@
 //   Pcg.*     PCG 的解和稠密 LDLT 的解
 //   Ccd.*     CCD 的步长上限（地面、刚体之间、网格）
 //   Step.*    整步：落地盒子、堆叠、布娃娃，和 CPU 版的轨迹一致；网格布娃娃堆不穿透
+//   Topology.*  穿透会改变拓扑的两个场景：锁链的环绕数不变、搅拌机的球不出罐子（notes/14_visible.md）
 // GPU 的原子加让求和顺序不固定，所以都按相对误差比（1e-9 量级），不要求逐位相同。没有显卡时整组跳过。
 #include "rcipc/gpu.h"
 
+#include <algorithm>
 #include <cmath>
 #include <random>
 
@@ -527,4 +529,132 @@ TEST(Step, MeshPileStaysSeparated) {
   }
   EXPECT_GT(S.kappa, 0.0);
   (void)kCaps8;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 笔记 notes/14_visible.md：穿透会改变拓扑的两个场景（tools/make_stress.py 生成）。
+
+// 两个闭合多边形的环绕数（同 tools/topology.py 的 linking_number）：沿一个一般的方向投影，
+// 数两条曲线之间的交叉，上面那段的方向 x 下面那段的方向和视线同向记 +1，总和除以 2。
+static double linking_number(const std::vector<Vector3d>& P, const std::vector<Vector3d>& Q) {
+  const Vector3d view = Vector3d(0.3127, 0.5413, 0.7805).normalized();
+  const Vector3d e1 = view.cross(Vector3d::UnitX()).normalized(), e2 = view.cross(e1);
+  const auto flat = [&](const Vector3d& x) { return Eigen::Vector2d(x.dot(e1), x.dot(e2)); };
+  const int nP = static_cast<int>(P.size()), nQ = static_cast<int>(Q.size());
+  int total = 0;
+  for (int i = 0; i < nP; ++i) {
+    const Vector3d &A0 = P[i], &A1 = P[(i + 1) % nP];
+    const Eigen::Vector2d a0 = flat(A0), ua = flat(A1) - a0;
+    for (int j = 0; j < nQ; ++j) {
+      const Vector3d &B0 = Q[j], &B1 = Q[(j + 1) % nQ];
+      const Eigen::Vector2d b0 = flat(B0), ub = flat(B1) - b0;
+      const double den = ua.x() * ub.y() - ua.y() * ub.x();
+      if (std::abs(den) < 1e-18) continue;
+      const Eigen::Vector2d w = b0 - a0;
+      const double s = (w.x() * ub.y() - w.y() * ub.x()) / den, t = (w.x() * ua.y() - w.y() * ua.x()) / den;
+      if (s < 0 || s >= 1 || t < 0 || t >= 1) continue;
+      const bool p_over = (A0 + s * (A1 - A0)).dot(view) > (B0 + t * (B1 - B0)).dot(view);
+      const Vector3d up = p_over ? Vector3d(A1 - A0) : Vector3d(B1 - B0), dn = p_over ? Vector3d(B1 - B0) : Vector3d(A1 - A0);
+      total += up.cross(dn).dot(view) > 0 ? 1 : -1;
+    }
+  }
+  return total / 2.0;
+}
+
+// 锁链（models/ring_chain.xml）：24 个环，每个环 12 段胶囊。跑 0.3 s（150 步，h = 2 ms）：
+// 每 10 步算一次所有环对的环绕数，和起点比，一对都不能变；每步结束都不穿透。
+// MuJoCo 用默认的接触参数时，这一段里（0.245 s）就有一对环互相穿过、脱开了（笔记第 3 节）。
+TEST(Topology, RingChainStaysLinked) {
+  REQUIRE_GPU();
+  const Model M = load("ring_chain.xml");
+  // 环：有 12 条边的刚体。胶囊的边是 (轴的终点, 起点)，按边的顺序取起点就是环的 12 边形。
+  std::vector<std::vector<int>> ring_verts(M.nbody());
+  for (const Edge& e : M.edges) ring_verts[e.body].push_back(e.v1);
+  std::vector<int> rings;
+  for (int b = 1; b < M.nbody(); ++b)
+    if (ring_verts[b].size() == 12) rings.push_back(b);
+  ASSERT_EQ(rings.size(), 24u);
+  const int n = static_cast<int>(rings.size());
+  const auto links = [&](const VectorXd& q) {
+    const Frames F = forward_kinematics(M, q);
+    std::vector<std::vector<Vector3d>> poly(n);
+    for (int i = 0; i < n; ++i)
+      for (int v : ring_verts[rings[i]]) poly[i].push_back(world_point(F, rings[i], M.vertices[v].local));
+    MatrixXd L = MatrixXd::Zero(n, n);
+    for (int i = 0; i < n; ++i)
+      for (int j = i + 1; j < n; ++j) L(i, j) = linking_number(poly[i], poly[j]);
+    return L;
+  };
+  StepParams P;
+  P.h = 0.002;
+  P.mu = 0.3;
+  P.eps_v = 0.01;
+  P.tol = 0.002;
+  P.semi_implicit = true;
+  gpu::Stepper G(M);
+  VectorXd q = M.key_qpos, v = VectorXd::Zero(M.nv);
+  const MatrixXd L0 = links(q);
+  for (int i = 0; i < n; ++i)
+    for (int j = i + 1; j < n; ++j) EXPECT_EQ(std::abs(L0(i, j)), j == i + 1 ? 1.0 : 0.0) << "rings " << i << " " << j;
+  SolverState S;
+  double vmax = 0;
+  for (int k = 0; k < 150; ++k) {
+    P.ctrl = ctrl_at(M, (k + 1) * P.h);
+    const StepResult r = G.step(P, q, v, &S);
+    ASSERT_GT(r.min_distance, 0.0) << "step " << k;
+    q = r.q;
+    v = r.v;
+    vmax = std::max(vmax, v.cwiseAbs().maxCoeff());
+    if ((k + 1) % 10 == 0) {
+      const MatrixXd L = links(q);
+      ASSERT_EQ((L - L0).cwiseAbs().maxCoeff(), 0.0) << "linking changed by step " << k + 1;
+    }
+  }
+  EXPECT_GT(vmax, 3.0);  // 链的末端已经甩起来了（这一段测的不是静止的链）
+}
+
+// 搅拌机（models/blender.xml）：前 0.24 s，转子加速到约 100 rad/s，球落到 3 mm 厚的叶片上，
+// 一半以上被打到 5 m/s 以上（最快约 30 m/s），撞 4 mm 厚的墙。每个球都还在罐子里，每步结束都不穿透。
+// MuJoCo 用默认的接触参数时，0.222 s 第一个球穿出了罐子（笔记第 4 节）。
+TEST(Topology, BlenderKeepsBallsInside) {
+  REQUIRE_GPU();
+  const Model M = load("blender.xml");
+  // 罐子的尺寸同 tools/make_stress.py：墙的内表面半径 0.3 m、厚 4 mm（正 12 边形），盖子上表面 0.354 m。
+  const double r_out = 0.304, z_top = 0.354, sector = 2 * kPi / 12;
+  std::vector<int> balls;  // 球：带自由关节的刚体（转子是铰链）
+  for (int b = 1; b < M.nbody(); ++b)
+    if (M.bodies[b].joint >= 0 && M.joints[M.bodies[b].joint].type == JointType::kFree) balls.push_back(b);
+  ASSERT_EQ(balls.size(), 20u);
+  StepParams P;
+  P.h = 0.002;
+  P.mu = 0.3;
+  P.eps_v = 0.01;
+  P.tol = 0.002;
+  P.semi_implicit = true;
+  gpu::Stepper G(M);
+  VectorXd q = M.key_qpos, v = VectorXd::Zero(M.nv);
+  SolverState S;
+  std::vector<double> top_speed(balls.size(), 0.0);
+  for (int k = 0; k < 120; ++k) {
+    P.ctrl = ctrl_at(M, (k + 1) * P.h);
+    const StepResult r = G.step(P, q, v, &S);
+    ASSERT_GT(r.min_distance, 0.0) << "step " << k;
+    q = r.q;
+    v = r.v;
+    const Frames F = forward_kinematics(M, q);
+    for (size_t i = 0; i < balls.size(); ++i) {
+      const Vector3d& x = F.xpos[balls[i]];
+      const double phi = std::round(std::atan2(x.y(), x.x()) / sector) * sector;
+      ASSERT_LT(x.x() * std::cos(phi) + x.y() * std::sin(phi), r_out) << "ball " << i << " step " << k;
+      ASSERT_LT(x.z(), z_top) << "ball " << i << " step " << k;
+      ASSERT_GT(x.z(), 0.0) << "ball " << i << " step " << k;
+      const int d = M.joints[M.bodies[balls[i]].joint].dadr;  // 自由关节：前 3 个自由度是平移
+      top_speed[i] = std::max(top_speed[i], v.segment<3>(d).norm());
+    }
+  }
+  // 转子的角速度：0.24 s 时约 87 rad/s。低于 100 是因为刚加速完、正在打球，另外惯性项的阻力（阶段 12 笔记第 4 节）
+  // 让它的稳态停在约 97 rad/s。
+  EXPECT_GT(v[0], 80.0);
+  EXPECT_GE(std::count_if(top_speed.begin(), top_speed.end(), [](double s) { return s > 5.0; }), 10);
+  EXPECT_GT(*std::max_element(top_speed.begin(), top_speed.end()), 15.0);
 }

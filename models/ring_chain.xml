@@ -1,0 +1,389 @@
+<!--
+  锁链：24 个环（中心线半径 20 mm、线半径 3 mm、节距 30 mm），第 0 个套在高 0.5 m 的横杆上；从水平伸直的姿态释放，1.6–2.6 s 横杆升高 0.8 m 把整串拎起来
+  由 tools/make_stress.py 生成（命令：chain），笔记 notes/14_visible.md。
+-->
+
+<mujoco model="ring_chain">
+  <compiler angle="radian"/>
+  <option gravity="0 0 -9.81" timestep="0.002"/>
+  <default>
+    <geom friction="0.3 0.005 0.0001" density="7800"/>
+  </default>
+  <worldbody>
+    <geom name="floor" type="plane" size="2 2 0.1"/>
+    <body name="bar" pos="0 0 0.5">
+      <joint name="lift" type="slide" axis="0 0 1"/>
+      <geom name="bar" type="capsule" fromto="0 -0.08 0 0 0.08 0" size="0.004" mass="1"/>
+      <geom name="stop0" type="sphere" pos="0 -0.08 0" size="0.02" mass="0.1"/>
+      <geom name="stop1" type="sphere" pos="0 0.08 0" size="0.02" mass="0.1"/>
+    </body>
+    <body name="ring0" pos="0.01 0 0.5">
+      <freejoint/>
+      <geom name="ring0_0" type="capsule" fromto="0.02 0 0 0.0173205 0 0.01" size="0.003"/>
+      <geom name="ring0_1" type="capsule" fromto="0.0173205 0 0.01 0.01 0 0.0173205" size="0.003"/>
+      <geom name="ring0_2" type="capsule" fromto="0.01 0 0.0173205 1.22465e-18 0 0.02" size="0.003"/>
+      <geom name="ring0_3" type="capsule" fromto="1.22465e-18 0 0.02 -0.01 0 0.0173205" size="0.003"/>
+      <geom name="ring0_4" type="capsule" fromto="-0.01 0 0.0173205 -0.0173205 0 0.01" size="0.003"/>
+      <geom name="ring0_5" type="capsule" fromto="-0.0173205 0 0.01 -0.02 0 2.44929e-18" size="0.003"/>
+      <geom name="ring0_6" type="capsule" fromto="-0.02 0 2.44929e-18 -0.0173205 0 -0.01" size="0.003"/>
+      <geom name="ring0_7" type="capsule" fromto="-0.0173205 0 -0.01 -0.01 0 -0.0173205" size="0.003"/>
+      <geom name="ring0_8" type="capsule" fromto="-0.01 0 -0.0173205 -3.67394e-18 0 -0.02" size="0.003"/>
+      <geom name="ring0_9" type="capsule" fromto="-3.67394e-18 0 -0.02 0.01 0 -0.0173205" size="0.003"/>
+      <geom name="ring0_10" type="capsule" fromto="0.01 0 -0.0173205 0.0173205 0 -0.01" size="0.003"/>
+      <geom name="ring0_11" type="capsule" fromto="0.0173205 0 -0.01 0.02 0 -4.89859e-18" size="0.003"/>
+    </body>
+    <body name="ring1" pos="0.04 0 0.5">
+      <freejoint/>
+      <geom name="ring1_0" type="capsule" fromto="0.02 0 0 0.0173205 0.01 0" size="0.003"/>
+      <geom name="ring1_1" type="capsule" fromto="0.0173205 0.01 0 0.01 0.0173205 0" size="0.003"/>
+      <geom name="ring1_2" type="capsule" fromto="0.01 0.0173205 0 1.22465e-18 0.02 0" size="0.003"/>
+      <geom name="ring1_3" type="capsule" fromto="1.22465e-18 0.02 0 -0.01 0.0173205 0" size="0.003"/>
+      <geom name="ring1_4" type="capsule" fromto="-0.01 0.0173205 0 -0.0173205 0.01 0" size="0.003"/>
+      <geom name="ring1_5" type="capsule" fromto="-0.0173205 0.01 0 -0.02 2.44929e-18 0" size="0.003"/>
+      <geom name="ring1_6" type="capsule" fromto="-0.02 2.44929e-18 0 -0.0173205 -0.01 0" size="0.003"/>
+      <geom name="ring1_7" type="capsule" fromto="-0.0173205 -0.01 0 -0.01 -0.0173205 0" size="0.003"/>
+      <geom name="ring1_8" type="capsule" fromto="-0.01 -0.0173205 0 -3.67394e-18 -0.02 0" size="0.003"/>
+      <geom name="ring1_9" type="capsule" fromto="-3.67394e-18 -0.02 0 0.01 -0.0173205 0" size="0.003"/>
+      <geom name="ring1_10" type="capsule" fromto="0.01 -0.0173205 0 0.0173205 -0.01 0" size="0.003"/>
+      <geom name="ring1_11" type="capsule" fromto="0.0173205 -0.01 0 0.02 -4.89859e-18 0" size="0.003"/>
+    </body>
+    <body name="ring2" pos="0.07 0 0.5">
+      <freejoint/>
+      <geom name="ring2_0" type="capsule" fromto="0.02 0 0 0.0173205 0 0.01" size="0.003"/>
+      <geom name="ring2_1" type="capsule" fromto="0.0173205 0 0.01 0.01 0 0.0173205" size="0.003"/>
+      <geom name="ring2_2" type="capsule" fromto="0.01 0 0.0173205 1.22465e-18 0 0.02" size="0.003"/>
+      <geom name="ring2_3" type="capsule" fromto="1.22465e-18 0 0.02 -0.01 0 0.0173205" size="0.003"/>
+      <geom name="ring2_4" type="capsule" fromto="-0.01 0 0.0173205 -0.0173205 0 0.01" size="0.003"/>
+      <geom name="ring2_5" type="capsule" fromto="-0.0173205 0 0.01 -0.02 0 2.44929e-18" size="0.003"/>
+      <geom name="ring2_6" type="capsule" fromto="-0.02 0 2.44929e-18 -0.0173205 0 -0.01" size="0.003"/>
+      <geom name="ring2_7" type="capsule" fromto="-0.0173205 0 -0.01 -0.01 0 -0.0173205" size="0.003"/>
+      <geom name="ring2_8" type="capsule" fromto="-0.01 0 -0.0173205 -3.67394e-18 0 -0.02" size="0.003"/>
+      <geom name="ring2_9" type="capsule" fromto="-3.67394e-18 0 -0.02 0.01 0 -0.0173205" size="0.003"/>
+      <geom name="ring2_10" type="capsule" fromto="0.01 0 -0.0173205 0.0173205 0 -0.01" size="0.003"/>
+      <geom name="ring2_11" type="capsule" fromto="0.0173205 0 -0.01 0.02 0 -4.89859e-18" size="0.003"/>
+    </body>
+    <body name="ring3" pos="0.1 0 0.5">
+      <freejoint/>
+      <geom name="ring3_0" type="capsule" fromto="0.02 0 0 0.0173205 0.01 0" size="0.003"/>
+      <geom name="ring3_1" type="capsule" fromto="0.0173205 0.01 0 0.01 0.0173205 0" size="0.003"/>
+      <geom name="ring3_2" type="capsule" fromto="0.01 0.0173205 0 1.22465e-18 0.02 0" size="0.003"/>
+      <geom name="ring3_3" type="capsule" fromto="1.22465e-18 0.02 0 -0.01 0.0173205 0" size="0.003"/>
+      <geom name="ring3_4" type="capsule" fromto="-0.01 0.0173205 0 -0.0173205 0.01 0" size="0.003"/>
+      <geom name="ring3_5" type="capsule" fromto="-0.0173205 0.01 0 -0.02 2.44929e-18 0" size="0.003"/>
+      <geom name="ring3_6" type="capsule" fromto="-0.02 2.44929e-18 0 -0.0173205 -0.01 0" size="0.003"/>
+      <geom name="ring3_7" type="capsule" fromto="-0.0173205 -0.01 0 -0.01 -0.0173205 0" size="0.003"/>
+      <geom name="ring3_8" type="capsule" fromto="-0.01 -0.0173205 0 -3.67394e-18 -0.02 0" size="0.003"/>
+      <geom name="ring3_9" type="capsule" fromto="-3.67394e-18 -0.02 0 0.01 -0.0173205 0" size="0.003"/>
+      <geom name="ring3_10" type="capsule" fromto="0.01 -0.0173205 0 0.0173205 -0.01 0" size="0.003"/>
+      <geom name="ring3_11" type="capsule" fromto="0.0173205 -0.01 0 0.02 -4.89859e-18 0" size="0.003"/>
+    </body>
+    <body name="ring4" pos="0.13 0 0.5">
+      <freejoint/>
+      <geom name="ring4_0" type="capsule" fromto="0.02 0 0 0.0173205 0 0.01" size="0.003"/>
+      <geom name="ring4_1" type="capsule" fromto="0.0173205 0 0.01 0.01 0 0.0173205" size="0.003"/>
+      <geom name="ring4_2" type="capsule" fromto="0.01 0 0.0173205 1.22465e-18 0 0.02" size="0.003"/>
+      <geom name="ring4_3" type="capsule" fromto="1.22465e-18 0 0.02 -0.01 0 0.0173205" size="0.003"/>
+      <geom name="ring4_4" type="capsule" fromto="-0.01 0 0.0173205 -0.0173205 0 0.01" size="0.003"/>
+      <geom name="ring4_5" type="capsule" fromto="-0.0173205 0 0.01 -0.02 0 2.44929e-18" size="0.003"/>
+      <geom name="ring4_6" type="capsule" fromto="-0.02 0 2.44929e-18 -0.0173205 0 -0.01" size="0.003"/>
+      <geom name="ring4_7" type="capsule" fromto="-0.0173205 0 -0.01 -0.01 0 -0.0173205" size="0.003"/>
+      <geom name="ring4_8" type="capsule" fromto="-0.01 0 -0.0173205 -3.67394e-18 0 -0.02" size="0.003"/>
+      <geom name="ring4_9" type="capsule" fromto="-3.67394e-18 0 -0.02 0.01 0 -0.0173205" size="0.003"/>
+      <geom name="ring4_10" type="capsule" fromto="0.01 0 -0.0173205 0.0173205 0 -0.01" size="0.003"/>
+      <geom name="ring4_11" type="capsule" fromto="0.0173205 0 -0.01 0.02 0 -4.89859e-18" size="0.003"/>
+    </body>
+    <body name="ring5" pos="0.16 0 0.5">
+      <freejoint/>
+      <geom name="ring5_0" type="capsule" fromto="0.02 0 0 0.0173205 0.01 0" size="0.003"/>
+      <geom name="ring5_1" type="capsule" fromto="0.0173205 0.01 0 0.01 0.0173205 0" size="0.003"/>
+      <geom name="ring5_2" type="capsule" fromto="0.01 0.0173205 0 1.22465e-18 0.02 0" size="0.003"/>
+      <geom name="ring5_3" type="capsule" fromto="1.22465e-18 0.02 0 -0.01 0.0173205 0" size="0.003"/>
+      <geom name="ring5_4" type="capsule" fromto="-0.01 0.0173205 0 -0.0173205 0.01 0" size="0.003"/>
+      <geom name="ring5_5" type="capsule" fromto="-0.0173205 0.01 0 -0.02 2.44929e-18 0" size="0.003"/>
+      <geom name="ring5_6" type="capsule" fromto="-0.02 2.44929e-18 0 -0.0173205 -0.01 0" size="0.003"/>
+      <geom name="ring5_7" type="capsule" fromto="-0.0173205 -0.01 0 -0.01 -0.0173205 0" size="0.003"/>
+      <geom name="ring5_8" type="capsule" fromto="-0.01 -0.0173205 0 -3.67394e-18 -0.02 0" size="0.003"/>
+      <geom name="ring5_9" type="capsule" fromto="-3.67394e-18 -0.02 0 0.01 -0.0173205 0" size="0.003"/>
+      <geom name="ring5_10" type="capsule" fromto="0.01 -0.0173205 0 0.0173205 -0.01 0" size="0.003"/>
+      <geom name="ring5_11" type="capsule" fromto="0.0173205 -0.01 0 0.02 -4.89859e-18 0" size="0.003"/>
+    </body>
+    <body name="ring6" pos="0.19 0 0.5">
+      <freejoint/>
+      <geom name="ring6_0" type="capsule" fromto="0.02 0 0 0.0173205 0 0.01" size="0.003"/>
+      <geom name="ring6_1" type="capsule" fromto="0.0173205 0 0.01 0.01 0 0.0173205" size="0.003"/>
+      <geom name="ring6_2" type="capsule" fromto="0.01 0 0.0173205 1.22465e-18 0 0.02" size="0.003"/>
+      <geom name="ring6_3" type="capsule" fromto="1.22465e-18 0 0.02 -0.01 0 0.0173205" size="0.003"/>
+      <geom name="ring6_4" type="capsule" fromto="-0.01 0 0.0173205 -0.0173205 0 0.01" size="0.003"/>
+      <geom name="ring6_5" type="capsule" fromto="-0.0173205 0 0.01 -0.02 0 2.44929e-18" size="0.003"/>
+      <geom name="ring6_6" type="capsule" fromto="-0.02 0 2.44929e-18 -0.0173205 0 -0.01" size="0.003"/>
+      <geom name="ring6_7" type="capsule" fromto="-0.0173205 0 -0.01 -0.01 0 -0.0173205" size="0.003"/>
+      <geom name="ring6_8" type="capsule" fromto="-0.01 0 -0.0173205 -3.67394e-18 0 -0.02" size="0.003"/>
+      <geom name="ring6_9" type="capsule" fromto="-3.67394e-18 0 -0.02 0.01 0 -0.0173205" size="0.003"/>
+      <geom name="ring6_10" type="capsule" fromto="0.01 0 -0.0173205 0.0173205 0 -0.01" size="0.003"/>
+      <geom name="ring6_11" type="capsule" fromto="0.0173205 0 -0.01 0.02 0 -4.89859e-18" size="0.003"/>
+    </body>
+    <body name="ring7" pos="0.22 0 0.5">
+      <freejoint/>
+      <geom name="ring7_0" type="capsule" fromto="0.02 0 0 0.0173205 0.01 0" size="0.003"/>
+      <geom name="ring7_1" type="capsule" fromto="0.0173205 0.01 0 0.01 0.0173205 0" size="0.003"/>
+      <geom name="ring7_2" type="capsule" fromto="0.01 0.0173205 0 1.22465e-18 0.02 0" size="0.003"/>
+      <geom name="ring7_3" type="capsule" fromto="1.22465e-18 0.02 0 -0.01 0.0173205 0" size="0.003"/>
+      <geom name="ring7_4" type="capsule" fromto="-0.01 0.0173205 0 -0.0173205 0.01 0" size="0.003"/>
+      <geom name="ring7_5" type="capsule" fromto="-0.0173205 0.01 0 -0.02 2.44929e-18 0" size="0.003"/>
+      <geom name="ring7_6" type="capsule" fromto="-0.02 2.44929e-18 0 -0.0173205 -0.01 0" size="0.003"/>
+      <geom name="ring7_7" type="capsule" fromto="-0.0173205 -0.01 0 -0.01 -0.0173205 0" size="0.003"/>
+      <geom name="ring7_8" type="capsule" fromto="-0.01 -0.0173205 0 -3.67394e-18 -0.02 0" size="0.003"/>
+      <geom name="ring7_9" type="capsule" fromto="-3.67394e-18 -0.02 0 0.01 -0.0173205 0" size="0.003"/>
+      <geom name="ring7_10" type="capsule" fromto="0.01 -0.0173205 0 0.0173205 -0.01 0" size="0.003"/>
+      <geom name="ring7_11" type="capsule" fromto="0.0173205 -0.01 0 0.02 -4.89859e-18 0" size="0.003"/>
+    </body>
+    <body name="ring8" pos="0.25 0 0.5">
+      <freejoint/>
+      <geom name="ring8_0" type="capsule" fromto="0.02 0 0 0.0173205 0 0.01" size="0.003"/>
+      <geom name="ring8_1" type="capsule" fromto="0.0173205 0 0.01 0.01 0 0.0173205" size="0.003"/>
+      <geom name="ring8_2" type="capsule" fromto="0.01 0 0.0173205 1.22465e-18 0 0.02" size="0.003"/>
+      <geom name="ring8_3" type="capsule" fromto="1.22465e-18 0 0.02 -0.01 0 0.0173205" size="0.003"/>
+      <geom name="ring8_4" type="capsule" fromto="-0.01 0 0.0173205 -0.0173205 0 0.01" size="0.003"/>
+      <geom name="ring8_5" type="capsule" fromto="-0.0173205 0 0.01 -0.02 0 2.44929e-18" size="0.003"/>
+      <geom name="ring8_6" type="capsule" fromto="-0.02 0 2.44929e-18 -0.0173205 0 -0.01" size="0.003"/>
+      <geom name="ring8_7" type="capsule" fromto="-0.0173205 0 -0.01 -0.01 0 -0.0173205" size="0.003"/>
+      <geom name="ring8_8" type="capsule" fromto="-0.01 0 -0.0173205 -3.67394e-18 0 -0.02" size="0.003"/>
+      <geom name="ring8_9" type="capsule" fromto="-3.67394e-18 0 -0.02 0.01 0 -0.0173205" size="0.003"/>
+      <geom name="ring8_10" type="capsule" fromto="0.01 0 -0.0173205 0.0173205 0 -0.01" size="0.003"/>
+      <geom name="ring8_11" type="capsule" fromto="0.0173205 0 -0.01 0.02 0 -4.89859e-18" size="0.003"/>
+    </body>
+    <body name="ring9" pos="0.28 0 0.5">
+      <freejoint/>
+      <geom name="ring9_0" type="capsule" fromto="0.02 0 0 0.0173205 0.01 0" size="0.003"/>
+      <geom name="ring9_1" type="capsule" fromto="0.0173205 0.01 0 0.01 0.0173205 0" size="0.003"/>
+      <geom name="ring9_2" type="capsule" fromto="0.01 0.0173205 0 1.22465e-18 0.02 0" size="0.003"/>
+      <geom name="ring9_3" type="capsule" fromto="1.22465e-18 0.02 0 -0.01 0.0173205 0" size="0.003"/>
+      <geom name="ring9_4" type="capsule" fromto="-0.01 0.0173205 0 -0.0173205 0.01 0" size="0.003"/>
+      <geom name="ring9_5" type="capsule" fromto="-0.0173205 0.01 0 -0.02 2.44929e-18 0" size="0.003"/>
+      <geom name="ring9_6" type="capsule" fromto="-0.02 2.44929e-18 0 -0.0173205 -0.01 0" size="0.003"/>
+      <geom name="ring9_7" type="capsule" fromto="-0.0173205 -0.01 0 -0.01 -0.0173205 0" size="0.003"/>
+      <geom name="ring9_8" type="capsule" fromto="-0.01 -0.0173205 0 -3.67394e-18 -0.02 0" size="0.003"/>
+      <geom name="ring9_9" type="capsule" fromto="-3.67394e-18 -0.02 0 0.01 -0.0173205 0" size="0.003"/>
+      <geom name="ring9_10" type="capsule" fromto="0.01 -0.0173205 0 0.0173205 -0.01 0" size="0.003"/>
+      <geom name="ring9_11" type="capsule" fromto="0.0173205 -0.01 0 0.02 -4.89859e-18 0" size="0.003"/>
+    </body>
+    <body name="ring10" pos="0.31 0 0.5">
+      <freejoint/>
+      <geom name="ring10_0" type="capsule" fromto="0.02 0 0 0.0173205 0 0.01" size="0.003"/>
+      <geom name="ring10_1" type="capsule" fromto="0.0173205 0 0.01 0.01 0 0.0173205" size="0.003"/>
+      <geom name="ring10_2" type="capsule" fromto="0.01 0 0.0173205 1.22465e-18 0 0.02" size="0.003"/>
+      <geom name="ring10_3" type="capsule" fromto="1.22465e-18 0 0.02 -0.01 0 0.0173205" size="0.003"/>
+      <geom name="ring10_4" type="capsule" fromto="-0.01 0 0.0173205 -0.0173205 0 0.01" size="0.003"/>
+      <geom name="ring10_5" type="capsule" fromto="-0.0173205 0 0.01 -0.02 0 2.44929e-18" size="0.003"/>
+      <geom name="ring10_6" type="capsule" fromto="-0.02 0 2.44929e-18 -0.0173205 0 -0.01" size="0.003"/>
+      <geom name="ring10_7" type="capsule" fromto="-0.0173205 0 -0.01 -0.01 0 -0.0173205" size="0.003"/>
+      <geom name="ring10_8" type="capsule" fromto="-0.01 0 -0.0173205 -3.67394e-18 0 -0.02" size="0.003"/>
+      <geom name="ring10_9" type="capsule" fromto="-3.67394e-18 0 -0.02 0.01 0 -0.0173205" size="0.003"/>
+      <geom name="ring10_10" type="capsule" fromto="0.01 0 -0.0173205 0.0173205 0 -0.01" size="0.003"/>
+      <geom name="ring10_11" type="capsule" fromto="0.0173205 0 -0.01 0.02 0 -4.89859e-18" size="0.003"/>
+    </body>
+    <body name="ring11" pos="0.34 0 0.5">
+      <freejoint/>
+      <geom name="ring11_0" type="capsule" fromto="0.02 0 0 0.0173205 0.01 0" size="0.003"/>
+      <geom name="ring11_1" type="capsule" fromto="0.0173205 0.01 0 0.01 0.0173205 0" size="0.003"/>
+      <geom name="ring11_2" type="capsule" fromto="0.01 0.0173205 0 1.22465e-18 0.02 0" size="0.003"/>
+      <geom name="ring11_3" type="capsule" fromto="1.22465e-18 0.02 0 -0.01 0.0173205 0" size="0.003"/>
+      <geom name="ring11_4" type="capsule" fromto="-0.01 0.0173205 0 -0.0173205 0.01 0" size="0.003"/>
+      <geom name="ring11_5" type="capsule" fromto="-0.0173205 0.01 0 -0.02 2.44929e-18 0" size="0.003"/>
+      <geom name="ring11_6" type="capsule" fromto="-0.02 2.44929e-18 0 -0.0173205 -0.01 0" size="0.003"/>
+      <geom name="ring11_7" type="capsule" fromto="-0.0173205 -0.01 0 -0.01 -0.0173205 0" size="0.003"/>
+      <geom name="ring11_8" type="capsule" fromto="-0.01 -0.0173205 0 -3.67394e-18 -0.02 0" size="0.003"/>
+      <geom name="ring11_9" type="capsule" fromto="-3.67394e-18 -0.02 0 0.01 -0.0173205 0" size="0.003"/>
+      <geom name="ring11_10" type="capsule" fromto="0.01 -0.0173205 0 0.0173205 -0.01 0" size="0.003"/>
+      <geom name="ring11_11" type="capsule" fromto="0.0173205 -0.01 0 0.02 -4.89859e-18 0" size="0.003"/>
+    </body>
+    <body name="ring12" pos="0.37 0 0.5">
+      <freejoint/>
+      <geom name="ring12_0" type="capsule" fromto="0.02 0 0 0.0173205 0 0.01" size="0.003"/>
+      <geom name="ring12_1" type="capsule" fromto="0.0173205 0 0.01 0.01 0 0.0173205" size="0.003"/>
+      <geom name="ring12_2" type="capsule" fromto="0.01 0 0.0173205 1.22465e-18 0 0.02" size="0.003"/>
+      <geom name="ring12_3" type="capsule" fromto="1.22465e-18 0 0.02 -0.01 0 0.0173205" size="0.003"/>
+      <geom name="ring12_4" type="capsule" fromto="-0.01 0 0.0173205 -0.0173205 0 0.01" size="0.003"/>
+      <geom name="ring12_5" type="capsule" fromto="-0.0173205 0 0.01 -0.02 0 2.44929e-18" size="0.003"/>
+      <geom name="ring12_6" type="capsule" fromto="-0.02 0 2.44929e-18 -0.0173205 0 -0.01" size="0.003"/>
+      <geom name="ring12_7" type="capsule" fromto="-0.0173205 0 -0.01 -0.01 0 -0.0173205" size="0.003"/>
+      <geom name="ring12_8" type="capsule" fromto="-0.01 0 -0.0173205 -3.67394e-18 0 -0.02" size="0.003"/>
+      <geom name="ring12_9" type="capsule" fromto="-3.67394e-18 0 -0.02 0.01 0 -0.0173205" size="0.003"/>
+      <geom name="ring12_10" type="capsule" fromto="0.01 0 -0.0173205 0.0173205 0 -0.01" size="0.003"/>
+      <geom name="ring12_11" type="capsule" fromto="0.0173205 0 -0.01 0.02 0 -4.89859e-18" size="0.003"/>
+    </body>
+    <body name="ring13" pos="0.4 0 0.5">
+      <freejoint/>
+      <geom name="ring13_0" type="capsule" fromto="0.02 0 0 0.0173205 0.01 0" size="0.003"/>
+      <geom name="ring13_1" type="capsule" fromto="0.0173205 0.01 0 0.01 0.0173205 0" size="0.003"/>
+      <geom name="ring13_2" type="capsule" fromto="0.01 0.0173205 0 1.22465e-18 0.02 0" size="0.003"/>
+      <geom name="ring13_3" type="capsule" fromto="1.22465e-18 0.02 0 -0.01 0.0173205 0" size="0.003"/>
+      <geom name="ring13_4" type="capsule" fromto="-0.01 0.0173205 0 -0.0173205 0.01 0" size="0.003"/>
+      <geom name="ring13_5" type="capsule" fromto="-0.0173205 0.01 0 -0.02 2.44929e-18 0" size="0.003"/>
+      <geom name="ring13_6" type="capsule" fromto="-0.02 2.44929e-18 0 -0.0173205 -0.01 0" size="0.003"/>
+      <geom name="ring13_7" type="capsule" fromto="-0.0173205 -0.01 0 -0.01 -0.0173205 0" size="0.003"/>
+      <geom name="ring13_8" type="capsule" fromto="-0.01 -0.0173205 0 -3.67394e-18 -0.02 0" size="0.003"/>
+      <geom name="ring13_9" type="capsule" fromto="-3.67394e-18 -0.02 0 0.01 -0.0173205 0" size="0.003"/>
+      <geom name="ring13_10" type="capsule" fromto="0.01 -0.0173205 0 0.0173205 -0.01 0" size="0.003"/>
+      <geom name="ring13_11" type="capsule" fromto="0.0173205 -0.01 0 0.02 -4.89859e-18 0" size="0.003"/>
+    </body>
+    <body name="ring14" pos="0.43 0 0.5">
+      <freejoint/>
+      <geom name="ring14_0" type="capsule" fromto="0.02 0 0 0.0173205 0 0.01" size="0.003"/>
+      <geom name="ring14_1" type="capsule" fromto="0.0173205 0 0.01 0.01 0 0.0173205" size="0.003"/>
+      <geom name="ring14_2" type="capsule" fromto="0.01 0 0.0173205 1.22465e-18 0 0.02" size="0.003"/>
+      <geom name="ring14_3" type="capsule" fromto="1.22465e-18 0 0.02 -0.01 0 0.0173205" size="0.003"/>
+      <geom name="ring14_4" type="capsule" fromto="-0.01 0 0.0173205 -0.0173205 0 0.01" size="0.003"/>
+      <geom name="ring14_5" type="capsule" fromto="-0.0173205 0 0.01 -0.02 0 2.44929e-18" size="0.003"/>
+      <geom name="ring14_6" type="capsule" fromto="-0.02 0 2.44929e-18 -0.0173205 0 -0.01" size="0.003"/>
+      <geom name="ring14_7" type="capsule" fromto="-0.0173205 0 -0.01 -0.01 0 -0.0173205" size="0.003"/>
+      <geom name="ring14_8" type="capsule" fromto="-0.01 0 -0.0173205 -3.67394e-18 0 -0.02" size="0.003"/>
+      <geom name="ring14_9" type="capsule" fromto="-3.67394e-18 0 -0.02 0.01 0 -0.0173205" size="0.003"/>
+      <geom name="ring14_10" type="capsule" fromto="0.01 0 -0.0173205 0.0173205 0 -0.01" size="0.003"/>
+      <geom name="ring14_11" type="capsule" fromto="0.0173205 0 -0.01 0.02 0 -4.89859e-18" size="0.003"/>
+    </body>
+    <body name="ring15" pos="0.46 0 0.5">
+      <freejoint/>
+      <geom name="ring15_0" type="capsule" fromto="0.02 0 0 0.0173205 0.01 0" size="0.003"/>
+      <geom name="ring15_1" type="capsule" fromto="0.0173205 0.01 0 0.01 0.0173205 0" size="0.003"/>
+      <geom name="ring15_2" type="capsule" fromto="0.01 0.0173205 0 1.22465e-18 0.02 0" size="0.003"/>
+      <geom name="ring15_3" type="capsule" fromto="1.22465e-18 0.02 0 -0.01 0.0173205 0" size="0.003"/>
+      <geom name="ring15_4" type="capsule" fromto="-0.01 0.0173205 0 -0.0173205 0.01 0" size="0.003"/>
+      <geom name="ring15_5" type="capsule" fromto="-0.0173205 0.01 0 -0.02 2.44929e-18 0" size="0.003"/>
+      <geom name="ring15_6" type="capsule" fromto="-0.02 2.44929e-18 0 -0.0173205 -0.01 0" size="0.003"/>
+      <geom name="ring15_7" type="capsule" fromto="-0.0173205 -0.01 0 -0.01 -0.0173205 0" size="0.003"/>
+      <geom name="ring15_8" type="capsule" fromto="-0.01 -0.0173205 0 -3.67394e-18 -0.02 0" size="0.003"/>
+      <geom name="ring15_9" type="capsule" fromto="-3.67394e-18 -0.02 0 0.01 -0.0173205 0" size="0.003"/>
+      <geom name="ring15_10" type="capsule" fromto="0.01 -0.0173205 0 0.0173205 -0.01 0" size="0.003"/>
+      <geom name="ring15_11" type="capsule" fromto="0.0173205 -0.01 0 0.02 -4.89859e-18 0" size="0.003"/>
+    </body>
+    <body name="ring16" pos="0.49 0 0.5">
+      <freejoint/>
+      <geom name="ring16_0" type="capsule" fromto="0.02 0 0 0.0173205 0 0.01" size="0.003"/>
+      <geom name="ring16_1" type="capsule" fromto="0.0173205 0 0.01 0.01 0 0.0173205" size="0.003"/>
+      <geom name="ring16_2" type="capsule" fromto="0.01 0 0.0173205 1.22465e-18 0 0.02" size="0.003"/>
+      <geom name="ring16_3" type="capsule" fromto="1.22465e-18 0 0.02 -0.01 0 0.0173205" size="0.003"/>
+      <geom name="ring16_4" type="capsule" fromto="-0.01 0 0.0173205 -0.0173205 0 0.01" size="0.003"/>
+      <geom name="ring16_5" type="capsule" fromto="-0.0173205 0 0.01 -0.02 0 2.44929e-18" size="0.003"/>
+      <geom name="ring16_6" type="capsule" fromto="-0.02 0 2.44929e-18 -0.0173205 0 -0.01" size="0.003"/>
+      <geom name="ring16_7" type="capsule" fromto="-0.0173205 0 -0.01 -0.01 0 -0.0173205" size="0.003"/>
+      <geom name="ring16_8" type="capsule" fromto="-0.01 0 -0.0173205 -3.67394e-18 0 -0.02" size="0.003"/>
+      <geom name="ring16_9" type="capsule" fromto="-3.67394e-18 0 -0.02 0.01 0 -0.0173205" size="0.003"/>
+      <geom name="ring16_10" type="capsule" fromto="0.01 0 -0.0173205 0.0173205 0 -0.01" size="0.003"/>
+      <geom name="ring16_11" type="capsule" fromto="0.0173205 0 -0.01 0.02 0 -4.89859e-18" size="0.003"/>
+    </body>
+    <body name="ring17" pos="0.52 0 0.5">
+      <freejoint/>
+      <geom name="ring17_0" type="capsule" fromto="0.02 0 0 0.0173205 0.01 0" size="0.003"/>
+      <geom name="ring17_1" type="capsule" fromto="0.0173205 0.01 0 0.01 0.0173205 0" size="0.003"/>
+      <geom name="ring17_2" type="capsule" fromto="0.01 0.0173205 0 1.22465e-18 0.02 0" size="0.003"/>
+      <geom name="ring17_3" type="capsule" fromto="1.22465e-18 0.02 0 -0.01 0.0173205 0" size="0.003"/>
+      <geom name="ring17_4" type="capsule" fromto="-0.01 0.0173205 0 -0.0173205 0.01 0" size="0.003"/>
+      <geom name="ring17_5" type="capsule" fromto="-0.0173205 0.01 0 -0.02 2.44929e-18 0" size="0.003"/>
+      <geom name="ring17_6" type="capsule" fromto="-0.02 2.44929e-18 0 -0.0173205 -0.01 0" size="0.003"/>
+      <geom name="ring17_7" type="capsule" fromto="-0.0173205 -0.01 0 -0.01 -0.0173205 0" size="0.003"/>
+      <geom name="ring17_8" type="capsule" fromto="-0.01 -0.0173205 0 -3.67394e-18 -0.02 0" size="0.003"/>
+      <geom name="ring17_9" type="capsule" fromto="-3.67394e-18 -0.02 0 0.01 -0.0173205 0" size="0.003"/>
+      <geom name="ring17_10" type="capsule" fromto="0.01 -0.0173205 0 0.0173205 -0.01 0" size="0.003"/>
+      <geom name="ring17_11" type="capsule" fromto="0.0173205 -0.01 0 0.02 -4.89859e-18 0" size="0.003"/>
+    </body>
+    <body name="ring18" pos="0.55 0 0.5">
+      <freejoint/>
+      <geom name="ring18_0" type="capsule" fromto="0.02 0 0 0.0173205 0 0.01" size="0.003"/>
+      <geom name="ring18_1" type="capsule" fromto="0.0173205 0 0.01 0.01 0 0.0173205" size="0.003"/>
+      <geom name="ring18_2" type="capsule" fromto="0.01 0 0.0173205 1.22465e-18 0 0.02" size="0.003"/>
+      <geom name="ring18_3" type="capsule" fromto="1.22465e-18 0 0.02 -0.01 0 0.0173205" size="0.003"/>
+      <geom name="ring18_4" type="capsule" fromto="-0.01 0 0.0173205 -0.0173205 0 0.01" size="0.003"/>
+      <geom name="ring18_5" type="capsule" fromto="-0.0173205 0 0.01 -0.02 0 2.44929e-18" size="0.003"/>
+      <geom name="ring18_6" type="capsule" fromto="-0.02 0 2.44929e-18 -0.0173205 0 -0.01" size="0.003"/>
+      <geom name="ring18_7" type="capsule" fromto="-0.0173205 0 -0.01 -0.01 0 -0.0173205" size="0.003"/>
+      <geom name="ring18_8" type="capsule" fromto="-0.01 0 -0.0173205 -3.67394e-18 0 -0.02" size="0.003"/>
+      <geom name="ring18_9" type="capsule" fromto="-3.67394e-18 0 -0.02 0.01 0 -0.0173205" size="0.003"/>
+      <geom name="ring18_10" type="capsule" fromto="0.01 0 -0.0173205 0.0173205 0 -0.01" size="0.003"/>
+      <geom name="ring18_11" type="capsule" fromto="0.0173205 0 -0.01 0.02 0 -4.89859e-18" size="0.003"/>
+    </body>
+    <body name="ring19" pos="0.58 0 0.5">
+      <freejoint/>
+      <geom name="ring19_0" type="capsule" fromto="0.02 0 0 0.0173205 0.01 0" size="0.003"/>
+      <geom name="ring19_1" type="capsule" fromto="0.0173205 0.01 0 0.01 0.0173205 0" size="0.003"/>
+      <geom name="ring19_2" type="capsule" fromto="0.01 0.0173205 0 1.22465e-18 0.02 0" size="0.003"/>
+      <geom name="ring19_3" type="capsule" fromto="1.22465e-18 0.02 0 -0.01 0.0173205 0" size="0.003"/>
+      <geom name="ring19_4" type="capsule" fromto="-0.01 0.0173205 0 -0.0173205 0.01 0" size="0.003"/>
+      <geom name="ring19_5" type="capsule" fromto="-0.0173205 0.01 0 -0.02 2.44929e-18 0" size="0.003"/>
+      <geom name="ring19_6" type="capsule" fromto="-0.02 2.44929e-18 0 -0.0173205 -0.01 0" size="0.003"/>
+      <geom name="ring19_7" type="capsule" fromto="-0.0173205 -0.01 0 -0.01 -0.0173205 0" size="0.003"/>
+      <geom name="ring19_8" type="capsule" fromto="-0.01 -0.0173205 0 -3.67394e-18 -0.02 0" size="0.003"/>
+      <geom name="ring19_9" type="capsule" fromto="-3.67394e-18 -0.02 0 0.01 -0.0173205 0" size="0.003"/>
+      <geom name="ring19_10" type="capsule" fromto="0.01 -0.0173205 0 0.0173205 -0.01 0" size="0.003"/>
+      <geom name="ring19_11" type="capsule" fromto="0.0173205 -0.01 0 0.02 -4.89859e-18 0" size="0.003"/>
+    </body>
+    <body name="ring20" pos="0.61 0 0.5">
+      <freejoint/>
+      <geom name="ring20_0" type="capsule" fromto="0.02 0 0 0.0173205 0 0.01" size="0.003"/>
+      <geom name="ring20_1" type="capsule" fromto="0.0173205 0 0.01 0.01 0 0.0173205" size="0.003"/>
+      <geom name="ring20_2" type="capsule" fromto="0.01 0 0.0173205 1.22465e-18 0 0.02" size="0.003"/>
+      <geom name="ring20_3" type="capsule" fromto="1.22465e-18 0 0.02 -0.01 0 0.0173205" size="0.003"/>
+      <geom name="ring20_4" type="capsule" fromto="-0.01 0 0.0173205 -0.0173205 0 0.01" size="0.003"/>
+      <geom name="ring20_5" type="capsule" fromto="-0.0173205 0 0.01 -0.02 0 2.44929e-18" size="0.003"/>
+      <geom name="ring20_6" type="capsule" fromto="-0.02 0 2.44929e-18 -0.0173205 0 -0.01" size="0.003"/>
+      <geom name="ring20_7" type="capsule" fromto="-0.0173205 0 -0.01 -0.01 0 -0.0173205" size="0.003"/>
+      <geom name="ring20_8" type="capsule" fromto="-0.01 0 -0.0173205 -3.67394e-18 0 -0.02" size="0.003"/>
+      <geom name="ring20_9" type="capsule" fromto="-3.67394e-18 0 -0.02 0.01 0 -0.0173205" size="0.003"/>
+      <geom name="ring20_10" type="capsule" fromto="0.01 0 -0.0173205 0.0173205 0 -0.01" size="0.003"/>
+      <geom name="ring20_11" type="capsule" fromto="0.0173205 0 -0.01 0.02 0 -4.89859e-18" size="0.003"/>
+    </body>
+    <body name="ring21" pos="0.64 0 0.5">
+      <freejoint/>
+      <geom name="ring21_0" type="capsule" fromto="0.02 0 0 0.0173205 0.01 0" size="0.003"/>
+      <geom name="ring21_1" type="capsule" fromto="0.0173205 0.01 0 0.01 0.0173205 0" size="0.003"/>
+      <geom name="ring21_2" type="capsule" fromto="0.01 0.0173205 0 1.22465e-18 0.02 0" size="0.003"/>
+      <geom name="ring21_3" type="capsule" fromto="1.22465e-18 0.02 0 -0.01 0.0173205 0" size="0.003"/>
+      <geom name="ring21_4" type="capsule" fromto="-0.01 0.0173205 0 -0.0173205 0.01 0" size="0.003"/>
+      <geom name="ring21_5" type="capsule" fromto="-0.0173205 0.01 0 -0.02 2.44929e-18 0" size="0.003"/>
+      <geom name="ring21_6" type="capsule" fromto="-0.02 2.44929e-18 0 -0.0173205 -0.01 0" size="0.003"/>
+      <geom name="ring21_7" type="capsule" fromto="-0.0173205 -0.01 0 -0.01 -0.0173205 0" size="0.003"/>
+      <geom name="ring21_8" type="capsule" fromto="-0.01 -0.0173205 0 -3.67394e-18 -0.02 0" size="0.003"/>
+      <geom name="ring21_9" type="capsule" fromto="-3.67394e-18 -0.02 0 0.01 -0.0173205 0" size="0.003"/>
+      <geom name="ring21_10" type="capsule" fromto="0.01 -0.0173205 0 0.0173205 -0.01 0" size="0.003"/>
+      <geom name="ring21_11" type="capsule" fromto="0.0173205 -0.01 0 0.02 -4.89859e-18 0" size="0.003"/>
+    </body>
+    <body name="ring22" pos="0.67 0 0.5">
+      <freejoint/>
+      <geom name="ring22_0" type="capsule" fromto="0.02 0 0 0.0173205 0 0.01" size="0.003"/>
+      <geom name="ring22_1" type="capsule" fromto="0.0173205 0 0.01 0.01 0 0.0173205" size="0.003"/>
+      <geom name="ring22_2" type="capsule" fromto="0.01 0 0.0173205 1.22465e-18 0 0.02" size="0.003"/>
+      <geom name="ring22_3" type="capsule" fromto="1.22465e-18 0 0.02 -0.01 0 0.0173205" size="0.003"/>
+      <geom name="ring22_4" type="capsule" fromto="-0.01 0 0.0173205 -0.0173205 0 0.01" size="0.003"/>
+      <geom name="ring22_5" type="capsule" fromto="-0.0173205 0 0.01 -0.02 0 2.44929e-18" size="0.003"/>
+      <geom name="ring22_6" type="capsule" fromto="-0.02 0 2.44929e-18 -0.0173205 0 -0.01" size="0.003"/>
+      <geom name="ring22_7" type="capsule" fromto="-0.0173205 0 -0.01 -0.01 0 -0.0173205" size="0.003"/>
+      <geom name="ring22_8" type="capsule" fromto="-0.01 0 -0.0173205 -3.67394e-18 0 -0.02" size="0.003"/>
+      <geom name="ring22_9" type="capsule" fromto="-3.67394e-18 0 -0.02 0.01 0 -0.0173205" size="0.003"/>
+      <geom name="ring22_10" type="capsule" fromto="0.01 0 -0.0173205 0.0173205 0 -0.01" size="0.003"/>
+      <geom name="ring22_11" type="capsule" fromto="0.0173205 0 -0.01 0.02 0 -4.89859e-18" size="0.003"/>
+    </body>
+    <body name="ring23" pos="0.7 0 0.5">
+      <freejoint/>
+      <geom name="ring23_0" type="capsule" fromto="0.02 0 0 0.0173205 0.01 0" size="0.003"/>
+      <geom name="ring23_1" type="capsule" fromto="0.0173205 0.01 0 0.01 0.0173205 0" size="0.003"/>
+      <geom name="ring23_2" type="capsule" fromto="0.01 0.0173205 0 1.22465e-18 0.02 0" size="0.003"/>
+      <geom name="ring23_3" type="capsule" fromto="1.22465e-18 0.02 0 -0.01 0.0173205 0" size="0.003"/>
+      <geom name="ring23_4" type="capsule" fromto="-0.01 0.0173205 0 -0.0173205 0.01 0" size="0.003"/>
+      <geom name="ring23_5" type="capsule" fromto="-0.0173205 0.01 0 -0.02 2.44929e-18 0" size="0.003"/>
+      <geom name="ring23_6" type="capsule" fromto="-0.02 2.44929e-18 0 -0.0173205 -0.01 0" size="0.003"/>
+      <geom name="ring23_7" type="capsule" fromto="-0.0173205 -0.01 0 -0.01 -0.0173205 0" size="0.003"/>
+      <geom name="ring23_8" type="capsule" fromto="-0.01 -0.0173205 0 -3.67394e-18 -0.02 0" size="0.003"/>
+      <geom name="ring23_9" type="capsule" fromto="-3.67394e-18 -0.02 0 0.01 -0.0173205 0" size="0.003"/>
+      <geom name="ring23_10" type="capsule" fromto="0.01 -0.0173205 0 0.0173205 -0.01 0" size="0.003"/>
+      <geom name="ring23_11" type="capsule" fromto="0.0173205 -0.01 0 0.02 -4.89859e-18 0" size="0.003"/>
+    </body>
+  </worldbody>
+  <actuator>
+    <position name="lift" joint="lift" kp="20000" dampratio="1"/>
+  </actuator>
+  <keyframe>
+    <key name="start" time="0" ctrl="0"/>
+    <key time="1.6" ctrl="0"/>
+    <key time="2.6" ctrl="0.8"/>
+  </keyframe>
+</mujoco>

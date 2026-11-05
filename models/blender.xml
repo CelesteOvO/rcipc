@@ -1,0 +1,123 @@
+<!--
+  搅拌机：封闭的罐子（内半径 0.3 m、高 0.35 m、墙和盖子 4 mm 厚），4 叶转子（叶片 3 mm 厚）0.2 s 里加速到 100 rad/s，20 个半径 12 mm 的球从上面掉下去
+  由 tools/make_stress.py 生成（命令：blender），笔记 notes/14_visible.md。
+-->
+
+<mujoco model="blender">
+  <compiler angle="radian"/>
+  <option gravity="0 0 -9.81" timestep="0.002"/>
+  <default>
+    <geom friction="0.3 0.005 0.0001"/>
+  </default>
+  <worldbody>
+    <geom name="floor" type="plane" size="1 1 0.1"/>
+    <geom name="wall0" type="box" pos="0.302 0 0.175" euler="0 0 -1.5708" size="0.0834566 0.002 0.175"/>
+    <geom name="wall1" type="box" pos="0.26154 0.151 0.175" euler="0 0 -1.0472" size="0.0834566 0.002 0.175"/>
+    <geom name="wall2" type="box" pos="0.151 0.26154 0.175" euler="0 0 -0.523599" size="0.0834566 0.002 0.175"/>
+    <geom name="wall3" type="box" pos="1.84922e-17 0.302 0.175" euler="0 0 0" size="0.0834566 0.002 0.175"/>
+    <geom name="wall4" type="box" pos="-0.151 0.26154 0.175" euler="0 0 0.523599" size="0.0834566 0.002 0.175"/>
+    <geom name="wall5" type="box" pos="-0.26154 0.151 0.175" euler="0 0 1.0472" size="0.0834566 0.002 0.175"/>
+    <geom name="wall6" type="box" pos="-0.302 3.69843e-17 0.175" euler="0 0 1.5708" size="0.0834566 0.002 0.175"/>
+    <geom name="wall7" type="box" pos="-0.26154 -0.151 0.175" euler="0 0 2.0944" size="0.0834566 0.002 0.175"/>
+    <geom name="wall8" type="box" pos="-0.151 -0.26154 0.175" euler="0 0 2.61799" size="0.0834566 0.002 0.175"/>
+    <geom name="wall9" type="box" pos="-5.54765e-17 -0.302 0.175" euler="0 0 3.14159" size="0.0834566 0.002 0.175"/>
+    <geom name="wall10" type="box" pos="0.151 -0.26154 0.175" euler="0 0 3.66519" size="0.0834566 0.002 0.175"/>
+    <geom name="wall11" type="box" pos="0.26154 -0.151 0.175" euler="0 0 4.18879" size="0.0834566 0.002 0.175"/>
+    <geom name="lid" type="box" pos="0 0 0.352" size="0.33 0.33 0.002"/>
+    <body name="rotor" pos="0 0 0.036">
+      <joint name="spin" type="hinge" axis="0 0 1"/>
+      <geom name="hub" type="cylinder" size="0.03 0.03" density="7800"/>
+      <geom name="blade0" type="box" pos="0.145 0 0" euler="0 0 0" size="0.115 0.0015 0.03" density="7800"/>
+      <geom name="blade1" type="box" pos="8.87869e-18 0.145 0" euler="0 0 1.5708" size="0.115 0.0015 0.03" density="7800"/>
+      <geom name="blade2" type="box" pos="-0.145 1.77574e-17 0" euler="0 0 3.14159" size="0.115 0.0015 0.03" density="7800"/>
+      <geom name="blade3" type="box" pos="-2.66361e-17 -0.145 0" euler="0 0 4.71239" size="0.115 0.0015 0.03" density="7800"/>
+    </body>
+    <body name="ball0" pos="0.149466 -0.0480834 0.148832">
+      <freejoint/>
+      <geom name="ball0" type="sphere" size="0.012" density="1100"/>
+    </body>
+    <body name="ball1" pos="-0.087605 0.214036 0.204665">
+      <freejoint/>
+      <geom name="ball1" type="sphere" size="0.012" density="1100"/>
+    </body>
+    <body name="ball2" pos="-0.177337 0.113798 0.229919">
+      <freejoint/>
+      <geom name="ball2" type="sphere" size="0.012" density="1100"/>
+    </body>
+    <body name="ball3" pos="0.00164843 -0.0746669 0.227629">
+      <freejoint/>
+      <geom name="ball3" type="sphere" size="0.012" density="1100"/>
+    </body>
+    <body name="ball4" pos="0.0301415 -0.122398 0.180639">
+      <freejoint/>
+      <geom name="ball4" type="sphere" size="0.012" density="1100"/>
+    </body>
+    <body name="ball5" pos="0.097938 0.10975 0.200623">
+      <freejoint/>
+      <geom name="ball5" type="sphere" size="0.012" density="1100"/>
+    </body>
+    <body name="ball6" pos="-0.00808354 0.104275 0.270073">
+      <freejoint/>
+      <geom name="ball6" type="sphere" size="0.012" density="1100"/>
+    </body>
+    <body name="ball7" pos="-0.11716 0.0109331 0.316147">
+      <freejoint/>
+      <geom name="ball7" type="sphere" size="0.012" density="1100"/>
+    </body>
+    <body name="ball8" pos="-0.0368289 -0.230559 0.228245">
+      <freejoint/>
+      <geom name="ball8" type="sphere" size="0.012" density="1100"/>
+    </body>
+    <body name="ball9" pos="0.0623246 0.0991029 0.313985">
+      <freejoint/>
+      <geom name="ball9" type="sphere" size="0.012" density="1100"/>
+    </body>
+    <body name="ball10" pos="0.117747 0.104952 0.244698">
+      <freejoint/>
+      <geom name="ball10" type="sphere" size="0.012" density="1100"/>
+    </body>
+    <body name="ball11" pos="-0.153214 -0.131697 0.30346">
+      <freejoint/>
+      <geom name="ball11" type="sphere" size="0.012" density="1100"/>
+    </body>
+    <body name="ball12" pos="-0.0754962 -0.0137093 0.211867">
+      <freejoint/>
+      <geom name="ball12" type="sphere" size="0.012" density="1100"/>
+    </body>
+    <body name="ball13" pos="-0.050856 -0.0625295 0.290527">
+      <freejoint/>
+      <geom name="ball13" type="sphere" size="0.012" density="1100"/>
+    </body>
+    <body name="ball14" pos="-0.010829 0.170456 0.287976">
+      <freejoint/>
+      <geom name="ball14" type="sphere" size="0.012" density="1100"/>
+    </body>
+    <body name="ball15" pos="-0.156248 -0.0107067 0.270606">
+      <freejoint/>
+      <geom name="ball15" type="sphere" size="0.012" density="1100"/>
+    </body>
+    <body name="ball16" pos="0.0403095 -0.0861861 0.256657">
+      <freejoint/>
+      <geom name="ball16" type="sphere" size="0.012" density="1100"/>
+    </body>
+    <body name="ball17" pos="0.073098 0.190247 0.280473">
+      <freejoint/>
+      <geom name="ball17" type="sphere" size="0.012" density="1100"/>
+    </body>
+    <body name="ball18" pos="0.0893573 0.0502659 0.291045">
+      <freejoint/>
+      <geom name="ball18" type="sphere" size="0.012" density="1100"/>
+    </body>
+    <body name="ball19" pos="0.154502 -0.151546 0.214382">
+      <freejoint/>
+      <geom name="ball19" type="sphere" size="0.012" density="1100"/>
+    </body>
+  </worldbody>
+  <actuator>
+    <velocity name="spin" joint="spin" kv="20"/>
+  </actuator>
+  <keyframe>
+    <key name="start" time="0" ctrl="0"/>
+    <key time="0.2" ctrl="100"/>
+  </keyframe>
+</mujoco>
