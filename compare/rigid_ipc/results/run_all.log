@@ -1,0 +1,52 @@
+running: D:\Project\rigid-ipc\build\Release\rigid_ipc_sim.exe --ngui D:\Project\rigid-ipc\fixtures\3D\mechanisms\gears\single-kinematic.json D:\Project\rcipc\compare\rigid_ipc\results\gears_single --loglevel info -f sim.json
+exit 0, wall 4.6 s (incl. start-up and writing sim.json)
+D:\Project\rcipc\compare\rigid_ipc\results\gears_single\sim.json: 1000 steps, 4 bodies, h 0.01, dhat 0.001, trajectory piecewise_linear, mu 0.0, time_stepper default, newton tol 0.01 (velocity)
+  ms/step: mean 4.5  median 3.0  max 116.3  total 4.5 s
+  newton/step: mean 1.05  max 4  (steps at >= 100: 0)
+  contacts/step: mean 1.2  max 30
+  min distance at step ends: 3.228e-04
+running: D:\Project\rigid-ipc\build\Release\rigid_ipc_sim.exe --ngui D:\Project\rigid-ipc\fixtures\3D\mechanisms\gears\single-kinematic.json D:\Project\rcipc\compare\rigid_ipc\results\gears_single --loglevel info -f sim_abs.json --patch {"newton_solver": {"velocity_conv_tol": 1e-6, "is_velocity_conv_tol_abs": true}}
+exit 0, wall 4.5 s (incl. start-up and writing sim.json)
+D:\Project\rcipc\compare\rigid_ipc\results\gears_single\sim_abs.json: 1000 steps, 4 bodies, h 0.01, dhat 0.001, trajectory piecewise_linear, mu 0.0, time_stepper default, newton tol 1e-06 (velocity)
+  ms/step: mean 4.3  median 3.0  max 109.6  total 4.3 s
+  newton/step: mean 1.04  max 3  (steps at >= 100: 0)
+  contacts/step: mean 1.2  max 29
+  min distance at step ends: 3.575e-04
+running: D:\Project\rcipc\build\Release\scene_demo.exe model=D:\Project\rcipc\compare\rigid_ipc\gears_single.xml T=10 h=0.01 dhat=0.001 mu=0 gpu=1 out=D:\Project\rcipc\compare\rigid_ipc\results\gears_single\rcipc_gpu.csv
+compare/rigid_ipc/gears_single.xml (gpu): 1000 steps
+  ms/step: mean 2.2  total 2.2 s
+  newton/step: mean 3.24  max 13  (hit the cap: 0)  PCG/step mean 3.9
+  min distance at step ends: 9.237e-06
+  log: compare/rigid_ipc/results/gears_single\rcipc_gpu.log
+running: D:\Project\rcipc\build\Release\scene_demo.exe model=D:\Project\rcipc\compare\rigid_ipc\gears_single.xml T=10 h=0.01 dhat=0.001 mu=0 gpu=0 out=D:\Project\rcipc\compare\rigid_ipc\results\gears_single\rcipc_cpu.csv
+compare/rigid_ipc/gears_single.xml (cpu): 1000 steps
+  ms/step: mean 72.7  total 72.7 s
+  newton/step: mean 3.21  max 13  (hit the cap: 0)  PCG/step mean 3.7
+  min distance at step ends: 9.237e-06
+  log: compare/rigid_ipc/results/gears_single\rcipc_cpu.log
+running: D:\Project\rigid-ipc\build\Release\rigid_ipc_sim.exe --ngui D:\Project\rigid-ipc\fixtures\3D\chain\10-links.json D:\Project\rcipc\compare\rigid_ipc\results\chain_10 --loglevel info -f sim.json
+exit 0, wall 4.6 s (incl. start-up and writing sim.json)
+D:\Project\rcipc\compare\rigid_ipc\results\chain_10\sim.json: 1000 steps, 10 bodies, h 0.01, dhat 0.001, trajectory piecewise_linear, mu 0.0, time_stepper default, newton tol 0.01 (velocity)
+  ms/step: mean 4.1  median 4.0  max 30.0  total 4.1 s
+  newton/step: mean 1.04  max 7  (steps at >= 100: 0)
+  contacts/step: mean 314.1  max 567
+  min distance at step ends: 9.310e-04
+running: D:\Project\rigid-ipc\build\Release\rigid_ipc_sim.exe --ngui D:\Project\rigid-ipc\fixtures\3D\chain\10-links.json D:\Project\rcipc\compare\rigid_ipc\results\chain_10 --loglevel info -f sim_abs.json --patch {"newton_solver": {"velocity_conv_tol": 1e-6, "is_velocity_conv_tol_abs": true}}
+exit 0, wall 4.7 s (incl. start-up and writing sim.json)
+D:\Project\rcipc\compare\rigid_ipc\results\chain_10\sim_abs.json: 1000 steps, 10 bodies, h 0.01, dhat 0.001, trajectory piecewise_linear, mu 0.0, time_stepper default, newton tol 1e-06 (velocity)
+  ms/step: mean 4.2  median 4.0  max 29.4  total 4.2 s
+  newton/step: mean 1.04  max 7  (steps at >= 100: 0)
+  contacts/step: mean 314.2  max 567
+  min distance at step ends: 8.581e-04
+running: D:\Project\rcipc\build\Release\scene_demo.exe model=D:\Project\rcipc\compare\rigid_ipc\chain_10.xml T=10 h=0.01 dhat=0.001 mu=0 gpu=1 out=D:\Project\rcipc\compare\rigid_ipc\results\chain_10\rcipc_gpu.csv
+compare/rigid_ipc/chain_10.xml (gpu): 1000 steps
+  ms/step: mean 5.3  total 5.3 s
+  newton/step: mean 7.12  max 50  (hit the cap: 3)  PCG/step mean 85.8
+  min distance at step ends: 1.502e-06
+  log: compare/rigid_ipc/results/chain_10\rcipc_gpu.log
+running: D:\Project\rcipc\build\Release\scene_demo.exe model=D:\Project\rcipc\compare\rigid_ipc\chain_10.xml T=10 h=0.01 dhat=0.001 mu=0 gpu=0 out=D:\Project\rcipc\compare\rigid_ipc\results\chain_10\rcipc_cpu.csv
+compare/rigid_ipc/chain_10.xml (cpu): 1000 steps
+  ms/step: mean 3561.2  total 3561.2 s
+  newton/step: mean 7.12  max 50  (hit the cap: 3)  PCG/step mean 85.8
+  min distance at step ends: 1.502e-06
+  log: compare/rigid_ipc/results/chain_10\rcipc_cpu.log

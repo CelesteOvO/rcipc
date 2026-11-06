@@ -1,0 +1,54 @@
+<!--
+  由 compare/rigid_ipc/import_rigid_ipc.py 从 Rigid-IPC 的 ../../../rigid-ipc/fixtures/3D/chain/10-links.json 生成，
+  scene_demo 参数：T=10 h=0.01 dhat=0.001 mu=0（笔记 notes/compare_rigid_ipc.md）。
+-->
+<mujoco model="10-links">
+  <compiler angle="radian" meshdir="D:/Project/rigid-ipc/meshes"/>
+  <option gravity="0 -9.81 0" timestep="0.01"/>
+  <default>
+    <geom friction="0 0 0"/>
+  </default>
+  <asset>
+    <mesh name="torus" file="torus.obj" scale="1 1 1" inertia="shell"/>
+    <mesh name="torus_1" file="torus.obj" scale="1 1 1"/>
+  </asset>
+  <worldbody>
+    <geom name="torus0" type="mesh" mesh="torus" pos="0 1.5 0" quat="1 0 0 0"/>
+    <body name="torus1" pos="0 0.95 0" quat="0.707106781 0 0.707106781 0">
+      <freejoint/>
+      <geom name="torus1" type="mesh" mesh="torus_1" density="1000"/>
+    </body>
+    <body name="torus2" pos="0 0.4 0" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="torus2" type="mesh" mesh="torus_1" density="1000"/>
+    </body>
+    <body name="torus3" pos="0 -0.15 0" quat="0.707106781 0 0.707106781 0">
+      <freejoint/>
+      <geom name="torus3" type="mesh" mesh="torus_1" density="1000"/>
+    </body>
+    <body name="torus4" pos="0 -0.7 0" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="torus4" type="mesh" mesh="torus_1" density="1000"/>
+    </body>
+    <body name="torus5" pos="0 -1.25 0" quat="0.707106781 0 0.707106781 0">
+      <freejoint/>
+      <geom name="torus5" type="mesh" mesh="torus_1" density="1000"/>
+    </body>
+    <body name="torus6" pos="0 -1.8 0" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="torus6" type="mesh" mesh="torus_1" density="1000"/>
+    </body>
+    <body name="torus7" pos="0 -2.35 0" quat="0.707106781 0 0.707106781 0">
+      <freejoint/>
+      <geom name="torus7" type="mesh" mesh="torus_1" density="1000"/>
+    </body>
+    <body name="torus8" pos="0 -2.9 0" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="torus8" type="mesh" mesh="torus_1" density="1000"/>
+    </body>
+    <body name="torus9" pos="0 -3.45 0" quat="0.707106781 0 0.707106781 0">
+      <freejoint/>
+      <geom name="torus9" type="mesh" mesh="torus_1" density="1000"/>
+    </body>
+  </worldbody>
+</mujoco>

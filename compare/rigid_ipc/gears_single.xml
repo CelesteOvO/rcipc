@@ -1,0 +1,30 @@
+<!--
+  由 compare/rigid_ipc/import_rigid_ipc.py 从 Rigid-IPC 的 ../../../rigid-ipc/fixtures/3D/mechanisms/gears/single-kinematic.json 生成，
+  scene_demo 参数：T=10 h=0.01 dhat=0.001 mu=0（笔记 notes/compare_rigid_ipc.md）。
+-->
+<mujoco model="single-kinematic">
+  <compiler angle="radian" meshdir="D:/Project/rigid-ipc/meshes"/>
+  <option gravity="0 -9.8 0" timestep="0.01"/>
+  <default>
+    <geom friction="0 0 0"/>
+  </default>
+  <asset>
+    <mesh name="gear" file="gears/gear.obj" scale="1 1 1"/>
+  </asset>
+  <worldbody>
+    <body name="gear0" pos="0 0 0" quat="0.707106781 0.707106781 0 0">
+      <joint name="gear0_j" type="hinge" axis="0 1 6.123234e-17" pos="8.91668777e-10 4.80599714e-18 3.9291939e-10"/>
+      <geom name="gear0" type="mesh" mesh="gear" density="1"/>
+    </body>
+    <body name="gear2" pos="2.05 0 0" quat="0.701057385 0.701057385 0.0922959556 0.0922959556">
+      <joint name="gear2_j" type="hinge" axis="0 1 6.123234e-17" pos="8.91668777e-10 4.80599714e-18 3.9291939e-10"/>
+      <geom name="gear2" type="mesh" mesh="gear" density="1"/>
+    </body>
+  </worldbody>
+  <actuator>
+    <velocity name="gear0_drive" joint="gear0_j" kv="10000"/>
+  </actuator>
+  <keyframe>
+    <key name="drive" time="0" ctrl="-1.74532925"/>
+  </keyframe>
+</mujoco>

@@ -1,0 +1,18 @@
+{
+ "steps": 1000,
+ "total_s": 72.7,
+ "ms_mean": 72.7,
+ "min_dist": 9.237e-06,
+ "newton_max": 13,
+ "newton_mean": 3.21,
+ "newton_capped": 0,
+ "pcg_mean": 3.74,
+ "solver": "cpu",
+ "args": {
+  "T": 10.0,
+  "h": 0.01,
+  "dhat": 0.001,
+  "mu": 0.0,
+  "extra": []
+ }
+}

@@ -1,0 +1,6 @@
+# Rigid-IPC 的原始输出太大（sim.json 带每步每个刚体的状态，链上 6 MB；日志 1 MB），不进仓库，按笔记第 4 节重跑
+sim*.json
+*.glb
+log-*/
+run.log
+run_abs.log

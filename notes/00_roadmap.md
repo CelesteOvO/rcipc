@@ -80,7 +80,7 @@ RC-IPC：在关节坐标里做 IPC。未知量是 MuJoCo 的关节坐标 $q$，�
 | **已完成**（阶段 12）：关节阻尼、armature；为 G1 补了关节干摩擦（frictionloss）和 actuatorfrcrange（12_drives.md 第 5 节） | 手和机器人模型 | 机器人模型 |
 | 闭环：等式约束加增广拉格朗日 | `EQ_AL` | 自行车链。和“关节精确”的说法冲突，要么改成精确的闭环约束，要么只做树 |
 | 场景（**部分完成**，[13_mechanisms.md](13_mechanisms.md)：齿轮组、夹爪、24 只 Go2 堆、3 只 Allegro 手抓住再翻过来、6 台 G1 多米诺（凸包碰撞体，和 MuJoCo 并排对比）；[14_visible.md](14_visible.md)：锁链和搅拌机，穿透会改变拓扑的场景，和 MuJoCo 的默认、最硬的接触比；[15_drift.md](15_drift.md)：摆锤越过矮墙，轻链吊重物时 libuipc 的关节漂移和刚体变形看得见；还差更多的手、闭环的几个） | 自行车链、齿轮、活塞、Allegro 手 3–64 只、G1 和 Go2 堆、机械臂、锁链 32×20、履带车 | 第 1 节的消融、和 libuipc、Rigid IPC 的对比 |
-| 基线脚本 | MuJoCo、AVBD、Rigid IPC、ABD-IPC | 和无保证方法、CPU 方法的对比 |
+| 基线脚本（**部分完成**，[compare_rigid_ipc.md](compare_rigid_ipc.md)：Rigid-IPC 的齿轮、圆环链两个场景导到我们这边，第一张表；链上我们的 Newton 多 6 倍，症结是 $kappa$ 和静止间隙） | MuJoCo、AVBD、Rigid IPC、ABD-IPC | 和无保证方法、CPU 方法的对比 |
 | 接入 `mj_step`、闭环控制 | `rcipc_mj/`、`closedloop/`（强化学习策略驱动 Go1） | 机器人应用 |
 
 另外有一项旧实现也没有：刚体对的宽相是 $O(n_\text{body}^2)$ 的暴力枚举（`k_body_pairs`，660 个刚体时 32 µs/次）。几千个刚体时要换成排序扫掠或刚体级的 BVH。
