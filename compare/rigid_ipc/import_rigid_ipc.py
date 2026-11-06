@@ -18,7 +18,7 @@ Rigid-IPC 的刚体是最大坐标（6 个自由度），没有关节；它能�
 坐标系原样保留（Rigid-IPC 的场景多是 y 轴朝上），重力、步长照抄到 <option>。
 rotation 是角度制的 xyz 欧拉角，R = Rz * Ry * Rx（read_rb_scene.cpp 第 199 行），绕网格原点转，再平移到 position。
 每个刚体一个 mesh geom，density 照抄（Rigid-IPC 的默认是 1000）。两边都从网格算质量和质心，所以质量一致
-（gear.obj 密度 1 时都是 1.266）。只用在固定几何体上的网格（比如平面）体积为 0，mesh 用 inertia="shell"。
+（gear.obj 密度 1 时都是 1.199；动的刚体 mesh 用 inertia="exact"，否则 MuJoCo 按凸包算）。只用在固定几何体上的网格（比如平面）体积为 0，mesh 用 inertia="shell"。
 
 摩擦系数 coefficient_friction、障碍距离 initial_barrier_activation_distance、时长 max_time 不进 MJCF，
 打印成 scene_demo 的参数：mu=、dhat=、T=。
@@ -219,7 +219,8 @@ def main():
 
     asset = []
     for (mesh_file, scale, static), mname in meshes.items():
-        extra = ' inertia="shell"' if static else ''
+        # 动的刚体用 inertia="exact"：MuJoCo 默认按凸包算质量和惯量，圆环这种有洞的网格会差一倍（torus.obj 142 kg 对 72.7 kg）
+        extra = ' inertia="shell"' if static else ' inertia="exact"'
         asset.append(f'    <mesh name="{mname}" file="{mesh_file}" scale="{fmt(scale)}"{extra}/>')
 
     meshdir = os.path.abspath(a.meshdir).replace("\\", "/")

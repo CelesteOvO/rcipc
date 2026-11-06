@@ -43,6 +43,7 @@ struct StepParams {
   double pcg_tol = 1e-4;           // PCG 的 rz 准则：|r^T z| <= pcg_tol |r0^T z0|
   int pcg_max = 200;               // PCG 最多迭代次数
   bool adapt_kappa = true;         // 每次线搜索之后按最小间隙调整 kappa（笔记第 4 节）
+  bool kappa_relax = true;         // adapt_kappa 开着时，间隙 > 1e-2 dhat 要不要把 kappa 减半（false：只加硬不放软，IPC 原来的做法）
   bool semi_implicit = false;      // 半隐式提前停止（Stiff-GIPC / libuipc 的规则，笔记第 5 节）
   int semi_kmin = 6;               // 半隐式：从第几次迭代起累积 beta
   double semi_beta_tol = 1e-3;     // 半隐式：beta <= 它且这次取满 alpha_max 时停

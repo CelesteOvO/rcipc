@@ -50,8 +50,9 @@ struct Args {
   std::string model = "ragdoll.xml", out;
   double T = 2.0, h = NAN, dhat = 1e-3, mu = 0.2, eps_v = 1e-3, tol = 1e-6;
   int semi = 0, ldlt = 0, check = 0, debug = 0, adapt = 1, gpu = 0, timing = 1, graph = 1, tight = 1, reuse = 1, tail = 1, prefilter = 1;
-  int icurv = 1;
-  double icurv_floor = NAN;
+  int icurv = 1, relax = 1;
+  double kappa = 0;  // > 0：kappa 的预设值（跳过第一次接触时的梯度平衡初始化）
+  double icurv_floor = NAN, curv = NAN;  // curv：StepParams::curv_scale（1 可证明的上界，0 纯 Gauss-Newton）
   double pcg_tol = NAN;
 };
 
@@ -73,6 +74,8 @@ Args parse(int argc, char** argv) {
     else if (k == "eps_v") a.eps_v = std::atof(v.c_str());
     else if (k == "tol") a.tol = std::atof(v.c_str());
     else if (k == "adapt") a.adapt = std::atoi(v.c_str());
+    else if (k == "relax") a.relax = std::atoi(v.c_str());
+    else if (k == "kappa") a.kappa = std::atof(v.c_str());
     else if (k == "gpu") a.gpu = std::atoi(v.c_str());
     else if (k == "timing") a.timing = std::atoi(v.c_str());
     else if (k == "graph") a.graph = std::atoi(v.c_str());
@@ -87,6 +90,7 @@ Args parse(int argc, char** argv) {
     else if (k == "debug") a.debug = std::atoi(v.c_str());
     else if (k == "icurv") a.icurv = std::atoi(v.c_str());
     else if (k == "icurv_floor") a.icurv_floor = std::atof(v.c_str());
+    else if (k == "curv") a.curv = std::atof(v.c_str());
     else if (k == "out") a.out = v;
     else std::fprintf(stderr, "unknown option %s\n", k.c_str());
   }
@@ -108,15 +112,18 @@ int main(int argc, char** argv) {
     P.eps_v = a.eps_v;
     P.tol = a.tol;
     P.adapt_kappa = a.adapt != 0;
+    P.kappa_relax = a.relax != 0;
     P.semi_implicit = a.semi != 0;
     P.inertia_curvature = a.icurv != 0;
     P.inertia_curvature_rot = a.icurv == 2;
     if (!std::isnan(a.icurv_floor)) P.inertia_curvature_floor = a.icurv_floor;
+    if (!std::isnan(a.curv)) P.curv_scale = a.curv;
     P.solver = a.ldlt ? LinearSolver::kLdlt : LinearSolver::kPcg;
     P.check_iterates = a.check != 0;
     P.tight_bound = a.tight != 0;
     if (!std::isnan(a.pcg_tol)) P.pcg_tol = a.pcg_tol;
     SolverState S;
+    if (a.kappa > 0) S.kappa = a.kappa;
 #ifdef RCIPC_HAVE_CUDA
     std::unique_ptr<gpu::Stepper> G;
     if (a.gpu) {

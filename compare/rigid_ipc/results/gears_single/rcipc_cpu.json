@@ -1,12 +1,12 @@
 {
  "steps": 1000,
- "total_s": 72.7,
- "ms_mean": 72.7,
- "min_dist": 9.237e-06,
+ "total_s": 78.8,
+ "ms_mean": 78.8,
+ "min_dist": 8.77e-06,
  "newton_max": 13,
- "newton_mean": 3.21,
+ "newton_mean": 3.23,
  "newton_capped": 0,
- "pcg_mean": 3.74,
+ "pcg_mean": 3.82,
  "solver": "cpu",
  "args": {
   "T": 10.0,

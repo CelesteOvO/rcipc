@@ -1,12 +1,12 @@
 {
  "steps": 1000,
- "total_s": 2.2,
- "ms_mean": 2.2,
- "min_dist": 9.237e-06,
+ "total_s": 2.0,
+ "ms_mean": 2.0,
+ "min_dist": 8.77e-06,
  "newton_max": 13,
- "newton_mean": 3.24,
+ "newton_mean": 3.22,
  "newton_capped": 0,
- "pcg_mean": 3.85,
+ "pcg_mean": 3.76,
  "solver": "gpu",
  "args": {
   "T": 10.0,

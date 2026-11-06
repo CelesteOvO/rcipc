@@ -9,7 +9,7 @@
     <geom friction="0 0 0"/>
   </default>
   <asset>
-    <mesh name="gear" file="gears/gear.obj" scale="1 1 1"/>
+    <mesh name="gear" file="gears/gear.obj" scale="1 1 1" inertia="exact"/>
   </asset>
   <worldbody>
     <body name="gear0" pos="0 0 0" quat="0.707106781 0.707106781 0 0">

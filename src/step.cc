@@ -160,7 +160,7 @@ StepResult step(const Model& model, const StepParams& P, const VectorXd& q0, con
       const double dmin = min_distance(model, forward_kinematics(model, q));
       if (dmin < 1e-3 * P.dhat && dmin < state->dmin_prev) {
         state->kappa = std::min(2 * state->kappa, krange.max);
-      } else if (dmin > 1e-2 * P.dhat) {
+      } else if (P.kappa_relax && dmin > 1e-2 * P.dhat) {
         state->kappa = std::max(0.5 * state->kappa, krange.min);
       }
       state->dmin_prev = dmin;

@@ -26,10 +26,11 @@ def main():
     ap.add_argument("--mu", type=float, required=True)
     ap.add_argument("--gpu", type=int, default=0)
     ap.add_argument("--extra", nargs="*", default=[], help="scene_demo 的其他 key=value")
+    ap.add_argument("--tag", help="结果文件名 rcipc_<tag>.*；默认 cpu/gpu（几组 kappa 实验放同一个目录时用）")
     a = ap.parse_args()
 
     os.makedirs(a.out, exist_ok=True)
-    tag = "gpu" if a.gpu else "cpu"
+    tag = a.tag or ("gpu" if a.gpu else "cpu")
     csv_path = os.path.abspath(os.path.join(a.out, f"rcipc_{tag}.csv"))
     cmd = [os.path.abspath(a.exe), f"model={os.path.abspath(a.model)}", f"T={a.T:g}", f"h={a.h:g}", f"dhat={a.dhat:g}", f"mu={a.mu:g}",
            f"gpu={a.gpu}", f"out={csv_path}", *a.extra]

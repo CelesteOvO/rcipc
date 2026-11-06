@@ -1271,7 +1271,7 @@ struct Stepper::Impl {
         const double dmin = r.dmin;
         if (dmin < 1e-3 * Pm.dhat && dmin < state->dmin_prev) {
           state->kappa = std::min(2 * state->kappa, krange.max);
-        } else if (dmin > 1e-2 * Pm.dhat) {
+        } else if (Pm.kappa_relax && dmin > 1e-2 * Pm.dhat) {
           state->kappa = std::max(0.5 * state->kappa, krange.min);
         }
         state->dmin_prev = dmin;
@@ -1383,7 +1383,7 @@ struct Stepper::Impl {
         const double dmin = last_eval_dmin;  // 接受的点上的最小距离（energy_at 顺便算的）
         if (dmin < 1e-3 * Pm.dhat && dmin < state->dmin_prev) {
           state->kappa = std::min(2 * state->kappa, krange.max);
-        } else if (dmin > 1e-2 * Pm.dhat) {
+        } else if (Pm.kappa_relax && dmin > 1e-2 * Pm.dhat) {
           state->kappa = std::max(0.5 * state->kappa, krange.min);
         }
         state->dmin_prev = dmin;

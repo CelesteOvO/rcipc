@@ -1,0 +1,112 @@
+D:\Project\rcipc\compare\rigid_ipc\gears_single.xml: 2 bodies, 2 trees, nv 2, 608 vertices, 1824 edges, 1216 faces; h 0.01, T 10, dhat 0.001, mu 0, eps_v 0.001, tol 1e-06 m/s, GPU
+1 actuators, 1 control keyframes
+t  0.01  gap 9.880e-04  limit       inf  newton  9  pcg  17  kappa 4.40e+11    12.9 ms/step
+t  0.10  gap 9.957e-04  limit       inf  newton 11  pcg  19  kappa 4.40e+11     2.8 ms/step
+t  0.20  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     2.3 ms/step
+t  0.30  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  0.40  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  0.50  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  0.60  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  0.70  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  0.80  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  0.90  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  1.00  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  1.10  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  1.20  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.9 ms/step
+t  1.30  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  1.40  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  1.50  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  1.60  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  1.70  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  1.80  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  1.90  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  2.00  gap 9.974e-04  limit       inf  newton  7  pcg  12  kappa 4.40e+11     3.4 ms/step
+t  2.10  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  2.20  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  2.30  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  2.40  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  2.50  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     2.5 ms/step
+t  2.60  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  2.70  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  2.80  gap 9.946e-04  limit       inf  newton  7  pcg  13  kappa 4.40e+11     2.6 ms/step
+t  2.90  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.9 ms/step
+t  3.00  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  3.10  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  3.20  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  3.30  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  3.40  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     2.7 ms/step
+t  3.50  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  3.60  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  3.70  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  3.80  gap 9.933e-04  limit       inf  newton 12  pcg  22  kappa 4.40e+11     2.4 ms/step
+t  3.90  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  4.00  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.9 ms/step
+t  4.10  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     2.0 ms/step
+t  4.20  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  4.30  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  4.40  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  4.50  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  4.60  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  4.70  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  4.80  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  4.90  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  5.00  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  5.10  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  5.20  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  5.30  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  5.40  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  5.50  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  5.60  gap       inf  limit       inf  newton  4  pcg   5  kappa 4.40e+11     3.5 ms/step
+t  5.70  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  5.80  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  5.90  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     2.7 ms/step
+t  6.00  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     2.8 ms/step
+t  6.10  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.9 ms/step
+t  6.20  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  6.30  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  6.40  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  6.50  gap       inf  limit       inf  newton  4  pcg   5  kappa 4.40e+11     3.8 ms/step
+t  6.60  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  6.70  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  6.80  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     2.7 ms/step
+t  6.90  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     2.8 ms/step
+t  7.00  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  7.10  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  7.20  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  7.30  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  7.40  gap       inf  limit       inf  newton  4  pcg   5  kappa 4.40e+11     3.8 ms/step
+t  7.50  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  7.60  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  7.70  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     2.7 ms/step
+t  7.80  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     2.8 ms/step
+t  7.90  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  8.00  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  8.10  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  8.20  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  8.30  gap       inf  limit       inf  newton  4  pcg   5  kappa 4.40e+11     3.9 ms/step
+t  8.40  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  8.50  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  8.60  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     2.7 ms/step
+t  8.70  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     2.7 ms/step
+t  8.80  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  8.90  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  9.00  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  9.10  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  9.20  gap       inf  limit       inf  newton  4  pcg   5  kappa 4.40e+11     3.8 ms/step
+t  9.30  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  9.40  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  9.50  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     2.7 ms/step
+t  9.60  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     2.7 ms/step
+t  9.70  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  9.80  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t  9.90  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+t 10.00  gap       inf  limit       inf  newton  3  pcg   3  kappa 4.40e+11     1.8 ms/step
+done: 1000 steps in 2.1 s (2.1 ms/step)
+min distance at step ends 9.763e-04 m
+min joint-limit distance 1.000e+300; Newton per step max 12 mean 3.36 (0 hit the cap); PCG per step mean 3.77
+GPU per step (ms): prepare 0.16, update 0.16, assemble 0.00, solve 0.00, converge 0.00, ccd 0.00, line search 0.00, graph 1.72, total 2.06; energy evaluations per step 2.59
+GPU per Newton iteration: 2 contacts, 2 rows, 1.1 PCG iterations, 0.70 CCD segments (0.70 culls); 1 body pairs per query
+ACCD tail: 4 pairs handed over (0.00 per CCD segment), 0 proved to return 1, 4 finished serially
+inertia curvature left out 0 times on the GPU (tree x iteration, not positive definite)
+ACCD prefilter: 65 pairs per CCD segment skipped in single precision
+wrote D:\Project\rcipc\compare\rigid_ipc\results\gears_single\rcipc_gpu_k4.4e11.csv (replay: python tools/replay.py D:\Project\rcipc\compare\rigid_ipc\gears_single.xml D:\Project\rcipc\compare\rigid_ipc\results\gears_single\rcipc_gpu_k4.4e11.csv)

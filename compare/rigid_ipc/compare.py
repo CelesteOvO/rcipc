@@ -58,7 +58,7 @@ def rcipc_rows(csv_path):
     with open(csv_path, newline="") as f:
         reader = csv.reader(f)
         next(reader)
-        return [[float(x) for x in row] for row in reader]
+        return [[float(x) for x in row] for row in reader if row and all(row)]  # 正在写的文件最后一行可能不完整
 
 
 def sim_files(d):
@@ -99,7 +99,7 @@ def main():
         if os.path.exists(csv_path):
             nw = np.array([r[3] for r in rcipc_rows(csv_path)][a.skip:])
             med, mx = float(np.median(nw)), float(nw.max())
-        rows.append((f"RC-IPC {extra}".strip(), S["solver"].upper(), tol, S["steps"], S["ms_mean"], float("nan"),
+        rows.append((f"RC-IPC {extra}".strip(), "GPU" if S["solver"].startswith("gpu") else "CPU", tol, S["steps"], S["ms_mean"], float("nan"),
                      float("nan"), S["newton_mean"] - 1, S["newton_max"] - 1, S["min_dist"], float("nan"),
                      f"newton incl. the check: mean {S['newton_mean']:.2f} median {med:g} max {mx:g}; "
                      f"{S['newton_capped']} steps at the cap; PCG/step {S['pcg_mean']:.1f}"))

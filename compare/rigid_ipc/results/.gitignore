@@ -2,5 +2,4 @@
 sim*.json
 *.glb
 log-*/
-run.log
-run_abs.log
+run*.log
