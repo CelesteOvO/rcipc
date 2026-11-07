@@ -29,9 +29,12 @@ void launch_inertia_hessian(const DModel& m, const DFrames& F, double h, double*
 // launch_inertia_hessian 后面调用（这时 Hk 里只有 M / h^2）：每棵树 floor M / h^2 + K 正定时 Hk += K，否则 *dropped 加一。
 // rot：K 里要不要转动那一部分（StepParams::inertia_curvature_rot）。
 // K 是工作区（ntree x TD x TD）。inertia_curvature_fits 是共享内存放不放得下（放不下时不要调用）。
+// 阶段 14：CB 不为空时（nbody x 21：每个刚体接触的 G = P + xpos F^T、F、P，launch_contact_full 写的）把接触的链上剩余项
+// （contact_chain_curvature）也加进 K，一起检查；inertia = false 时 K 里不要惯性的那一份（只有接触的）。
 bool inertia_curvature_fits(const DModel& m);
 void launch_inertia_curvature(const DModel& m, const DFrames& F, const double* tc, const double* tA, double h, bool rot,
-                              double floor, double* Hk, double* K, unsigned long long* dropped);
+                              double floor, double* Hk, double* K, unsigned long long* dropped,
+                              const double* CB = nullptr, bool inertia = true);
 // 关节限位（limits.cc）：能量累加到 *e、梯度累加到 g、对角累加到 Hk（哪个为空就不算）。
 void launch_limits(const DModel& m, const double* q, double k, double dhat, double* e, double* g, double* Hk);
 // 阶段 12：驱动、阻尼、armature（drive.cc）：能量累加到 *e，梯度累加到 g，对角 Hessian 累加到 Hk（哪个为空就不算）。
@@ -76,6 +79,11 @@ void launch_to_float(const double* x, int n, float* out);
 //   能量累加到 *e，梯度累加到 g，曲率上界累加到 Hk 的对角，行写到 rows 的第 0..n-1 行（哪个为空就不算）。
 void launch_contact_terms(const DModel& m, const DFrames& F, const double* q, const DContact* c, DCount n, DScalar kappa,
                           double dhat, double curv_scale, double* e, double* g, double* Hk, DRows rows);
+// 阶段 14（contact_full.cu）：完整的接触 Hessian（contact_rows_full）。能量累加到 *e，梯度累加到 g，
+// 第 i 个接触的 12 x 12 旋量块特征分解后写到 rows 的第 12 i .. 12 i + 11 行（用不到的行两侧刚体是 0、D = 0），
+// 链上剩余项要的每刚体量原子加到 CB（nbody x 21，调用者清零；可为空）。rows.D 为空时只算能量和梯度。
+void launch_contact_full(const DModel& m, const DFrames& F, const DContact* c, DCount n, DScalar kappa, double dhat,
+                         double* e, double* g, DRows rows, double* CB);
 // 测试用：把行展开成逐个自由度的值（每行 2 CH 个槽，用不到的 idx = -1）。
 void launch_rows_expand(const DModel& m, const DFrames& F, DRows rows, int nrow, int* idx, double* val);
 // 接触里最小的距离，atomic_min 到 *out（调用者先设成 +无穷）。

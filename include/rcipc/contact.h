@@ -88,6 +88,46 @@ Eigen::MatrixXd contact_hessian(const Model& model, const Frames& frames, const 
 Eigen::MatrixXd contact_curvature(const Model& model, const Eigen::VectorXd& q, const std::vector<Contact>& contacts,
                                   double kappa, double dhat, double scale);
 
+// ---------- 阶段 14：完整的接触 Hessian（笔记 notes/17_contact_hessian.md） ----------
+//
+// 到阶段 13 为止，接触的 Hessian 是 Gauss-Newton 行 kappa w r^T r（w 补回了法向的二阶项）加阶段 6 的对角上界。
+// 精确的二阶导数还有 kappa b' 乘上 d^2 对 delta 的二阶导数里剩下的部分：最近点的参数随顶点变化（包络定理）、
+// 顶点沿关节走弧线（轨迹曲率）、两条边的 mollifier。这些项不定号，不能逐项加。这里把一个接触的全部二阶导数在
+// 两侧刚体的旋量空间里算成 12 x 12 的对称矩阵（每侧 6 维：刚体原点的平移 v 和转动 omega，顶点 X 的速度是
+// v + omega x (X - xpos)），做特征分解，只留正的特征值；每个特征向量就是两侧各一个力旋量 (f, tau)，正好是 GPU 上
+// 行的存法（src/gpu/rows.cuh）。关节坐标对旋量不是线性的那一截（铰链锚点不在刚体原点、链上有上游关节）另算，
+// 和惯性的曲率项一样经正定检查进树块；自由刚体上它恰好是 0。
+
+// 平方距离 y = |Delta|^2 对模板顶点坐标的精确二阶导数（3 nstencil x 3 nstencil）。固定权重时是 2 (w w^T) ⊗ I；
+// 最近点在三角形内部、边内部或线段内部时参数会随顶点动，包络定理给出要减掉的一项 f_{X lam} f_{lam lam}^-1 f_{lam X}。
+// 地面：2 n n^T。X 是模板顶点的世界坐标。
+Eigen::MatrixXd squared_distance_hessian(const Contact& c, const Eigen::Vector3d* X);
+
+// 一个接触的能量 kappa m b(d^2) 对两侧旋量 (v_A, omega_A, v_B, omega_B) 的精确二阶导数（12 x 12，对称，不定号），
+// 含顶点随转动走弧线的几何项。地面接触的 B 侧是世界，后 6 行 6 列为 0。
+Eigen::Matrix<double, 12, 12> contact_wrench_hessian(const Model& model, const Frames& frames, const Contact& c,
+                                                     double kappa, double dhat);
+
+// 旋量对 delta 的 Jacobian（12 x nv）：前 6 行是刚体 A 的 (v, omega)，后 6 行是 B 的；旋量以各自的原点 xpos 为参考点。
+// 转动自由度 d 在它刚体的链上时那一列是 ((o_d - xpos) x a_d, a_d)，滑动是 (a_d, 0)。
+// 顶点的 point_jacobian 等于 [I, -[X - xpos]x] 乘它，所以 sum_c J_c^T H12_c J_c 加 contact_chain_curvature 就是精确的 Hessian。
+Eigen::MatrixXd contact_twist_jacobian(const Model& model, const Frames& frames, const Contact& c);
+
+// 完整 Hessian 的行形式：每个接触的 12 x 12 做特征分解，特征值 > rel_tol * 最大特征值的每一对变成一行
+// （r = 特征向量作为力旋量在各自由度上的值，D = 特征值），追加到 rows。一个接触最多 12 行。
+void contact_rows_full(const Model& model, const Frames& frames, const std::vector<Contact>& contacts, double kappa,
+                       double dhat, std::vector<Row>* rows, double rel_tol = 1e-12);
+
+// 链上的剩余项（nv x nv，对称）：精确的 delta 空间 Hessian 减去 sum_c J_c^T H12_c J_c。只在每侧刚体链上的自由度之间
+// 非零：同一个关节的两个转动（锚点 o 不在原点时是合力关于 (xpos - o) 的几何项）、上游转动对下游转动或滑动。
+// 不定号，step() 把它和惯性的曲率项加在一起经 add_inertia_curvature 的正定检查进树块。
+Eigen::MatrixXd contact_chain_curvature(const Model& model, const Frames& frames, const std::vector<Contact>& contacts,
+                                        double kappa, double dhat);
+
+// 测试用：不投影的精确 Hessian sum_c J_c^T H12_c J_c + contact_chain_curvature，和能量的有限差分一致。
+Eigen::MatrixXd contact_hessian_exact(const Model& model, const Frames& frames, const std::vector<Contact>& contacts,
+                                      double kappa, double dhat);
+
 // kappa 的取值范围（阶段 4 笔记第 4 节）。参考值 kappa_ref 让“一个障碍在 dhat/2 处的斥力”等于一个平均刚体的重量：
 //   kappa_ref * |b'(dhat^2 / 4)| * dhat = m_avg * |g|
 // 下限是 kappa_ref / 100，上限是 100 kappa_ref（上限 / 下限 = 1e4，同书第 174 页）。

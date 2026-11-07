@@ -1,0 +1,21 @@
+D:/Project/rcipc/compare/rigid_ipc/chain_10.xml: 9 bodies, 9 trees, nv 54, 2000 vertices, 6000 edges, 4000 faces; h 0.01, T 1.5, dhat 0.001, mu 0, eps_v 0.001, tol 1e-06 m/s, PCG
+t  0.01  gap 4.783e-02  limit       inf  newton  2  pcg   2  kappa 0.00e+00   471.1 ms/step
+t  0.10  gap 3.196e-06  limit       inf  newton 16  pcg  16  kappa 3.29e+09  1253.6 ms/step
+t  0.20  gap 5.748e-06  limit       inf  newton 15  pcg 136  kappa 1.32e+10  7808.5 ms/step
+t  0.30  gap 6.173e-06  limit       inf  newton 24  pcg 257  kappa 2.63e+10  12775.7 ms/step
+t  0.40  gap 6.165e-06  limit       inf  newton  8  pcg 107  kappa 1.32e+10  8377.5 ms/step
+t  0.50  gap 6.109e-06  limit       inf  newton  6  pcg  95  kappa 1.32e+10  3157.3 ms/step
+t  0.60  gap 6.108e-06  limit       inf  newton  6  pcg  91  kappa 1.32e+10  3189.4 ms/step
+t  0.70  gap 6.105e-06  limit       inf  newton  6  pcg  97  kappa 1.32e+10  3270.4 ms/step
+t  0.80  gap 6.101e-06  limit       inf  newton  6  pcg  97  kappa 1.32e+10  3226.3 ms/step
+t  0.90  gap 6.098e-06  limit       inf  newton  6  pcg  84  kappa 1.32e+10  3250.1 ms/step
+t  1.00  gap 6.099e-06  limit       inf  newton  6  pcg  97  kappa 1.32e+10  3336.7 ms/step
+t  1.10  gap 6.102e-06  limit       inf  newton  6  pcg  99  kappa 1.32e+10  3601.2 ms/step
+t  1.20  gap 6.105e-06  limit       inf  newton  6  pcg  90  kappa 1.32e+10  3434.5 ms/step
+t  1.30  gap 6.109e-06  limit       inf  newton  6  pcg  69  kappa 1.32e+10  3485.8 ms/step
+t  1.40  gap 6.113e-06  limit       inf  newton  6  pcg  72  kappa 1.32e+10  3587.0 ms/step
+t  1.50  gap 6.117e-06  limit       inf  newton  6  pcg  74  kappa 1.32e+10  3111.4 ms/step
+done: 150 steps in 667.9 s (4452.5 ms/step)
+min distance at step ends 1.904e-06 m
+min joint-limit distance 1.000e+300; Newton per step max 50 mean 8.68 (1 hit the cap); PCG per step mean 98.89
+inertia curvature left out 0 times (tree x iteration, not positive definite)

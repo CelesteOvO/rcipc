@@ -19,8 +19,9 @@ __device__ inline void set_cont(DIter* it, cudaGraphConditionalHandle h, int v) 
 }
 
 __global__ void k_it_begin(DIter* it) {
-  // 组装之前：行数 = 接触 + 2 x 摩擦，计数清零。
-  it->nrow = it->nc + 2 * it->nf;
+  // 组装之前：行数 = 每接触的行数 x 接触 + 2 x 摩擦，计数清零。
+  it->nrow = it->rpc * it->nc + 2 * it->nf;
+  it->row0f = it->rpc * it->nc;
   it->status = kIterRunning;
   it->segs = it->windows = it->trials = 0;
   it->adv = 0;

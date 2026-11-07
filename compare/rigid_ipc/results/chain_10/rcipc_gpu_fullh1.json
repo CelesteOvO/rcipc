@@ -1,0 +1,21 @@
+{
+ "steps": 1000,
+ "total_s": 21.9,
+ "ms_mean": 21.9,
+ "min_dist": 1.904e-06,
+ "newton_max": 50,
+ "newton_mean": 5.5,
+ "newton_capped": 1,
+ "pcg_mean": 76.01,
+ "solver": "gpu_fullh1",
+ "args": {
+  "T": 10.0,
+  "h": 0.01,
+  "dhat": 0.001,
+  "mu": 0.0,
+  "extra": [
+   "fullh=1",
+   "timing=0"
+  ]
+ }
+}

@@ -223,8 +223,10 @@ struct DIter {
   double kappa = 0;
   int nc = 0;       // 当前点的接触个数（接受试探点时由设备更新）
   int nf = 0;       // 摩擦接触的个数（步首冻结）
+  int rpc = 1;      // 每个接触几行：Gauss-Newton 1，完整的接触 Hessian 12（阶段 14）
   // 设备写：
-  int nrow = 0;     // nc + 2 nf
+  int nrow = 0;     // rpc nc + 2 nf
+  int row0f = 0;    // 摩擦行从第几行起：rpc nc
   int status = 0;   // IterStatus
   int pcg = 0;      // PCG 的迭代次数
   int segs = 0;     // CCD 的段数

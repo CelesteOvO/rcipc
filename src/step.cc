@@ -100,13 +100,23 @@ StepResult step(const Model& model, const StepParams& P, const VectorXd& q0, con
                        drive_gradient(model, D, q);
     NewtonSystem sys;
     const MatrixXd Mh = inertia_hessian(model, F, h);
-    sys.Hk = Mh + contact_curvature(model, q, C, kappa, P.dhat, P.curv_scale);
+    //   阶段 14：完整的接触 Hessian 时不再加阶段 6 的上界（几何项已经精确地在旋量块和链上的剩余项里）。
+    sys.Hk = Mh + contact_curvature(model, q, C, kappa, P.dhat, P.full_contact_hessian ? 0.0 : P.curv_scale);
     sys.Hk.diagonal() += limit_hessian_diagonal(model, q, P.limit_k, P.limit_dhat) + drive_hessian_diagonal(model, D, q);
     //   阶段 13：再加上 Gauss-Newton 丢掉的惯性项 K（轻链吊重物时它是链上拉力的几何刚度，比 M / h^2 大几十倍），
-    //   每棵树单独判断，不正定的树不加。
-    if (P.inertia_curvature) curv_dropped += add_inertia_curvature(model, Mh, inertia_curvature(model, F, T, h, P.inertia_curvature_rot), &sys.Hk,
-                                                     P.inertia_curvature_floor);
-    sys.rows = contact_rows(model, F, C, kappa, P.dhat);
+    //   每棵树单独判断，不正定的树不加。阶段 14 的链上剩余项也走这一道检查。
+    if (P.inertia_curvature || P.full_contact_hessian) {
+      MatrixXd K = MatrixXd::Zero(model.nv, model.nv);
+      if (P.inertia_curvature) K += inertia_curvature(model, F, T, h, P.inertia_curvature_rot);
+      if (P.full_contact_hessian) K += contact_chain_curvature(model, F, C, kappa, P.dhat);
+      curv_dropped += add_inertia_curvature(model, Mh, K, &sys.Hk, P.inertia_curvature_floor);
+    }
+    if (P.full_contact_hessian) {
+      sys.rows.clear();
+      contact_rows_full(model, F, C, kappa, P.dhat, &sys.rows);
+    } else {
+      sys.rows = contact_rows(model, F, C, kappa, P.dhat);
+    }
     const std::vector<Row> frows = friction_rows(model, F, FC, h, P.mu, P.eps_v);
     sys.rows.insert(sys.rows.end(), frows.begin(), frows.end());
     VectorXd p;

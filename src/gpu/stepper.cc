@@ -279,6 +279,8 @@ struct Stepper::Impl {
   DBuf<double> Kc;
   DBuf<unsigned long long> curv_stats;
   bool icurv_fits = false;
+  // 阶段 14：完整的接触 Hessian。cb 是每个刚体接触的 (G, F, P)（nbody x 21，launch_contact_full 写、launch_inertia_curvature 读）。
+  DBuf<double> cb;
   double last_eval_dmin = 0;  // energy_at 最后一次检测到的接触里最小的距离
   DBuf<double> pcg_acc;
 
@@ -295,13 +297,14 @@ struct Stepper::Impl {
     long gen = -1;
     double h = 0, dhat = 0, mu = 0, eps_v = 0, curv = 0, limit_k = 0, limit_dhat = 0, c = 0, tol = 0, pcg_tol = 0;
     int pcg_max = 0;
-    bool tight = true, reuse = true, tail = true, prefilter = true, icurv = true, icurv_rot = false;
+    bool tight = true, reuse = true, tail = true, prefilter = true, icurv = true, icurv_rot = false, fullh = false;
     double icurv_floor = 0;
     bool operator==(const GraphKey& o) const {
       return gen == o.gen && h == o.h && dhat == o.dhat && mu == o.mu && eps_v == o.eps_v && curv == o.curv &&
              limit_k == o.limit_k && limit_dhat == o.limit_dhat && c == o.c && tol == o.tol && pcg_tol == o.pcg_tol &&
              pcg_max == o.pcg_max && tight == o.tight && reuse == o.reuse && tail == o.tail &&
-             prefilter == o.prefilter && icurv == o.icurv && icurv_rot == o.icurv_rot && icurv_floor == o.icurv_floor;
+             prefilter == o.prefilter && icurv == o.icurv && icurv_rot == o.icurv_rot && icurv_floor == o.icurv_floor &&
+             fullh == o.fullh;
     }
   };
   GraphKey graph_key;
@@ -566,6 +569,7 @@ struct Stepper::Impl {
     for (DBuf<double>* b : {&p, &g, &ge0, &gb, &scale, &rhs}) b->reserve(nv);
     Hk.reserve(std::max(m.ntree, 1) * m.TD * m.TD);
     Kc.reserve(std::max(m.ntree, 1) * m.TD * m.TD);
+    cb.reserve(21 * std::max(m.nbody, 1));
     icurv_fits = inertia_curvature_fits(m);
     P.reserve(2 * std::max(m.ntree, 1) * m.TD * m.TD);  // 逆 + 工作区（launch_precond_build）
     work.reserve(4 * nv + 18 * nb);  // PCG：r、z、p、Ap，加上力旋量形式的行用的工作区（launch_matvec）
@@ -809,20 +813,26 @@ struct Stepper::Impl {
     const double h = Pm.h;
     cudaMemsetAsync(scal.get(), 0, sizeof(double));
     cudaMemsetAsync(g.get(), 0, sizeof(double) * m.nv);
+    const bool full = Pm.full_contact_hessian;  // 阶段 14
+    const int rpc = full ? 12 : 1;
+    grow_rows(rpc * nc + 2 * nf);
     launch_inertia_hessian(m, F.view(), h, Hk.get());
-    if (Pm.inertia_curvature && icurv_fits)
+    if (full) {  // 接触先算：链上剩余项要的每刚体量进 cb，曲率内核一起检查。它不动 Hk，所以 Hk 里仍只有 M / h^2
+      cudaMemsetAsync(cb.get(), 0, sizeof(double) * 21 * m.nbody);
+      launch_contact_full(m, F.view(), contacts.get(), nc, kappa, Pm.dhat, scal.get(), g.get(), rows_view(), cb.get());
+    }
+    if ((Pm.inertia_curvature || full) && icurv_fits)
       launch_inertia_curvature(m, F.view(), tc.get(), tA.get(), h, Pm.inertia_curvature_rot, Pm.inertia_curvature_floor,
-                                 Hk.get(), Kc.get(),
-                                 curv_stats.get());
+                                 Hk.get(), Kc.get(), curv_stats.get(), full ? cb.get() : nullptr, Pm.inertia_curvature);
     launch_inertia_energy(m, F.view(), tc.get(), tA.get(), h, scal.get());
     launch_inertia_gradient(m, F.view(), tc.get(), tA.get(), h, g.get());
-    grow_rows(nc + 2 * nf);
-    launch_contact_terms(m, F.view(), q.get(), contacts.get(), nc, kappa, Pm.dhat, Pm.curv_scale, scal.get(), g.get(),
-                         Hk.get(), rows_view());
-    launch_friction_terms(m, F.view(), fric.get(), nf, h, Pm.mu, Pm.eps_v, scal.get(), g.get(), rows_view(), nc);
+    if (!full)
+      launch_contact_terms(m, F.view(), q.get(), contacts.get(), nc, kappa, Pm.dhat, Pm.curv_scale, scal.get(), g.get(),
+                           Hk.get(), rows_view());
+    launch_friction_terms(m, F.view(), fric.get(), nf, h, Pm.mu, Pm.eps_v, scal.get(), g.get(), rows_view(), rpc * nc);
     launch_limits(m, q.get(), Pm.limit_k, Pm.limit_dhat, scal.get(), g.get(), Hk.get());
     if (drives_on) launch_drives(m, drive_view(), q.get(), scal.get(), g.get(), Hk.get());
-    nrow = nc + 2 * nf;
+    nrow = rpc * nc + 2 * nf;
     timers.contacts += nc;
     timers.rows += nrow;
     timers.assemble += ms_since(t0);
@@ -1047,6 +1057,8 @@ struct Stepper::Impl {
     const DCount nrow_d(&it->nrow, row_cap);
     const DScalar kappa_d(0, &it->kappa), s_d(0, &it->s), len_d(0, &it->len);
     const bool fr = Pm.mu > 0;
+    const bool full = Pm.full_contact_hessian;                               // 阶段 14
+    const DCount row0_d(&it->row0f, (full ? 12 : 1) * contact_cap);  // 摩擦行从第几行起（k_it_begin 算）
     check(cudaGraphCreate(&graph, 0), "graph create");
     cudaGraphConditionalHandle hc, hl;
     check(cudaGraphConditionalHandleCreate(&hc, graph, 0, 0), "handle");
@@ -1059,15 +1071,19 @@ struct Stepper::Impl {
       cudaMemsetAsync(sc, 0, sizeof(double));
       cudaMemsetAsync(g.get(), 0, sizeof(double) * m.nv);
       launch_inertia_hessian(m, F.view(), h, Hk.get());
-      if (Pm.inertia_curvature && icurv_fits)
+      if (full) {  // 阶段 14（同 assemble）
+        cudaMemsetAsync(cb.get(), 0, sizeof(double) * 21 * m.nbody);
+        launch_contact_full(m, F.view(), contacts.get(), nc_d, kappa_d, Pm.dhat, sc, g.get(), rows_view(), cb.get());
+      }
+      if ((Pm.inertia_curvature || full) && icurv_fits)
         launch_inertia_curvature(m, F.view(), tc.get(), tA.get(), h, Pm.inertia_curvature_rot, Pm.inertia_curvature_floor,
-                                 Hk.get(), Kc.get(),
-                                 curv_stats.get());
+                                 Hk.get(), Kc.get(), curv_stats.get(), full ? cb.get() : nullptr, Pm.inertia_curvature);
       launch_inertia_energy(m, F.view(), tc.get(), tA.get(), h, sc);
       launch_inertia_gradient(m, F.view(), tc.get(), tA.get(), h, g.get());
-      launch_contact_terms(m, F.view(), q.get(), contacts.get(), nc_d, kappa_d, Pm.dhat, Pm.curv_scale, sc, g.get(),
-                           Hk.get(), rows_view());
-      if (fr) launch_friction_terms(m, F.view(), fric.get(), nf_d, h, Pm.mu, Pm.eps_v, sc, g.get(), rows_view(), nc_d);
+      if (!full)
+        launch_contact_terms(m, F.view(), q.get(), contacts.get(), nc_d, kappa_d, Pm.dhat, Pm.curv_scale, sc, g.get(),
+                             Hk.get(), rows_view());
+      if (fr) launch_friction_terms(m, F.view(), fric.get(), nf_d, h, Pm.mu, Pm.eps_v, sc, g.get(), rows_view(), row0_d);
       launch_limits(m, q.get(), Pm.limit_k, Pm.limit_dhat, sc, g.get(), Hk.get());
       if (drives_on) launch_drives(m, drive_view(), q.get(), sc, g.get(), Hk.get());
       launch_precond_build(m, F.view(), Hk.get(), rows_view(), nrow_d, P.get(), scale.get(), precond_work());
@@ -1185,6 +1201,7 @@ struct Stepper::Impl {
     k.icurv = Pm.inertia_curvature;
     k.icurv_rot = Pm.inertia_curvature_rot;
     k.icurv_floor = Pm.inertia_curvature_floor;
+    k.fullh = Pm.full_contact_hessian;
     return k;
   }
 
@@ -1212,10 +1229,11 @@ struct Stepper::Impl {
   }
 
   // 一次图版的 Newton 迭代：写 kappa、nc、nf，发图，读回 DIter。
-  const DIter& run_graph_iteration(double kappa) {
+  const DIter& run_graph_iteration(double kappa, int rpc) {
     h_it->kappa = kappa;
     h_it->nc = nc;
     h_it->nf = nf;
+    h_it->rpc = rpc;
     check(cudaMemcpyAsync(d_it.get(), h_it, offsetof(DIter, nrow), cudaMemcpyHostToDevice), "iter header");
     check(cudaGraphLaunch(graph_exec, cudaStreamPerThread), "graph launch");
     check(cudaMemcpyAsync(h_it, d_it.get(), sizeof(DIter), cudaMemcpyDeviceToHost), "iter read");
@@ -1238,13 +1256,14 @@ struct Stepper::Impl {
         state->dmin_prev = contact_dmin(nc);
         timers.assemble += ms_since(t0);
       }
-      grow_rows(contact_cap + 2 * nf);  // 行数不超过 nc + 2 nf，nc 不超过 contact_cap：图里不用再扩容
+      const int rpc = Pm.full_contact_hessian ? 12 : 1;
+      grow_rows(rpc * contact_cap + 2 * nf);  // 行数不超过 rpc nc + 2 nf，nc 不超过 contact_cap：图里不用再扩容
       if (!ensure_graph(Pm)) {
         if (it == 1) return false;
         throw std::runtime_error("CUDA graph could not be recorded in the middle of a step");
       }
       const auto t0 = Clock::now();
-      const DIter r = run_graph_iteration(state->kappa);
+      const DIter r = run_graph_iteration(state->kappa, rpc);
       timers.graph += ms_since(t0);
       if (r.status == kIterOverflow) {
         // 某个缓冲区放不下：这次迭代没有接受任何东西。扩容，重新检测当前点的接触（线搜索把它们覆盖了），重来。

@@ -5,6 +5,7 @@
 //              [check=0|1] [debug=0|1|2] [gpu=0|1] [timing=0|1] [pcg_tol=..] [icurv=0|1|2] [icurv_floor=..] [out=traj.csv]
 //   gpu=1：用 GPU 版（阶段 11，需要编译时打开了 CUDA）。check 在 GPU 上不支持。
 //   icurv=0：惯性 Hessian 只用 M / h^2（阶段 13 之前的做法，notes/16_inertia_curvature.md）；icurv=2 连转动那一部分也加。
+//   fullh=1：完整的接触 Hessian（每个接触 12 x 12 的旋量块做半正定投影，阶段 14，notes/17_contact_hessian.md）。
 //   timing=0：GPU 版不做分段计时（分段计时每段都要等 GPU，会拖慢整步；量墙钟时间时关掉）。
 //
 //   model：models/ 下的文件名（或绝对路径）。有的场景：ragdoll.xml、ragdoll_pile.xml、chain.xml、stack.xml、ledge.xml，
@@ -14,7 +15,7 @@
 //          notes/15_drift.md）。
 //   模型有关键帧时，从第一个关键帧的 qpos 开始（没有时从 qpos0）。
 //   check=1：每次接受的 Newton 迭代都沿真实轨迹采样最小距离（慢，但验证的是 CCD 真正保证的东西）。
-//   debug=1：第一次穿模的那一步打印每次迭代；debug=2 另外打印每个撞上 Newton 上限的步（间隙、|dx|/h、CCD 和线搜索的步长）。
+//   debug=1：第一次穿模的那一步打印每次迭代；debug=2 另外打印每个撞上 Newton 上限的步（间隙、|dx|/h、CCD 和线搜索的步长）；debug=3 每一步都打印。
 //   out：每行 t, min_distance, min_limit, newton, pcg, 然后是 nq 个 qpos。用 tools/replay.py 在 MuJoCo 的窗口里回放。
 //
 // 阶段 12：有驱动的场景，每一步的控制量按 MJCF 的关键帧插值（ctrl_at，取这一步结束的时刻）。
@@ -50,7 +51,7 @@ struct Args {
   std::string model = "ragdoll.xml", out;
   double T = 2.0, h = NAN, dhat = 1e-3, mu = 0.2, eps_v = 1e-3, tol = 1e-6;
   int semi = 0, ldlt = 0, check = 0, debug = 0, adapt = 1, gpu = 0, timing = 1, graph = 1, tight = 1, reuse = 1, tail = 1, prefilter = 1;
-  int icurv = 1, relax = 1;
+  int icurv = 1, relax = 1, fullh = 0;  // fullh=1：完整的接触 Hessian（StepParams::full_contact_hessian，阶段 14）
   double kappa = 0;  // > 0：kappa 的预设值（跳过第一次接触时的梯度平衡初始化）
   double icurv_floor = NAN, curv = NAN;  // curv：StepParams::curv_scale（1 可证明的上界，0 纯 Gauss-Newton）
   double pcg_tol = NAN;
@@ -75,6 +76,7 @@ Args parse(int argc, char** argv) {
     else if (k == "tol") a.tol = std::atof(v.c_str());
     else if (k == "adapt") a.adapt = std::atoi(v.c_str());
     else if (k == "relax") a.relax = std::atoi(v.c_str());
+    else if (k == "fullh") a.fullh = std::atoi(v.c_str());
     else if (k == "kappa") a.kappa = std::atof(v.c_str());
     else if (k == "gpu") a.gpu = std::atoi(v.c_str());
     else if (k == "timing") a.timing = std::atoi(v.c_str());
@@ -113,6 +115,7 @@ int main(int argc, char** argv) {
     P.tol = a.tol;
     P.adapt_kappa = a.adapt != 0;
     P.kappa_relax = a.relax != 0;
+    P.full_contact_hessian = a.fullh != 0;
     P.semi_implicit = a.semi != 0;
     P.inertia_curvature = a.icurv != 0;
     P.inertia_curvature_rot = a.icurv == 2;
@@ -140,10 +143,10 @@ int main(int argc, char** argv) {
 #endif
 
     std::printf("%s: %d bodies, %d trees, nv %d, %d vertices, %d edges, %d faces; h %g, T %g, dhat %g, mu %g, eps_v %g, "
-                "tol %g m/s, %s%s%s\n",
+                "tol %g m/s, %s, %s contact Hessian%s%s\n",
                 a.model.c_str(), model.nbody() - 1, model.ntree, model.nv, model.nvertex(), model.nedge(), model.nface(),
                 P.h, a.T, P.dhat, P.mu, P.eps_v, P.tol, a.gpu ? "GPU" : (a.ldlt ? "LDLT" : "PCG"),
-                a.semi ? ", semi-implicit stop" : "",
+                P.full_contact_hessian ? "full" : "Gauss-Newton", a.semi ? ", semi-implicit stop" : "",
                 model.filter_parent ? "" : ", parent-child contact on");
     if (model.nu() > 0) std::printf("%d actuators, %zu control keyframes\n", model.nu(), model.ctrl_keys.size());
     for (const std::string& s : model.ignored) std::printf("ignored (not supported): %s\n", s.c_str());
@@ -177,6 +180,13 @@ int main(int argc, char** argv) {
         for (size_t k = 0; k < trace.size(); ++k)
           std::printf("  it %2zu: gap %.3e |dx|/h %.3e alpha_max %.4f alpha %.4f pcg %d\n", k + 1, trace[k].min_distance,
                       trace[k].step, trace[k].alpha_max, trace[k].alpha, trace[k].pcg);
+      }
+      if (a.debug >= 3) {
+        // debug=3：每一步都打印每次迭代（看静止时 Newton 为什么要走好几步）。
+        std::printf("step %ld (t = %.4f): newton %d\n", nstep + 1, t + P.h, r.newton);
+        for (size_t k = 0; k < trace.size(); ++k)
+          std::printf("  it %2zu: gap %.3e |dx|/h %.3e alpha_max %.4f alpha %.4f pcg %d E %.12e\n", k + 1, trace[k].min_distance,
+                      trace[k].step, trace[k].alpha_max, trace[k].alpha, trace[k].pcg, trace[k].energy);
       }
       if (a.debug >= 2 && r.newton >= P.max_newton) {
         // debug=2：撞上 Newton 上限的步，打印每次迭代的间隙、|dx|/h（收敛判据）、CCD 允许的最大步长和线搜索取的步长。

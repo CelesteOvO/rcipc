@@ -4,6 +4,8 @@
 #include <initializer_list>
 #include <limits>
 
+#include <Eigen/Eigenvalues>
+
 #include "rcipc/barrier.h"
 #include "rcipc/chain.h"
 #include "rcipc/distance.h"
@@ -11,6 +13,7 @@
 // 接触。推导见 notes/04_ground.md（地面）和 notes/07_contact.md（刚体之间），测试见 tests/test_contact.cc。
 namespace rcipc {
 
+using Eigen::Matrix3d;
 using Eigen::MatrixXd;
 using Eigen::RowVectorXd;
 using Eigen::Vector3d;
@@ -334,6 +337,312 @@ MatrixXd contact_curvature(const Model& model, const VectorXd& q, const std::vec
         for (int d = chain[j].dadr; d < chain[j].dadr + chain[j].nv; ++d) H(d, d) += scale * f * C;
       }
     }
+  }
+  return H;
+}
+
+// ---------- 阶段 14：完整的接触 Hessian（笔记 notes/17_contact_hessian.md） ----------
+
+namespace {
+
+using Matrix12d = Eigen::Matrix<double, 12, 12>;
+using Vector12d = Eigen::Matrix<double, 12, 1>;
+
+// 模板顶点的世界坐标和两侧的半径之和（同 contact_distance）。
+void stencil_points(const Model& model, const Frames& frames, const Contact& c, Vector3d* X, double* radii) {
+  for (int i = 0; i < c.nstencil; ++i) {
+    const Vertex& V = model.vertices[c.verts[i]];
+    X[i] = world_point(frames, V.body, V.local);
+  }
+  *radii = c.type == ContactType::kGround ? model.vertices[c.verts[0]].radius
+                                           : model.vertices[c.verts[0]].radius + model.vertices[c.verts[2]].radius;
+}
+
+// 模板顶点 i 在哪一侧（0 = A，1 = B）；世界上的顶点返回 -1。
+int stencil_side(const Model& model, const Contact& c, int i) {
+  const int body = model.vertices[c.verts[i]].body;
+  if (body == 0) return -1;
+  return body == c.bodyA ? 0 : 1;
+}
+
+// [v]x：v x w = skew(v) w。
+Matrix3d skew(const Vector3d& v) {
+  Matrix3d S;
+  S << 0, -v.z(), v.y(), v.z(), 0, -v.x(), -v.y(), v.x(), 0;
+  return S;
+}
+
+// 几何项：f . (a x (b x rho)) = a^T (rho f^T) b - (a . b) tr(rho f^T)（inertia.cc 的 rot_rot）。对称化以后作为 omega 的
+// 二次型，矩阵是 (Q + Q^T) / 2 - tr(Q) I，Q = sum_v rho_v f_v^T。
+Matrix3d rotation_curvature(const Matrix3d& Q) { return 0.5 * (Q + Q.transpose()) - Q.trace() * Matrix3d::Identity(); }
+
+// 一个接触的全部一阶、二阶导数（对模板顶点坐标，kappa 已乘上）：f 是 3 nstencil 的梯度，H 是 3 nstencil x 3 nstencil。
+void vertex_derivatives(const Contact& c, const Vector3d* X, double radii, double kappa, double dhat, VectorXd* f,
+                        MatrixXd* H) {
+  const int n = 3 * c.nstencil;
+  // 第 1 层：y = |Delta|^2 对顶点的导数。地面：y = (n . X - offset)^2，梯度 2 ell n，二阶 2 n n^T。
+  const double ell = c.d + radii;  // |Delta|
+  VectorXd gy(n);
+  for (int i = 0; i < c.nstencil; ++i) gy.segment<3>(3 * i) = 2 * ell * c.w[i] * c.n;
+  const MatrixXd Hy = squared_distance_hessian(c, X);
+  // 第 2 层：x = d^2 = (sqrt(y) - R)^2。dx/dy = d / ell，d^2x/dy^2 = R / (2 ell^3)。
+  const double alpha = c.d / ell;
+  const BarrierValue bv = barrier(c.d * c.d, dhat * dhat);
+  const VectorXd gb = bv.db * alpha * gy;
+  const MatrixXd Hb = (bv.ddb * alpha * alpha + bv.db * radii / (2 * ell * ell * ell)) * gy * gy.transpose() + bv.db * alpha * Hy;
+  if (c.type != ContactType::kEdgeEdge || (c.moll == 1 && c.dmoll == 0)) {
+    *f = kappa * gb;
+    *H = kappa * Hb;
+    return;
+  }
+  // 第 3 层（边–边）：乘上 mollifier m(c_x)，c_x = |u x v|^2 = |u|^2 |v|^2 - (u . v)^2，u = X1 - X0，v = X3 - X2。
+  //   dc/du = 2 |v|^2 u - 2 (u . v) v，dc/dv 对称；
+  //   d^2c/du^2 = 2 |v|^2 I - 2 v v^T，d^2c/dv^2 = 2 |u|^2 I - 2 u u^T，d^2c/du dv = 4 u v^T - 2 v u^T - 2 (u . v) I。
+  //   m 的二阶导数：c_x < eps 时 m'' = -2 / eps^2（make_ee 里 eps = 1e-3 |u|^2 |v|^2），否则 0。
+  const Vector3d u = X[1] - X[0], v = X[3] - X[2];
+  const double uv = u.dot(v);
+  Eigen::Matrix<double, 6, 1> gc;
+  gc << 2 * v.squaredNorm() * u - 2 * uv * v, 2 * u.squaredNorm() * v - 2 * uv * u;
+  Eigen::Matrix<double, 6, 6> Cuv;
+  Cuv.block<3, 3>(0, 0) = 2 * v.squaredNorm() * Matrix3d::Identity() - 2 * v * v.transpose();
+  Cuv.block<3, 3>(3, 3) = 2 * u.squaredNorm() * Matrix3d::Identity() - 2 * u * u.transpose();
+  Cuv.block<3, 3>(0, 3) = 4 * u * v.transpose() - 2 * v * u.transpose() - 2 * uv * Matrix3d::Identity();
+  Cuv.block<3, 3>(3, 0) = Cuv.block<3, 3>(0, 3).transpose();
+  Eigen::Matrix<double, 6, 12> T = Eigen::Matrix<double, 6, 12>::Zero();  // (u, v) = T X
+  T.block<3, 3>(0, 0) = -Matrix3d::Identity();
+  T.block<3, 3>(0, 3) = Matrix3d::Identity();
+  T.block<3, 3>(3, 6) = -Matrix3d::Identity();
+  T.block<3, 3>(3, 9) = Matrix3d::Identity();
+  const VectorXd gcX = T.transpose() * gc;
+  const MatrixXd HcX = T.transpose() * Cuv * T;
+  const double eps = 1e-3 * u.squaredNorm() * v.squaredNorm();
+  const double ddm = c.dmoll != 0 && eps > 0 ? -2.0 / (eps * eps) : 0.0;
+  // E / kappa = m b：梯度 m b' + b m'，二阶 m H_b + b (m'' gc gc^T + m' H_c) + m' (gc gb^T + gb gc^T)。
+  *f = kappa * (c.moll * gb + bv.b * c.dmoll * gcX);
+  *H = kappa * (c.moll * Hb + bv.b * (ddm * gcX * gcX.transpose() + c.dmoll * HcX) +
+                c.dmoll * (gcX * gb.transpose() + gb * gcX.transpose()));
+}
+
+// 力旋量 (f, tau)（参考点 ref）在刚体 body 链上各自由度上的值，加到 r 里（rows.cuh 的 wrench_on_dof）。
+void add_wrench_row(const Model& model, const Frames& frames, int body, const Vector3d& ref, const Vector3d& f,
+                    const Vector3d& tau, RowVectorXd* r) {
+  for (int b = body; b != 0; b = model.bodies[b].parent) {
+    const int j = model.bodies[b].joint;
+    if (j < 0) continue;
+    for (int d = model.joints[j].dadr; d < model.joints[j].dadr + model.joints[j].nv; ++d) {
+      const Vector3d& a = frames.dof_axis[d];
+      (*r)[d] += model.dof_rot[d] ? a.dot(tau - (frames.dof_anchor[d] - ref).cross(f)) : a.dot(f);
+    }
+  }
+}
+
+}  // namespace
+
+MatrixXd squared_distance_hessian(const Contact& c, const Vector3d* X) {
+  if (c.type == ContactType::kGround) return 2 * c.n * c.n.transpose();
+  const int n = 3 * c.nstencil;
+  // 固定权重的那一项：y = |sum_v w_v X_v|^2，d^2y/dX_v dX_u = 2 w_v w_u I。
+  MatrixXd H = MatrixXd::Zero(n, n);
+  for (int v = 0; v < c.nstencil; ++v)
+    for (int u = 0; u < c.nstencil; ++u) H.block<3, 3>(3 * v, 3 * u) = 2 * c.w[v] * c.w[u] * Matrix3d::Identity();
+  // 包络定理：y(X) = min_lam F(X, lam)，F = |sum_v w_v(lam) X_v|^2，w 对 lam 是线性的。
+  //   d^2y = F_XX - F_{X lam} F_{lam lam}^-1 F_{lam X}。
+  //   F_{lam_k} = 2 Delta . E_k，E_k = sum_v (dw_v/dlam_k) X_v；F_{lam_k lam_l} = 2 E_k . E_l；
+  //   F_{X_v lam_k} = 2 w_v E_k + 2 (dw_v/dlam_k) Delta。
+  // 哪些参数在动：点–三角形里重心坐标 > 0 的那几个（一个：顶点，不动；两个：边上，一个参数；三个：面内，两个参数），
+  // 边–边里 s、t 在 (0, 1) 内部的。被夹在边界上的参数当常数（和距离函数的分段结构一致）。
+  Vector3d Delta = Vector3d::Zero();
+  for (int v = 0; v < c.nstencil; ++v) Delta += c.w[v] * X[v];
+  double dw[2][4] = {{0, 0, 0, 0}, {0, 0, 0, 0}};
+  int np = 0;
+  if (c.type == ContactType::kPointTriangle) {
+    int active[3], na = 0;
+    for (int i = 0; i < 3; ++i)
+      if (-c.w[1 + i] > 0) active[na++] = i;
+    // 以 active[0] 为基：lam_{i0} = 1 - sum 其余，所以 w[1 + i0] = -lam_{i0} 对 lam_{ik} 的导数是 +1，w[1 + ik] 的是 -1。
+    for (int k = 1; k < na; ++k) {
+      dw[np][1 + active[0]] = 1;
+      dw[np][1 + active[k]] = -1;
+      ++np;
+    }
+  } else {
+    if (c.w[1] > 0 && c.w[1] < 1) {  // s 在内部：w = (1 - s, s, ., .)
+      dw[np][0] = -1;
+      dw[np][1] = 1;
+      ++np;
+    }
+    if (-c.w[3] > 0 && -c.w[3] < 1) {  // t 在内部：w = (., ., -(1 - t), -t)
+      dw[np][2] = 1;
+      dw[np][3] = -1;
+      ++np;
+    }
+  }
+  if (np == 0) return H;
+  Vector3d E[2];
+  MatrixXd G(n, np);  // 第 k 列是 F_{X lam_k}
+  for (int k = 0; k < np; ++k) {
+    E[k] = Vector3d::Zero();
+    for (int v = 0; v < c.nstencil; ++v) E[k] += dw[k][v] * X[v];
+    for (int v = 0; v < c.nstencil; ++v) G.block<3, 1>(3 * v, k) = 2 * c.w[v] * E[k] + 2 * dw[k][v] * Delta;
+  }
+  MatrixXd Fll(np, np);
+  for (int k = 0; k < np; ++k)
+    for (int l = 0; l < np; ++l) Fll(k, l) = 2 * E[k].dot(E[l]);
+  // F_{lam lam} 退化（两条边平行、或者边长为 0）时用伪逆：特征值小于最大值 1e-10 倍的方向不动（mollifier 让这种接触的能量趟近 0）。
+  const Eigen::SelfAdjointEigenSolver<MatrixXd> es(Fll);
+  MatrixXd Finv = MatrixXd::Zero(np, np);
+  const double lmax = es.eigenvalues().maxCoeff();
+  for (int k = 0; k < np; ++k) {
+    const double l = es.eigenvalues()[k];
+    if (l > 1e-10 * lmax) Finv += es.eigenvectors().col(k) * es.eigenvectors().col(k).transpose() / l;
+  }
+  H -= G * Finv * G.transpose();
+  return H;
+}
+
+MatrixXd contact_twist_jacobian(const Model& model, const Frames& frames, const Contact& c) {
+  MatrixXd J = MatrixXd::Zero(12, model.nv);
+  for (int side = 0; side < 2; ++side) {
+    const int body = side == 0 ? c.bodyA : c.bodyB;
+    if (body == 0) continue;
+    const Vector3d& ref = frames.xpos[body];
+    for (int b = body; b != 0; b = model.bodies[b].parent) {
+      const int j = model.bodies[b].joint;
+      if (j < 0) continue;
+      for (int d = model.joints[j].dadr; d < model.joints[j].dadr + model.joints[j].nv; ++d) {
+        const Vector3d& a = frames.dof_axis[d];
+        if (model.dof_rot[d]) {
+          J.block<3, 1>(6 * side, d) = (frames.dof_anchor[d] - ref).cross(a);
+          J.block<3, 1>(6 * side + 3, d) = a;
+        } else {
+          J.block<3, 1>(6 * side, d) = a;
+        }
+      }
+    }
+  }
+  return J;
+}
+
+Matrix12d contact_wrench_hessian(const Model& model, const Frames& frames, const Contact& c, double kappa, double dhat) {
+  Vector3d X[4];
+  double radii;
+  stencil_points(model, frames, c, X, &radii);
+  VectorXd f;
+  MatrixXd HX;
+  vertex_derivatives(c, X, radii, kappa, dhat, &f, &HX);
+  // 顶点速度对旋量：X' = v + omega x (X - ref)，即 [I, -[X - ref]x]。
+  Eigen::Matrix<double, Eigen::Dynamic, 12> Jv = Eigen::Matrix<double, Eigen::Dynamic, 12>::Zero(3 * c.nstencil, 12);
+  Matrix3d Q[2] = {Matrix3d::Zero(), Matrix3d::Zero()};
+  for (int i = 0; i < c.nstencil; ++i) {
+    const int side = stencil_side(model, c, i);
+    if (side < 0) continue;
+    const Vector3d rho = X[i] - frames.xpos[side == 0 ? c.bodyA : c.bodyB];
+    Jv.block<3, 3>(3 * i, 6 * side) = Matrix3d::Identity();
+    Jv.block<3, 3>(3 * i, 6 * side + 3) = -skew(rho);
+    Q[side] += rho * f.segment<3>(3 * i).transpose();
+  }
+  Matrix12d H = Jv.transpose() * HX * Jv;
+  // 几何项：顶点随 omega 走弧线，exp([omega]) rho 的二阶项是 omega x (omega x rho) / 2，乘上力 f 求和。
+  for (int side = 0; side < 2; ++side) H.block<3, 3>(6 * side + 3, 6 * side + 3) += rotation_curvature(Q[side]);
+  return H;
+}
+
+void contact_rows_full(const Model& model, const Frames& frames, const std::vector<Contact>& contacts, double kappa,
+                       double dhat, std::vector<Row>* rows, double rel_tol) {
+  for (const Contact& c : contacts) {
+    const Matrix12d H = contact_wrench_hessian(model, frames, c, kappa, dhat);
+    const Eigen::SelfAdjointEigenSolver<Matrix12d> es(H);
+    const double lmax = es.eigenvalues().maxCoeff();
+    if (!(lmax > 0)) continue;
+    for (int k = 0; k < 12; ++k) {
+      const double l = es.eigenvalues()[k];
+      if (l <= rel_tol * lmax) continue;
+      const Vector12d u = es.eigenvectors().col(k);
+      Row row;
+      row.r = RowVectorXd::Zero(model.nv);
+      row.D = l;
+      for (int side = 0; side < 2; ++side) {
+        const int body = side == 0 ? c.bodyA : c.bodyB;
+        if (body == 0) continue;
+        add_wrench_row(model, frames, body, frames.xpos[body], u.segment<3>(6 * side), u.segment<3>(6 * side + 3), &row.r);
+      }
+      rows->push_back(std::move(row));
+    }
+  }
+}
+
+MatrixXd contact_chain_curvature(const Model& model, const Frames& frames, const std::vector<Contact>& contacts,
+                                 double kappa, double dhat) {
+  // 精确的 delta 空间 Hessian 里的几何项（inertia_curvature 的公式，Q_j = (X - o_j) f^T）减去旋量块里已经有的
+  // （rot_rot(a_i, Q, a_j) 对称化，Q = sum (X - xpos) f^T）。记 F = sum f、P = sum (X - xpos) f^T：
+  //   同一个关节的两个转动 i、j（锚点 o）：精确 sym rot_rot(a_i, P + (xpos - o) F^T, a_j)，块里 sym rot_rot(a_i, P, a_j)，
+  //     剩 sym rot_rot(a_i, (xpos - o) F^T, a_j)；
+  //   上游转动 up、下游转动 dn：精确 rot_rot(a_up, P + (xpos - o_dn) F^T, a_dn)（不对称化），块里 sym rot_rot(a_up, P, a_dn)；
+  //   上游转动、下游滑动：精确 (a_up x a_dn) . F，块里 0；
+  //   其余 0。
+  const auto rot_rot = [](const Vector3d& a, const Matrix3d& Q, const Vector3d& b) { return a.dot(Q * b) - a.dot(b) * Q.trace(); };
+  MatrixXd K = MatrixXd::Zero(model.nv, model.nv);
+  for (const Contact& c : contacts) {
+    Vector3d X[4];
+    double radii;
+    stencil_points(model, frames, c, X, &radii);
+    VectorXd f;
+    MatrixXd HX;
+    vertex_derivatives(c, X, radii, kappa, dhat, &f, &HX);
+    for (int side = 0; side < 2; ++side) {
+      const int body = side == 0 ? c.bodyA : c.bodyB;
+      if (body == 0) continue;
+      const Vector3d& ref = frames.xpos[body];
+      Vector3d F = Vector3d::Zero();
+      Matrix3d P = Matrix3d::Zero();
+      for (int i = 0; i < c.nstencil; ++i) {
+        if (stencil_side(model, c, i) != side) continue;
+        F += f.segment<3>(3 * i);
+        P += (X[i] - ref) * f.segment<3>(3 * i).transpose();
+      }
+      std::vector<int> chain;  // 从刚体往根
+      for (int b = body; b != 0; b = model.bodies[b].parent) {
+        const int j = model.bodies[b].joint;
+        if (j < 0) continue;
+        for (int k = 0; k < model.joints[j].nv; ++k) chain.push_back(model.joints[j].dadr + k);
+      }
+      for (size_t u = 0; u < chain.size(); ++u) {
+        for (size_t w = u; w < chain.size(); ++w) {
+          const int i = chain[u], j = chain[w];
+          double term = 0;
+          if (model.dof_joint[i] == model.dof_joint[j]) {
+            if (model.dof_rot[i] && model.dof_rot[j]) {
+              const Matrix3d Qo = (ref - frames.dof_anchor[j]) * F.transpose();
+              term = 0.5 * (rot_rot(frames.dof_axis[i], Qo, frames.dof_axis[j]) + rot_rot(frames.dof_axis[j], Qo, frames.dof_axis[i]));
+            }
+          } else {
+            const int up = j, dn = i;  // chain 从刚体往根排，后面的在上游
+            const Vector3d& au = frames.dof_axis[up];
+            const Vector3d& ad = frames.dof_axis[dn];
+            if (model.dof_rot[up]) {
+              if (model.dof_rot[dn]) {
+                term = rot_rot(au, P + (ref - frames.dof_anchor[dn]) * F.transpose(), ad) -
+                       0.5 * (rot_rot(au, P, ad) + rot_rot(ad, P, au));
+              } else {
+                term = au.cross(ad).dot(F);
+              }
+            }
+          }
+          K(i, j) += term;
+          if (i != j) K(j, i) += term;
+        }
+      }
+    }
+  }
+  return K;
+}
+
+MatrixXd contact_hessian_exact(const Model& model, const Frames& frames, const std::vector<Contact>& contacts, double kappa,
+                               double dhat) {
+  MatrixXd H = contact_chain_curvature(model, frames, contacts, kappa, dhat);
+  for (const Contact& c : contacts) {
+    const MatrixXd J = contact_twist_jacobian(model, frames, c);
+    H += J.transpose() * contact_wrench_hessian(model, frames, c, kappa, dhat) * J;
   }
   return H;
 }

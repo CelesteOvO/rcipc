@@ -514,6 +514,8 @@ $\kappa$ 只在第一步初始化，之后跨步沿用；每次线搜索之后�
 
 第 4 节第 5 步，GN 丢掉了 $\kappa b'\,\partial^2 x/\partial\delta^2$。在笛卡尔 IPC 里这一项要么不存在，要么是安全的；在关节坐标里它会出问题：书上观察到，接触的间隙被 Newton 一次次“挖小”，从 $8\times10^{-8}$ 挖到 $7\times10^{-10}$（第 175 页）。
 
+（阶段 14，[17_contact_hessian.md](17_contact_hessian.md)：这一项也可以精确地算出来，每个接触在两侧刚体的旋量空间里做 12 x 12 的半正定投影；`StepParams::full_contact_hessian` 打开。它让静止链上的 Newton 少一步，但每步慢几倍，默认仍用这一节的上界。）
+
 ### 物理想法
 
 GN 用线性模型预测距离：$x(\delta) \approx x_0 + r\delta$。但关节转动时顶点走弧线，距离还有二阶变化：

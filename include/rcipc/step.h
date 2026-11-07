@@ -61,6 +61,10 @@ struct StepParams {
   // 树块上 floor * M / h^2 + K 正定才加 K（add_inertia_curvature）。0.99：K 可以抵掉质量矩阵 99% 的曲率；
   // 小的 floor 只在 K 接近半正定（链被拉紧）时才加。笔记 16 第 5 节比较了两者。
   double inertia_curvature_floor = 0.99;
+  // 阶段 14：接触的 Hessian 用完整的二阶导数（每个接触 12 x 12 的旋量块做半正定投影，contact_rows_full），
+  // 链上的剩余项和惯性的曲率项一起经正定检查进树块；这时阶段 6 的曲率上界不再需要（curv_scale 当 0）。
+  // false 退回 Gauss-Newton 行加曲率上界（笔记 notes/17_contact_hessian.md）。
+  bool full_contact_hessian = false;
 };
 
 // 跨时间步保留的求解器状态。kappa 在第一次出现接触时初始化，之后沿用并按间隙调整。

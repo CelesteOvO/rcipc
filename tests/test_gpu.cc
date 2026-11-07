@@ -26,6 +26,7 @@
 #include "rcipc/limits.h"
 #include "rcipc/model.h"
 #include "rcipc/quat.h"
+#include "rcipc/solver.h"
 #include "rcipc/step.h"
 
 using namespace rcipc;
@@ -65,11 +66,23 @@ gpu::Stepper::Terms cpu_terms(const Model& M, const StepParams& P, const VectorX
   out.g = inertia_gradient(M, F, T, P.h) + contact_gradient(M, F, C, kappa, P.dhat) +
           friction_gradient(M, F, FC, P.h, P.mu, P.eps_v) + limit_gradient(M, q, P.limit_k, P.limit_dhat);
   const MatrixXd Mh = inertia_hessian(M, F, P.h);
-  out.H = Mh + contact_curvature(M, q, C, kappa, P.dhat, P.curv_scale) + contact_hessian(M, F, C, kappa, P.dhat) +
-          friction_hessian(M, F, FC, P.h, P.mu, P.eps_v);
-  out.H.diagonal() += limit_hessian_diagonal(M, q, P.limit_k, P.limit_dhat);
-  if (P.inertia_curvature) add_inertia_curvature(M, Mh, inertia_curvature(M, F, T, P.h, P.inertia_curvature_rot), &out.H,
-                                             P.inertia_curvature_floor);  // 阶段 13
+  if (P.full_contact_hessian) {
+    // 阶段 14：行是每个接触的旋量块的半正定部分，链上剩余项和惯性的曲率项一起检查（同 step.cc）。
+    NewtonSystem sys;
+    sys.Hk = MatrixXd::Zero(M.nv, M.nv);
+    contact_rows_full(M, F, C, kappa, P.dhat, &sys.rows);
+    out.H = Mh + dense(sys) + friction_hessian(M, F, FC, P.h, P.mu, P.eps_v);
+    out.H.diagonal() += limit_hessian_diagonal(M, q, P.limit_k, P.limit_dhat);
+    MatrixXd K = contact_chain_curvature(M, F, C, kappa, P.dhat);
+    if (P.inertia_curvature) K += inertia_curvature(M, F, T, P.h, P.inertia_curvature_rot);
+    add_inertia_curvature(M, Mh, K, &out.H, P.inertia_curvature_floor);
+  } else {
+    out.H = Mh + contact_curvature(M, q, C, kappa, P.dhat, P.curv_scale) + contact_hessian(M, F, C, kappa, P.dhat) +
+            friction_hessian(M, F, FC, P.h, P.mu, P.eps_v);
+    out.H.diagonal() += limit_hessian_diagonal(M, q, P.limit_k, P.limit_dhat);
+    if (P.inertia_curvature) add_inertia_curvature(M, Mh, inertia_curvature(M, F, T, P.h, P.inertia_curvature_rot), &out.H,
+                                               P.inertia_curvature_floor);  // 阶段 13
+  }
   out.ncontact = static_cast<int>(C.size());
   out.nfriction = static_cast<int>(FC.size());
   return out;
@@ -238,6 +251,42 @@ TEST(Terms, RagdollWithLimits) {
   StepParams P;
   const State s = cpu_run(M, P, 300, M.qpos0, VectorXd::Zero(M.nv));
   expect_terms_match(M, P, s, s.q, "ragdoll");
+}
+
+// 阶段 14：完整的接触 Hessian。两个盒子（自由刚体：链上剩余项为 0）、台阶（mollifier）、布娃娃（铰链锚点不在原点、
+// 深的链：剩余项非零，走 CB 和曲率内核的那条路）。行数变成每个接触 12 行，摩擦行跟在后面。
+TEST(Terms, FullContactHessian) {
+  REQUIRE_GPU();
+  {
+    const Model M = load("stack.xml");
+    StepParams P;
+    P.full_contact_hessian = true;
+    const State s = cpu_run(M, P, 300, M.qpos0, VectorXd::Zero(12));
+    ASSERT_GT(s.S.kappa, 0);
+    expect_terms_match(M, P, s, s.q, "stack, full");
+    // 和 Gauss-Newton 的确实不一样（切向的刚度不同）。
+    gpu::Stepper G(M);
+    const MatrixXd Hf = G.terms(P, s.q, s.v, s.S.kappa, s.q).H;
+    P.full_contact_hessian = false;
+    const MatrixXd Hg = G.terms(P, s.q, s.v, s.S.kappa, s.q).H;
+    EXPECT_GT((Hf - Hg).norm(), 1e-6 * Hg.norm());
+  }
+  {
+    const Model M = load("ledge.xml");
+    StepParams P;
+    P.full_contact_hessian = true;
+    const State s = cpu_run(M, P, 120, M.qpos0, VectorXd::Zero(6));
+    expect_terms_match(M, P, s, s.q, "ledge, full");
+  }
+  {
+    const Model M = load("ragdoll.xml");
+    StepParams P;
+    P.full_contact_hessian = true;
+    const State s = cpu_run(M, P, 300, M.qpos0, VectorXd::Zero(M.nv));
+    expect_terms_match(M, P, s, s.q, "ragdoll, full");
+    P.inertia_curvature = false;  // 只有接触的剩余项进曲率内核
+    expect_terms_match(M, P, s, s.q, "ragdoll, full, no inertia curvature");
+  }
 }
 
 // 网格布娃娃（和 libuipc 同一套网格，d̂ = 1 cm）。

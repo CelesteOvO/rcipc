@@ -305,9 +305,16 @@ __device__ inline double rot_rot(V3 a, const double* G, V3 o, V3 f, V3 b) {
   const double trQ = G[0] + G[4] + G[8] - dot(o, f);
   return aGb - dot(a, o) * dot(f, b) - dot(a, b) * trQ;
 }
+// a^T P b - (a . b) tr P（P 按行存 9 个）。
+__device__ inline double rot_rot_plain(V3 a, const double* P, V3 b) {
+  const double aPb = a.x * (P[0] * b.x + P[1] * b.y + P[2] * b.z) + a.y * (P[3] * b.x + P[4] * b.y + P[5] * b.z) +
+                     a.z * (P[6] * b.x + P[7] * b.y + P[8] * b.z);
+  return aPb - dot(a, b) * (P[0] + P[4] + P[8]);
+}
 
 __global__ void k_inertia_curvature(DModel m, DFrames F, const double* tc, const double* tA, double h, double rot,
-                                    double floor, double* Hk, double* K, unsigned long long* dropped) {
+                                    double floor, double* Hk, double* K, unsigned long long* dropped, const double* CB,
+                                    int inertia) {
   // 阶段 13：inertia_curvature + add_inertia_curvature（inertia.cc）。一个线程块一棵树 t。
   //   1. 每个刚体 b：f_b = m (c - c~) / h^2，G_b = R S (R - A~)^T / h^2 + c_b f_b^T；再对子树求和 Gbar、fbar。
   //      刚体 b 的 Q(o) = G_b - o f_b^T，子树上的和就是 Gbar - o fbar^T：每个元素 O(1)，不用逐个刚体加（同 CRBA）。
@@ -320,9 +327,10 @@ __global__ void k_inertia_curvature(DModel m, DFrames F, const double* tc, const
   extern __shared__ double sh[];
   const int t = blockIdx.x;
   const int TD = m.TD, n = m.tndof[t], d0 = m.tdof0[t], b0 = m.tbody0[t], nb = m.tnbody[t];
-  double* G = sh;               // TB x 12：每个刚体的 G_b（9 个）和 f_b（3 个）
-  double* Gs = G + 12 * m.TB;   // TB x 12：子树之和
-  double* sa = Gs + 12 * m.TB;  // TD x 3：轴
+  // 阶段 14：每个刚体多存 9 个——接触的 P = sum (X - xpos) f^T（CB 的后 9 个），它已经在旋量块里，K 里要减掉。
+  double* G = sh;               // TB x 21：每个刚体的 G_b（9 个）、f_b（3 个）、P_b（9 个）
+  double* Gs = G + 21 * m.TB;   // TB x 21：子树之和
+  double* sa = Gs + 21 * m.TB;  // TD x 3：轴
   double* so = sa + 3 * TD;     // TD x 3：锚点
   double* sc = so + 3 * TD;     // TD：缩放
   double* B = sc + TD;          // n x n
@@ -340,12 +348,19 @@ __global__ void k_inertia_curvature(DModel m, DFrames F, const double* tc, const
       for (int j = 0; j < 3; ++j) Dt.m[3 * i + j] = R.m[3 * j + i] - tA[9 * b + 3 * j + i];
     const M3 P = mm(mm(R, mload(m.S + 9 * b)), Dt);
     const double cv[3] = {c.x, c.y, c.z}, fv[3] = {f.x, f.y, f.z};
-    double* g = G + 12 * k;
+    double* g = G + 21 * k;
     for (int i = 0; i < 3; ++i)
-      for (int j = 0; j < 3; ++j) g[3 * i + j] = rot * P.m[3 * i + j] * ih2 + cv[i] * fv[j];  // rot = 0：不要转动那一部分
-    g[9] = f.x;
-    g[10] = f.y;
-    g[11] = f.z;
+      for (int j = 0; j < 3; ++j)
+        g[3 * i + j] = inertia ? rot * P.m[3 * i + j] * ih2 + cv[i] * fv[j] : 0.0;  // rot = 0：不要转动那一部分
+    g[9] = inertia ? f.x : 0.0;
+    g[10] = inertia ? f.y : 0.0;
+    g[11] = inertia ? f.z : 0.0;
+    for (int i = 0; i < 9; ++i) g[12 + i] = 0;
+    if (CB) {  // 阶段 14：接触的那一份（G = P + xpos F^T 和惯性的 c f^T 同一个形式，所以直接加）
+      const double* cb = CB + 21 * static_cast<size_t>(b);
+      for (int i = 0; i < 12; ++i) g[i] += cb[i];
+      for (int i = 0; i < 9; ++i) g[12 + i] = cb[12 + i];
+    }
   }
   for (int li = threadIdx.x; li < n; li += blockDim.x) {
     for (int c = 0; c < 3; ++c) {
@@ -357,10 +372,10 @@ __global__ void k_inertia_curvature(DModel m, DFrames F, const double* tc, const
   }
   if (threadIdx.x == 0) ok = 1;
   __syncthreads();
-  for (int e = threadIdx.x; e < nb * 12; e += blockDim.x) {
-    const int k = e / 12, a = e % 12, b = b0 + k;
+  for (int e = threadIdx.x; e < nb * 21; e += blockDim.x) {
+    const int k = e / 21, a = e % 21, b = b0 + k;
     double s = 0;
-    for (int c = b; c < m.bsub_end[b]; ++c) s += G[12 * (c - b0) + a];
+    for (int c = b; c < m.bsub_end[b]; ++c) s += G[21 * (c - b0) + a];
     Gs[e] = s;
   }
   __syncthreads();
@@ -372,18 +387,25 @@ __global__ void k_inertia_curvature(DModel m, DFrames F, const double* tc, const
     const int lo = max(bi, bj);
     double v = 0;
     if (lo < min(m.bsub_end[bi], m.bsub_end[bj])) {
-      const double* gs = Gs + 12 * (lo - b0);
+      const double* gs = Gs + 21 * (lo - b0);
       const V3 fs = v3(gs[9], gs[10], gs[11]);
       if (bi == bj) {  // 同一个关节
         if (m.drot[i] && m.drot[j]) {
           const V3 ai = v3load(sa + 3 * li), aj = v3load(sa + 3 * lj), o = v3load(so + 3 * lj);
           v = 0.5 * (rot_rot(ai, gs, o, fs, aj) + rot_rot(aj, gs, o, fs, ai));
+          if (CB) v -= 0.5 * (rot_rot_plain(ai, gs + 12, aj) + rot_rot_plain(aj, gs + 12, ai));
         }
       } else {
         const int up = bi < bj ? li : lj, dn = bi < bj ? lj : li;
         if (m.drot[d0 + up]) {
           const V3 au = v3load(sa + 3 * up), ad = v3load(sa + 3 * dn);
-          v = m.drot[d0 + dn] ? rot_rot(au, gs, v3load(so + 3 * dn), fs, ad) : dot(cross(au, ad), fs);
+          if (m.drot[d0 + dn]) {
+            v = rot_rot(au, gs, v3load(so + 3 * dn), fs, ad);
+            // 阶段 14：旋量块里已经有对称化的 rot_rot(a, P, b)（contact_chain_curvature 的第二条）
+            if (CB) v -= 0.5 * (rot_rot_plain(au, gs + 12, ad) + rot_rot_plain(ad, gs + 12, au));
+          } else {
+            v = dot(cross(au, ad), fs);
+          }
         }
       }
     }
@@ -535,7 +557,7 @@ void launch_inertia_hessian(const DModel& m, const DFrames& F, double h, double*
 }
 
 size_t inertia_curvature_smem(const DModel& m) {
-  return sizeof(double) * (24 * static_cast<size_t>(m.TB) + 7 * static_cast<size_t>(m.TD) +
+  return sizeof(double) * (42 * static_cast<size_t>(m.TB) + 7 * static_cast<size_t>(m.TD) +
                            static_cast<size_t>(m.TD) * m.TD);
 }
 
@@ -554,9 +576,11 @@ bool inertia_curvature_fits(const DModel& m) {
 }
 
 void launch_inertia_curvature(const DModel& m, const DFrames& F, const double* tc, const double* tA, double h, bool rot,
-                              double floor, double* Hk, double* K, unsigned long long* dropped) {
+                              double floor, double* Hk, double* K, unsigned long long* dropped, const double* CB,
+                              bool inertia) {
   if (m.ntree == 0) return;
-  k_inertia_curvature<<<m.ntree, 256, inertia_curvature_smem(m)>>>(m, F, tc, tA, h, rot ? 1.0 : 0.0, floor, Hk, K, dropped);
+  k_inertia_curvature<<<m.ntree, 256, inertia_curvature_smem(m)>>>(m, F, tc, tA, h, rot ? 1.0 : 0.0, floor, Hk, K, dropped,
+                                                                   CB, inertia ? 1 : 0);
 }
 
 void launch_drives(const DModel& m, const DDrive& D, const double* q, double* e, double* g, double* Hk) {

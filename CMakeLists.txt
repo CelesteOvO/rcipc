@@ -14,6 +14,8 @@ if(MSVC)
   # /W4：较高的警告级别。/permissive-：按标准 C++ 严格检查。
   # 只给 C++ 源文件（阶段 11 的 .cu 文件由 nvcc 编译，它不认这些选项，见下面的 CUDA 部分）。
   add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/utf-8> $<$<COMPILE_LANGUAGE:CXX>:/W4> $<$<COMPILE_LANGUAGE:CXX>:/permissive->)
+  # /bigobj：contact.cc 里固定大小的 Eigen 模板（12 x 12 的旋量块、特征分解）在 Debug 下节数超过 .obj 的默认上限。
+  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/bigobj>)
   add_compile_definitions(_CRT_SECURE_NO_WARNINGS)  # 允许用 fopen 等函数，不必换成 fopen_s
 else()
   add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wall> $<$<COMPILE_LANGUAGE:CXX>:-Wextra>)
@@ -92,6 +94,7 @@ if(RCIPC_CUDA AND CMAKE_CUDA_COMPILER)
     src/gpu/stepper.cc   # 主机：上传模型、Newton 循环
     src/gpu/kin.cu       # 正运动学、惯性项、关节限位
     src/gpu/contact.cu   # 接触检测、接触行、摩擦
+    src/gpu/contact_full.cu  # 阶段 14：完整的接触 Hessian（12 x 12 的旋量块、特征分解成行）
     src/gpu/narrow.cu    # 检测和 CCD 共用的窄相剔除（刚体坐标系里的分组）
     src/gpu/ccd.cu       # 曲线 CCD
     src/gpu/solver.cu    # PCG 和树块预条件器
