@@ -1,0 +1,2313 @@
+<!--
+  由 compare/rigid_ipc/import_rigid_ipc.py 从 Rigid-IPC 的 ../../../rigid-ipc/fixtures/3D/chain/wrecking-ball.json 生成，
+  scene_demo 参数：T=10 h=0.01 dhat=0.001 mu=0（笔记 notes/compare_rigid_ipc.md）。
+-->
+<mujoco model="wrecking-ball">
+  <compiler angle="radian" meshdir="D:/Project/rigid-ipc/meshes"/>
+  <option gravity="0 -9.81 0" timestep="0.01"/>
+  <default>
+    <geom friction="0 0 0"/>
+  </default>
+  <asset>
+    <mesh name="link" file="wrecking-ball/link.obj" scale="1 1 1" inertia="shell"/>
+    <mesh name="link_1" file="wrecking-ball/link.obj" scale="1 1 1" inertia="exact"/>
+    <mesh name="ball" file="wrecking-ball/ball.obj" scale="1 1 1" inertia="exact"/>
+    <mesh name="cube" file="cube.obj" scale="1 1 1" inertia="exact"/>
+  </asset>
+  <worldbody>
+    <geom name="link0" type="mesh" mesh="link" pos="10.9119201 18.3 0" quat="0.866025404 0 0 -0.5"/>
+    <geom name="plane14" type="plane" pos="10.9119201 -1 0" quat="-0.5 0.5 0.5 0.5" size="10 10 0.1"/>
+    <body name="link1" pos="10.1324972 17.85 0" quat="0.612372436 0.353553391 0.612372436 -0.353553391">
+      <freejoint/>
+      <geom name="link1" type="mesh" mesh="link_1" density="7680"/>
+    </body>
+    <body name="link2" pos="9.35307436 17.4 0" quat="0.866025404 0 0 -0.5">
+      <freejoint/>
+      <geom name="link2" type="mesh" mesh="link_1" density="7680"/>
+    </body>
+    <body name="link3" pos="8.5736515 16.95 0" quat="0.612372436 0.353553391 0.612372436 -0.353553391">
+      <freejoint/>
+      <geom name="link3" type="mesh" mesh="link_1" density="7680"/>
+    </body>
+    <body name="link4" pos="7.79422863 16.5 0" quat="0.866025404 0 0 -0.5">
+      <freejoint/>
+      <geom name="link4" type="mesh" mesh="link_1" density="7680"/>
+    </body>
+    <body name="link5" pos="7.01480577 16.05 0" quat="0.612372436 0.353553391 0.612372436 -0.353553391">
+      <freejoint/>
+      <geom name="link5" type="mesh" mesh="link_1" density="7680"/>
+    </body>
+    <body name="link6" pos="6.23538291 15.6 0" quat="0.866025404 0 0 -0.5">
+      <freejoint/>
+      <geom name="link6" type="mesh" mesh="link_1" density="7680"/>
+    </body>
+    <body name="link7" pos="5.45596004 15.15 0" quat="0.612372436 0.353553391 0.612372436 -0.353553391">
+      <freejoint/>
+      <geom name="link7" type="mesh" mesh="link_1" density="7680"/>
+    </body>
+    <body name="link8" pos="4.67653718 14.7 0" quat="0.866025404 0 0 -0.5">
+      <freejoint/>
+      <geom name="link8" type="mesh" mesh="link_1" density="7680"/>
+    </body>
+    <body name="link9" pos="3.89711432 14.25 0" quat="0.612372436 0.353553391 0.612372436 -0.353553391">
+      <freejoint/>
+      <geom name="link9" type="mesh" mesh="link_1" density="7680"/>
+    </body>
+    <body name="link10" pos="3.11769145 13.8 0" quat="0.866025404 0 0 -0.5">
+      <freejoint/>
+      <geom name="link10" type="mesh" mesh="link_1" density="7680"/>
+    </body>
+    <body name="link11" pos="2.33826859 13.35 0" quat="0.612372436 0.353553391 0.612372436 -0.353553391">
+      <freejoint/>
+      <geom name="link11" type="mesh" mesh="link_1" density="7680"/>
+    </body>
+    <body name="link12" pos="1.55884573 12.9 0" quat="0.866025404 0 0 -0.5">
+      <freejoint/>
+      <geom name="link12" type="mesh" mesh="link_1" density="7680"/>
+    </body>
+    <body name="ball13" pos="0.779422863 12.45 0" quat="0.612372436 0.353553391 0.612372436 -0.353553391">
+      <freejoint/>
+      <geom name="ball13" type="mesh" mesh="ball" density="7680"/>
+    </body>
+    <body name="cube15" pos="7.41192009 -0.45 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube15" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube16" pos="7.41192009 -0.45 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube16" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube17" pos="7.41192009 -0.45 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube17" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube18" pos="7.41192009 -0.45 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube18" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube19" pos="7.41192009 -0.45 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube19" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube20" pos="7.41192009 -0.45 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube20" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube21" pos="7.41192009 -0.45 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube21" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube22" pos="7.41192009 -0.45 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube22" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube23" pos="7.41192009 -0.45 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube23" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube24" pos="7.41192009 -0.45 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube24" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube25" pos="7.41192009 0.6 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube25" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube26" pos="7.41192009 0.6 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube26" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube27" pos="7.41192009 0.6 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube27" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube28" pos="7.41192009 0.6 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube28" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube29" pos="7.41192009 0.6 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube29" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube30" pos="7.41192009 0.6 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube30" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube31" pos="7.41192009 0.6 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube31" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube32" pos="7.41192009 0.6 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube32" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube33" pos="7.41192009 0.6 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube33" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube34" pos="7.41192009 0.6 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube34" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube35" pos="7.41192009 1.65 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube35" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube36" pos="7.41192009 1.65 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube36" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube37" pos="7.41192009 1.65 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube37" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube38" pos="7.41192009 1.65 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube38" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube39" pos="7.41192009 1.65 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube39" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube40" pos="7.41192009 1.65 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube40" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube41" pos="7.41192009 1.65 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube41" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube42" pos="7.41192009 1.65 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube42" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube43" pos="7.41192009 1.65 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube43" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube44" pos="7.41192009 1.65 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube44" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube45" pos="7.41192009 2.7 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube45" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube46" pos="7.41192009 2.7 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube46" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube47" pos="7.41192009 2.7 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube47" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube48" pos="7.41192009 2.7 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube48" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube49" pos="7.41192009 2.7 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube49" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube50" pos="7.41192009 2.7 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube50" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube51" pos="7.41192009 2.7 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube51" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube52" pos="7.41192009 2.7 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube52" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube53" pos="7.41192009 2.7 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube53" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube54" pos="7.41192009 2.7 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube54" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube55" pos="7.41192009 3.75 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube55" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube56" pos="7.41192009 3.75 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube56" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube57" pos="7.41192009 3.75 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube57" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube58" pos="7.41192009 3.75 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube58" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube59" pos="7.41192009 3.75 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube59" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube60" pos="7.41192009 3.75 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube60" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube61" pos="7.41192009 3.75 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube61" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube62" pos="7.41192009 3.75 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube62" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube63" pos="7.41192009 3.75 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube63" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube64" pos="7.41192009 3.75 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube64" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube65" pos="7.41192009 4.8 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube65" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube66" pos="7.41192009 4.8 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube66" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube67" pos="7.41192009 4.8 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube67" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube68" pos="7.41192009 4.8 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube68" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube69" pos="7.41192009 4.8 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube69" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube70" pos="7.41192009 4.8 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube70" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube71" pos="7.41192009 4.8 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube71" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube72" pos="7.41192009 4.8 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube72" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube73" pos="7.41192009 4.8 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube73" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube74" pos="7.41192009 4.8 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube74" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube75" pos="7.41192009 5.85 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube75" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube76" pos="7.41192009 5.85 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube76" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube77" pos="7.41192009 5.85 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube77" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube78" pos="7.41192009 5.85 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube78" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube79" pos="7.41192009 5.85 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube79" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube80" pos="7.41192009 5.85 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube80" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube81" pos="7.41192009 5.85 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube81" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube82" pos="7.41192009 5.85 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube82" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube83" pos="7.41192009 5.85 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube83" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube84" pos="7.41192009 5.85 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube84" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube85" pos="8.46192009 -0.45 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube85" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube86" pos="8.46192009 -0.45 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube86" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube87" pos="8.46192009 -0.45 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube87" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube88" pos="8.46192009 -0.45 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube88" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube89" pos="8.46192009 -0.45 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube89" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube90" pos="8.46192009 -0.45 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube90" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube91" pos="8.46192009 -0.45 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube91" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube92" pos="8.46192009 -0.45 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube92" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube93" pos="8.46192009 -0.45 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube93" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube94" pos="8.46192009 -0.45 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube94" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube95" pos="8.46192009 0.6 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube95" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube96" pos="8.46192009 0.6 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube96" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube97" pos="8.46192009 0.6 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube97" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube98" pos="8.46192009 0.6 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube98" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube99" pos="8.46192009 0.6 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube99" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube100" pos="8.46192009 0.6 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube100" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube101" pos="8.46192009 0.6 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube101" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube102" pos="8.46192009 0.6 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube102" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube103" pos="8.46192009 0.6 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube103" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube104" pos="8.46192009 0.6 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube104" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube105" pos="8.46192009 1.65 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube105" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube106" pos="8.46192009 1.65 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube106" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube107" pos="8.46192009 1.65 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube107" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube108" pos="8.46192009 1.65 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube108" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube109" pos="8.46192009 1.65 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube109" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube110" pos="8.46192009 1.65 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube110" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube111" pos="8.46192009 1.65 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube111" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube112" pos="8.46192009 1.65 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube112" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube113" pos="8.46192009 1.65 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube113" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube114" pos="8.46192009 1.65 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube114" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube115" pos="8.46192009 2.7 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube115" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube116" pos="8.46192009 2.7 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube116" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube117" pos="8.46192009 2.7 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube117" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube118" pos="8.46192009 2.7 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube118" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube119" pos="8.46192009 2.7 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube119" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube120" pos="8.46192009 2.7 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube120" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube121" pos="8.46192009 2.7 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube121" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube122" pos="8.46192009 2.7 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube122" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube123" pos="8.46192009 2.7 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube123" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube124" pos="8.46192009 2.7 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube124" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube125" pos="8.46192009 3.75 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube125" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube126" pos="8.46192009 3.75 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube126" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube127" pos="8.46192009 3.75 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube127" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube128" pos="8.46192009 3.75 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube128" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube129" pos="8.46192009 3.75 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube129" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube130" pos="8.46192009 3.75 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube130" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube131" pos="8.46192009 3.75 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube131" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube132" pos="8.46192009 3.75 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube132" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube133" pos="8.46192009 3.75 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube133" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube134" pos="8.46192009 3.75 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube134" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube135" pos="8.46192009 4.8 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube135" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube136" pos="8.46192009 4.8 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube136" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube137" pos="8.46192009 4.8 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube137" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube138" pos="8.46192009 4.8 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube138" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube139" pos="8.46192009 4.8 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube139" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube140" pos="8.46192009 4.8 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube140" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube141" pos="8.46192009 4.8 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube141" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube142" pos="8.46192009 4.8 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube142" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube143" pos="8.46192009 4.8 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube143" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube144" pos="8.46192009 4.8 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube144" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube145" pos="8.46192009 5.85 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube145" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube146" pos="8.46192009 5.85 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube146" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube147" pos="8.46192009 5.85 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube147" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube148" pos="8.46192009 5.85 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube148" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube149" pos="8.46192009 5.85 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube149" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube150" pos="8.46192009 5.85 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube150" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube151" pos="8.46192009 5.85 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube151" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube152" pos="8.46192009 5.85 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube152" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube153" pos="8.46192009 5.85 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube153" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube154" pos="8.46192009 5.85 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube154" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube155" pos="9.51192009 -0.45 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube155" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube156" pos="9.51192009 -0.45 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube156" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube157" pos="9.51192009 -0.45 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube157" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube158" pos="9.51192009 -0.45 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube158" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube159" pos="9.51192009 -0.45 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube159" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube160" pos="9.51192009 -0.45 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube160" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube161" pos="9.51192009 -0.45 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube161" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube162" pos="9.51192009 -0.45 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube162" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube163" pos="9.51192009 -0.45 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube163" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube164" pos="9.51192009 -0.45 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube164" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube165" pos="9.51192009 0.6 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube165" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube166" pos="9.51192009 0.6 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube166" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube167" pos="9.51192009 0.6 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube167" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube168" pos="9.51192009 0.6 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube168" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube169" pos="9.51192009 0.6 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube169" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube170" pos="9.51192009 0.6 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube170" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube171" pos="9.51192009 0.6 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube171" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube172" pos="9.51192009 0.6 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube172" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube173" pos="9.51192009 0.6 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube173" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube174" pos="9.51192009 0.6 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube174" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube175" pos="9.51192009 1.65 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube175" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube176" pos="9.51192009 1.65 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube176" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube177" pos="9.51192009 1.65 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube177" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube178" pos="9.51192009 1.65 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube178" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube179" pos="9.51192009 1.65 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube179" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube180" pos="9.51192009 1.65 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube180" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube181" pos="9.51192009 1.65 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube181" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube182" pos="9.51192009 1.65 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube182" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube183" pos="9.51192009 1.65 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube183" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube184" pos="9.51192009 1.65 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube184" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube185" pos="9.51192009 2.7 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube185" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube186" pos="9.51192009 2.7 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube186" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube187" pos="9.51192009 2.7 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube187" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube188" pos="9.51192009 2.7 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube188" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube189" pos="9.51192009 2.7 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube189" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube190" pos="9.51192009 2.7 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube190" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube191" pos="9.51192009 2.7 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube191" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube192" pos="9.51192009 2.7 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube192" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube193" pos="9.51192009 2.7 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube193" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube194" pos="9.51192009 2.7 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube194" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube195" pos="9.51192009 3.75 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube195" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube196" pos="9.51192009 3.75 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube196" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube197" pos="9.51192009 3.75 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube197" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube198" pos="9.51192009 3.75 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube198" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube199" pos="9.51192009 3.75 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube199" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube200" pos="9.51192009 3.75 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube200" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube201" pos="9.51192009 3.75 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube201" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube202" pos="9.51192009 3.75 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube202" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube203" pos="9.51192009 3.75 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube203" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube204" pos="9.51192009 3.75 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube204" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube205" pos="9.51192009 4.8 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube205" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube206" pos="9.51192009 4.8 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube206" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube207" pos="9.51192009 4.8 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube207" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube208" pos="9.51192009 4.8 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube208" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube209" pos="9.51192009 4.8 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube209" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube210" pos="9.51192009 4.8 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube210" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube211" pos="9.51192009 4.8 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube211" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube212" pos="9.51192009 4.8 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube212" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube213" pos="9.51192009 4.8 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube213" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube214" pos="9.51192009 4.8 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube214" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube215" pos="9.51192009 5.85 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube215" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube216" pos="9.51192009 5.85 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube216" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube217" pos="9.51192009 5.85 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube217" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube218" pos="9.51192009 5.85 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube218" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube219" pos="9.51192009 5.85 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube219" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube220" pos="9.51192009 5.85 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube220" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube221" pos="9.51192009 5.85 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube221" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube222" pos="9.51192009 5.85 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube222" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube223" pos="9.51192009 5.85 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube223" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube224" pos="9.51192009 5.85 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube224" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube225" pos="10.5619201 -0.45 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube225" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube226" pos="10.5619201 -0.45 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube226" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube227" pos="10.5619201 -0.45 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube227" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube228" pos="10.5619201 -0.45 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube228" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube229" pos="10.5619201 -0.45 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube229" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube230" pos="10.5619201 -0.45 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube230" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube231" pos="10.5619201 -0.45 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube231" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube232" pos="10.5619201 -0.45 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube232" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube233" pos="10.5619201 -0.45 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube233" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube234" pos="10.5619201 -0.45 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube234" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube235" pos="10.5619201 0.6 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube235" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube236" pos="10.5619201 0.6 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube236" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube237" pos="10.5619201 0.6 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube237" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube238" pos="10.5619201 0.6 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube238" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube239" pos="10.5619201 0.6 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube239" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube240" pos="10.5619201 0.6 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube240" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube241" pos="10.5619201 0.6 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube241" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube242" pos="10.5619201 0.6 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube242" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube243" pos="10.5619201 0.6 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube243" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube244" pos="10.5619201 0.6 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube244" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube245" pos="10.5619201 1.65 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube245" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube246" pos="10.5619201 1.65 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube246" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube247" pos="10.5619201 1.65 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube247" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube248" pos="10.5619201 1.65 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube248" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube249" pos="10.5619201 1.65 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube249" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube250" pos="10.5619201 1.65 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube250" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube251" pos="10.5619201 1.65 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube251" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube252" pos="10.5619201 1.65 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube252" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube253" pos="10.5619201 1.65 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube253" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube254" pos="10.5619201 1.65 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube254" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube255" pos="10.5619201 2.7 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube255" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube256" pos="10.5619201 2.7 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube256" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube257" pos="10.5619201 2.7 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube257" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube258" pos="10.5619201 2.7 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube258" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube259" pos="10.5619201 2.7 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube259" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube260" pos="10.5619201 2.7 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube260" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube261" pos="10.5619201 2.7 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube261" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube262" pos="10.5619201 2.7 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube262" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube263" pos="10.5619201 2.7 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube263" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube264" pos="10.5619201 2.7 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube264" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube265" pos="10.5619201 3.75 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube265" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube266" pos="10.5619201 3.75 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube266" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube267" pos="10.5619201 3.75 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube267" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube268" pos="10.5619201 3.75 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube268" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube269" pos="10.5619201 3.75 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube269" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube270" pos="10.5619201 3.75 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube270" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube271" pos="10.5619201 3.75 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube271" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube272" pos="10.5619201 3.75 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube272" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube273" pos="10.5619201 3.75 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube273" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube274" pos="10.5619201 3.75 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube274" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube275" pos="10.5619201 4.8 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube275" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube276" pos="10.5619201 4.8 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube276" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube277" pos="10.5619201 4.8 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube277" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube278" pos="10.5619201 4.8 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube278" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube279" pos="10.5619201 4.8 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube279" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube280" pos="10.5619201 4.8 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube280" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube281" pos="10.5619201 4.8 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube281" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube282" pos="10.5619201 4.8 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube282" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube283" pos="10.5619201 4.8 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube283" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube284" pos="10.5619201 4.8 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube284" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube285" pos="10.5619201 5.85 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube285" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube286" pos="10.5619201 5.85 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube286" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube287" pos="10.5619201 5.85 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube287" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube288" pos="10.5619201 5.85 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube288" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube289" pos="10.5619201 5.85 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube289" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube290" pos="10.5619201 5.85 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube290" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube291" pos="10.5619201 5.85 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube291" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube292" pos="10.5619201 5.85 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube292" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube293" pos="10.5619201 5.85 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube293" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube294" pos="10.5619201 5.85 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube294" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube295" pos="11.6119201 -0.45 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube295" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube296" pos="11.6119201 -0.45 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube296" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube297" pos="11.6119201 -0.45 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube297" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube298" pos="11.6119201 -0.45 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube298" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube299" pos="11.6119201 -0.45 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube299" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube300" pos="11.6119201 -0.45 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube300" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube301" pos="11.6119201 -0.45 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube301" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube302" pos="11.6119201 -0.45 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube302" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube303" pos="11.6119201 -0.45 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube303" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube304" pos="11.6119201 -0.45 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube304" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube305" pos="11.6119201 0.6 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube305" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube306" pos="11.6119201 0.6 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube306" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube307" pos="11.6119201 0.6 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube307" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube308" pos="11.6119201 0.6 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube308" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube309" pos="11.6119201 0.6 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube309" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube310" pos="11.6119201 0.6 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube310" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube311" pos="11.6119201 0.6 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube311" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube312" pos="11.6119201 0.6 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube312" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube313" pos="11.6119201 0.6 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube313" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube314" pos="11.6119201 0.6 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube314" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube315" pos="11.6119201 1.65 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube315" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube316" pos="11.6119201 1.65 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube316" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube317" pos="11.6119201 1.65 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube317" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube318" pos="11.6119201 1.65 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube318" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube319" pos="11.6119201 1.65 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube319" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube320" pos="11.6119201 1.65 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube320" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube321" pos="11.6119201 1.65 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube321" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube322" pos="11.6119201 1.65 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube322" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube323" pos="11.6119201 1.65 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube323" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube324" pos="11.6119201 1.65 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube324" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube325" pos="11.6119201 2.7 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube325" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube326" pos="11.6119201 2.7 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube326" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube327" pos="11.6119201 2.7 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube327" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube328" pos="11.6119201 2.7 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube328" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube329" pos="11.6119201 2.7 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube329" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube330" pos="11.6119201 2.7 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube330" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube331" pos="11.6119201 2.7 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube331" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube332" pos="11.6119201 2.7 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube332" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube333" pos="11.6119201 2.7 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube333" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube334" pos="11.6119201 2.7 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube334" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube335" pos="11.6119201 3.75 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube335" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube336" pos="11.6119201 3.75 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube336" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube337" pos="11.6119201 3.75 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube337" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube338" pos="11.6119201 3.75 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube338" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube339" pos="11.6119201 3.75 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube339" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube340" pos="11.6119201 3.75 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube340" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube341" pos="11.6119201 3.75 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube341" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube342" pos="11.6119201 3.75 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube342" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube343" pos="11.6119201 3.75 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube343" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube344" pos="11.6119201 3.75 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube344" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube345" pos="11.6119201 4.8 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube345" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube346" pos="11.6119201 4.8 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube346" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube347" pos="11.6119201 4.8 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube347" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube348" pos="11.6119201 4.8 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube348" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube349" pos="11.6119201 4.8 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube349" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube350" pos="11.6119201 4.8 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube350" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube351" pos="11.6119201 4.8 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube351" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube352" pos="11.6119201 4.8 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube352" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube353" pos="11.6119201 4.8 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube353" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube354" pos="11.6119201 4.8 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube354" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube355" pos="11.6119201 5.85 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube355" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube356" pos="11.6119201 5.85 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube356" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube357" pos="11.6119201 5.85 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube357" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube358" pos="11.6119201 5.85 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube358" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube359" pos="11.6119201 5.85 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube359" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube360" pos="11.6119201 5.85 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube360" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube361" pos="11.6119201 5.85 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube361" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube362" pos="11.6119201 5.85 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube362" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube363" pos="11.6119201 5.85 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube363" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube364" pos="11.6119201 5.85 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube364" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube365" pos="12.6619201 -0.45 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube365" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube366" pos="12.6619201 -0.45 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube366" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube367" pos="12.6619201 -0.45 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube367" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube368" pos="12.6619201 -0.45 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube368" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube369" pos="12.6619201 -0.45 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube369" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube370" pos="12.6619201 -0.45 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube370" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube371" pos="12.6619201 -0.45 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube371" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube372" pos="12.6619201 -0.45 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube372" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube373" pos="12.6619201 -0.45 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube373" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube374" pos="12.6619201 -0.45 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube374" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube375" pos="12.6619201 0.6 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube375" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube376" pos="12.6619201 0.6 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube376" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube377" pos="12.6619201 0.6 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube377" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube378" pos="12.6619201 0.6 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube378" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube379" pos="12.6619201 0.6 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube379" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube380" pos="12.6619201 0.6 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube380" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube381" pos="12.6619201 0.6 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube381" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube382" pos="12.6619201 0.6 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube382" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube383" pos="12.6619201 0.6 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube383" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube384" pos="12.6619201 0.6 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube384" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube385" pos="12.6619201 1.65 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube385" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube386" pos="12.6619201 1.65 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube386" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube387" pos="12.6619201 1.65 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube387" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube388" pos="12.6619201 1.65 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube388" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube389" pos="12.6619201 1.65 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube389" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube390" pos="12.6619201 1.65 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube390" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube391" pos="12.6619201 1.65 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube391" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube392" pos="12.6619201 1.65 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube392" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube393" pos="12.6619201 1.65 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube393" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube394" pos="12.6619201 1.65 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube394" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube395" pos="12.6619201 2.7 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube395" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube396" pos="12.6619201 2.7 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube396" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube397" pos="12.6619201 2.7 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube397" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube398" pos="12.6619201 2.7 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube398" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube399" pos="12.6619201 2.7 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube399" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube400" pos="12.6619201 2.7 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube400" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube401" pos="12.6619201 2.7 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube401" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube402" pos="12.6619201 2.7 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube402" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube403" pos="12.6619201 2.7 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube403" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube404" pos="12.6619201 2.7 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube404" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube405" pos="12.6619201 3.75 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube405" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube406" pos="12.6619201 3.75 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube406" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube407" pos="12.6619201 3.75 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube407" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube408" pos="12.6619201 3.75 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube408" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube409" pos="12.6619201 3.75 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube409" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube410" pos="12.6619201 3.75 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube410" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube411" pos="12.6619201 3.75 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube411" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube412" pos="12.6619201 3.75 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube412" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube413" pos="12.6619201 3.75 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube413" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube414" pos="12.6619201 3.75 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube414" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube415" pos="12.6619201 4.8 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube415" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube416" pos="12.6619201 4.8 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube416" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube417" pos="12.6619201 4.8 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube417" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube418" pos="12.6619201 4.8 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube418" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube419" pos="12.6619201 4.8 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube419" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube420" pos="12.6619201 4.8 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube420" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube421" pos="12.6619201 4.8 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube421" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube422" pos="12.6619201 4.8 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube422" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube423" pos="12.6619201 4.8 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube423" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube424" pos="12.6619201 4.8 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube424" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube425" pos="12.6619201 5.85 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube425" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube426" pos="12.6619201 5.85 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube426" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube427" pos="12.6619201 5.85 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube427" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube428" pos="12.6619201 5.85 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube428" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube429" pos="12.6619201 5.85 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube429" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube430" pos="12.6619201 5.85 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube430" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube431" pos="12.6619201 5.85 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube431" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube432" pos="12.6619201 5.85 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube432" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube433" pos="12.6619201 5.85 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube433" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube434" pos="12.6619201 5.85 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube434" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube435" pos="13.7119201 -0.45 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube435" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube436" pos="13.7119201 -0.45 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube436" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube437" pos="13.7119201 -0.45 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube437" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube438" pos="13.7119201 -0.45 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube438" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube439" pos="13.7119201 -0.45 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube439" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube440" pos="13.7119201 -0.45 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube440" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube441" pos="13.7119201 -0.45 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube441" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube442" pos="13.7119201 -0.45 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube442" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube443" pos="13.7119201 -0.45 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube443" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube444" pos="13.7119201 -0.45 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube444" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube445" pos="13.7119201 0.6 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube445" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube446" pos="13.7119201 0.6 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube446" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube447" pos="13.7119201 0.6 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube447" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube448" pos="13.7119201 0.6 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube448" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube449" pos="13.7119201 0.6 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube449" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube450" pos="13.7119201 0.6 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube450" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube451" pos="13.7119201 0.6 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube451" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube452" pos="13.7119201 0.6 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube452" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube453" pos="13.7119201 0.6 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube453" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube454" pos="13.7119201 0.6 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube454" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube455" pos="13.7119201 1.65 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube455" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube456" pos="13.7119201 1.65 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube456" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube457" pos="13.7119201 1.65 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube457" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube458" pos="13.7119201 1.65 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube458" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube459" pos="13.7119201 1.65 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube459" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube460" pos="13.7119201 1.65 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube460" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube461" pos="13.7119201 1.65 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube461" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube462" pos="13.7119201 1.65 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube462" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube463" pos="13.7119201 1.65 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube463" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube464" pos="13.7119201 1.65 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube464" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube465" pos="13.7119201 2.7 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube465" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube466" pos="13.7119201 2.7 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube466" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube467" pos="13.7119201 2.7 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube467" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube468" pos="13.7119201 2.7 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube468" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube469" pos="13.7119201 2.7 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube469" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube470" pos="13.7119201 2.7 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube470" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube471" pos="13.7119201 2.7 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube471" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube472" pos="13.7119201 2.7 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube472" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube473" pos="13.7119201 2.7 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube473" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube474" pos="13.7119201 2.7 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube474" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube475" pos="13.7119201 3.75 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube475" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube476" pos="13.7119201 3.75 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube476" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube477" pos="13.7119201 3.75 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube477" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube478" pos="13.7119201 3.75 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube478" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube479" pos="13.7119201 3.75 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube479" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube480" pos="13.7119201 3.75 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube480" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube481" pos="13.7119201 3.75 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube481" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube482" pos="13.7119201 3.75 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube482" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube483" pos="13.7119201 3.75 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube483" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube484" pos="13.7119201 3.75 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube484" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube485" pos="13.7119201 4.8 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube485" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube486" pos="13.7119201 4.8 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube486" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube487" pos="13.7119201 4.8 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube487" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube488" pos="13.7119201 4.8 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube488" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube489" pos="13.7119201 4.8 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube489" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube490" pos="13.7119201 4.8 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube490" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube491" pos="13.7119201 4.8 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube491" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube492" pos="13.7119201 4.8 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube492" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube493" pos="13.7119201 4.8 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube493" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube494" pos="13.7119201 4.8 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube494" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube495" pos="13.7119201 5.85 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube495" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube496" pos="13.7119201 5.85 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube496" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube497" pos="13.7119201 5.85 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube497" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube498" pos="13.7119201 5.85 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube498" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube499" pos="13.7119201 5.85 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube499" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube500" pos="13.7119201 5.85 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube500" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube501" pos="13.7119201 5.85 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube501" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube502" pos="13.7119201 5.85 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube502" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube503" pos="13.7119201 5.85 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube503" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube504" pos="13.7119201 5.85 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube504" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube505" pos="14.7619201 -0.45 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube505" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube506" pos="14.7619201 -0.45 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube506" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube507" pos="14.7619201 -0.45 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube507" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube508" pos="14.7619201 -0.45 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube508" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube509" pos="14.7619201 -0.45 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube509" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube510" pos="14.7619201 -0.45 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube510" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube511" pos="14.7619201 -0.45 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube511" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube512" pos="14.7619201 -0.45 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube512" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube513" pos="14.7619201 -0.45 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube513" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube514" pos="14.7619201 -0.45 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube514" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube515" pos="14.7619201 0.6 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube515" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube516" pos="14.7619201 0.6 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube516" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube517" pos="14.7619201 0.6 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube517" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube518" pos="14.7619201 0.6 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube518" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube519" pos="14.7619201 0.6 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube519" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube520" pos="14.7619201 0.6 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube520" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube521" pos="14.7619201 0.6 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube521" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube522" pos="14.7619201 0.6 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube522" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube523" pos="14.7619201 0.6 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube523" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube524" pos="14.7619201 0.6 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube524" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube525" pos="14.7619201 1.65 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube525" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube526" pos="14.7619201 1.65 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube526" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube527" pos="14.7619201 1.65 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube527" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube528" pos="14.7619201 1.65 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube528" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube529" pos="14.7619201 1.65 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube529" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube530" pos="14.7619201 1.65 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube530" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube531" pos="14.7619201 1.65 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube531" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube532" pos="14.7619201 1.65 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube532" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube533" pos="14.7619201 1.65 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube533" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube534" pos="14.7619201 1.65 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube534" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube535" pos="14.7619201 2.7 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube535" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube536" pos="14.7619201 2.7 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube536" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube537" pos="14.7619201 2.7 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube537" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube538" pos="14.7619201 2.7 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube538" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube539" pos="14.7619201 2.7 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube539" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube540" pos="14.7619201 2.7 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube540" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube541" pos="14.7619201 2.7 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube541" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube542" pos="14.7619201 2.7 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube542" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube543" pos="14.7619201 2.7 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube543" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube544" pos="14.7619201 2.7 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube544" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube545" pos="14.7619201 3.75 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube545" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube546" pos="14.7619201 3.75 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube546" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube547" pos="14.7619201 3.75 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube547" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube548" pos="14.7619201 3.75 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube548" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube549" pos="14.7619201 3.75 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube549" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube550" pos="14.7619201 3.75 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube550" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube551" pos="14.7619201 3.75 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube551" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube552" pos="14.7619201 3.75 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube552" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube553" pos="14.7619201 3.75 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube553" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube554" pos="14.7619201 3.75 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube554" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube555" pos="14.7619201 4.8 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube555" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube556" pos="14.7619201 4.8 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube556" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube557" pos="14.7619201 4.8 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube557" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube558" pos="14.7619201 4.8 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube558" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube559" pos="14.7619201 4.8 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube559" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube560" pos="14.7619201 4.8 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube560" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube561" pos="14.7619201 4.8 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube561" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube562" pos="14.7619201 4.8 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube562" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube563" pos="14.7619201 4.8 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube563" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube564" pos="14.7619201 4.8 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube564" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube565" pos="14.7619201 5.85 -4.5" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube565" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube566" pos="14.7619201 5.85 -3.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube566" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube567" pos="14.7619201 5.85 -2.4" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube567" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube568" pos="14.7619201 5.85 -1.35" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube568" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube569" pos="14.7619201 5.85 -0.3" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube569" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube570" pos="14.7619201 5.85 0.75" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube570" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube571" pos="14.7619201 5.85 1.8" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube571" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube572" pos="14.7619201 5.85 2.85" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube572" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube573" pos="14.7619201 5.85 3.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube573" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube574" pos="14.7619201 5.85 4.95" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="cube574" type="mesh" mesh="cube" density="1000"/>
+    </body>
+  </worldbody>
+</mujoco>

@@ -1,0 +1,22 @@
+<!--
+  由 compare/rigid_ipc/import_rigid_ipc.py 从 Rigid-IPC 的 ../../../rigid-ipc/fixtures/3D/pendulum/pendulum.json 生成，
+  scene_demo 参数：T=10 h=0.01 dhat=0.0001 mu=0（笔记 notes/compare_rigid_ipc.md）。
+-->
+<mujoco model="pendulum">
+  <compiler angle="radian" meshdir="D:/Project/rigid-ipc/meshes"/>
+  <option gravity="0 -9.81 0" timestep="0.01"/>
+  <default>
+    <geom friction="0 0 0"/>
+  </default>
+  <asset>
+    <mesh name="pin-short" file="pendulum/pin-short.obj" scale="0.1 0.1 0.1" inertia="shell"/>
+    <mesh name="arm" file="pendulum/arm.obj" scale="0.1 0.1 0.1" inertia="exact"/>
+  </asset>
+  <worldbody>
+    <geom name="pin-short0" type="mesh" mesh="pin-short" pos="0 0.2 0" quat="1 0 0 0"/>
+    <body name="arm1" pos="-0.2 0.2 0" quat="0.707106781 0 0 0.707106781">
+      <freejoint/>
+      <geom name="arm1" type="mesh" mesh="arm" density="1000"/>
+    </body>
+  </worldbody>
+</mujoco>

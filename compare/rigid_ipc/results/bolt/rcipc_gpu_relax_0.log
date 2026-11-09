@@ -1,0 +1,61 @@
+D:\Project\rcipc\compare\rigid_ipc\bolt.xml: 1 bodies, 1 trees, nv 6, 2625 vertices, 7869 edges, 5246 faces; h 0.01, T 5, dhat 0.0001, mu 0, eps_v 0.001, tol 1e-06 m/s, GPU, Gauss-Newton contact Hessian
+t  0.01  gap 3.591e-05  limit       inf  newton 12  pcg  12  kappa 8.62e+10    34.2 ms/step
+t  0.10  gap 2.198e-05  limit       inf  newton 17  pcg  17  kappa 8.62e+10    44.4 ms/step
+t  0.20  gap 3.535e-05  limit       inf  newton 20  pcg  20  kappa 8.62e+10    49.2 ms/step
+t  0.30  gap 3.929e-05  limit       inf  newton 18  pcg  18  kappa 8.62e+10    56.0 ms/step
+t  0.40  gap 3.955e-05  limit       inf  newton 28  pcg  28  kappa 8.62e+10    51.3 ms/step
+t  0.50  gap 4.114e-05  limit       inf  newton 21  pcg  21  kappa 8.62e+10    57.0 ms/step
+t  0.60  gap 4.171e-05  limit       inf  newton 35  pcg  35  kappa 8.62e+10    59.9 ms/step
+t  0.70  gap 4.292e-05  limit       inf  newton 23  pcg  23  kappa 8.62e+10    82.8 ms/step
+t  0.80  gap 4.225e-05  limit       inf  newton 28  pcg  28  kappa 8.62e+10    80.5 ms/step
+t  0.90  gap 3.940e-05  limit       inf  newton 23  pcg  23  kappa 8.62e+10    64.8 ms/step
+t  1.00  gap 4.181e-05  limit       inf  newton 21  pcg  21  kappa 8.62e+10    78.6 ms/step
+t  1.10  gap 5.485e-05  limit       inf  newton 32  pcg  32  kappa 1.72e+11    80.2 ms/step
+t  1.20  gap 5.338e-05  limit       inf  newton 35  pcg  35  kappa 1.72e+11    61.4 ms/step
+t  1.30  gap 5.277e-05  limit       inf  newton 28  pcg  28  kappa 1.72e+11    59.6 ms/step
+t  1.40  gap 5.328e-05  limit       inf  newton 24  pcg  24  kappa 1.72e+11    62.1 ms/step
+t  1.50  gap 5.319e-05  limit       inf  newton 20  pcg  20  kappa 1.72e+11    59.7 ms/step
+t  1.60  gap 5.061e-05  limit       inf  newton 24  pcg  24  kappa 1.72e+11    56.1 ms/step
+t  1.70  gap 5.018e-05  limit       inf  newton 23  pcg  23  kappa 1.72e+11    62.4 ms/step
+t  1.80  gap 4.949e-05  limit       inf  newton 50  pcg  50  kappa 1.72e+11    74.3 ms/step
+t  1.90  gap 5.483e-05  limit       inf  newton 24  pcg  24  kappa 1.72e+11    67.8 ms/step
+t  2.00  gap 5.584e-05  limit       inf  newton 28  pcg  28  kappa 1.72e+11    60.8 ms/step
+t  2.10  gap 5.562e-05  limit       inf  newton 28  pcg  28  kappa 1.72e+11    66.5 ms/step
+t  2.20  gap 5.465e-05  limit       inf  newton 24  pcg  24  kappa 1.72e+11    62.6 ms/step
+t  2.30  gap 5.459e-05  limit       inf  newton 26  pcg  26  kappa 1.72e+11    63.2 ms/step
+t  2.40  gap 5.364e-05  limit       inf  newton 34  pcg  34  kappa 1.72e+11    55.9 ms/step
+t  2.50  gap 5.419e-06  limit       inf  newton 29  pcg  29  kappa 1.72e+11    53.3 ms/step
+t  2.60  gap 8.768e-05  limit       inf  newton 12  pcg  12  kappa 1.72e+11    56.4 ms/step
+t  2.70  gap 8.814e-05  limit       inf  newton 11  pcg  11  kappa 1.72e+11    34.9 ms/step
+t  2.80  gap 8.831e-05  limit       inf  newton 25  pcg  25  kappa 1.72e+11    36.5 ms/step
+t  2.90  gap 5.323e-05  limit       inf  newton 10  pcg  10  kappa 1.72e+11    30.9 ms/step
+t  3.00  gap 8.812e-05  limit       inf  newton 20  pcg  20  kappa 1.72e+11    34.7 ms/step
+t  3.10  gap 8.798e-05  limit       inf  newton 12  pcg  12  kappa 1.72e+11    36.9 ms/step
+t  3.20  gap 8.773e-05  limit       inf  newton 34  pcg  34  kappa 1.72e+11    35.8 ms/step
+t  3.30  gap 8.656e-05  limit       inf  newton 19  pcg  19  kappa 1.72e+11    39.9 ms/step
+t  3.40  gap 6.697e-05  limit       inf  newton 44  pcg  44  kappa 1.72e+11    41.8 ms/step
+t  3.50  gap 8.784e-05  limit       inf  newton 12  pcg  12  kappa 1.72e+11    48.9 ms/step
+t  3.60  gap 8.819e-05  limit       inf  newton 18  pcg  18  kappa 1.72e+11    37.4 ms/step
+t  3.70  gap 8.816e-05  limit       inf  newton 18  pcg  18  kappa 1.72e+11    25.5 ms/step
+t  3.80  gap 8.804e-05  limit       inf  newton  9  pcg   9  kappa 1.72e+11    32.7 ms/step
+t  3.90  gap 8.820e-05  limit       inf  newton 14  pcg  14  kappa 1.72e+11    24.4 ms/step
+t  4.00  gap 8.778e-05  limit       inf  newton 12  pcg  12  kappa 1.72e+11    35.4 ms/step
+t  4.10  gap 8.811e-05  limit       inf  newton 14  pcg  14  kappa 1.72e+11    27.6 ms/step
+t  4.20  gap 8.793e-05  limit       inf  newton 27  pcg  27  kappa 1.72e+11    36.6 ms/step
+t  4.30  gap 8.785e-05  limit       inf  newton 15  pcg  15  kappa 1.72e+11    28.3 ms/step
+t  4.40  gap 8.793e-05  limit       inf  newton 11  pcg  11  kappa 1.72e+11    31.0 ms/step
+t  4.50  gap 8.828e-05  limit       inf  newton 47  pcg  47  kappa 1.72e+11    35.4 ms/step
+t  4.60  gap 8.653e-05  limit       inf  newton 14  pcg  14  kappa 1.72e+11    32.1 ms/step
+t  4.70  gap 7.836e-05  limit       inf  newton 17  pcg  17  kappa 1.72e+11    25.3 ms/step
+t  4.80  gap 8.813e-05  limit       inf  newton  8  pcg   8  kappa 1.72e+11    30.1 ms/step
+t  4.90  gap 8.772e-05  limit       inf  newton 10  pcg  10  kappa 1.72e+11    22.8 ms/step
+t  5.00  gap 8.796e-05  limit       inf  newton 10  pcg  10  kappa 1.72e+11    22.6 ms/step
+done: 500 steps in 24.1 s (48.3 ms/step)
+min distance at step ends 3.431e-06 m
+min joint-limit distance 1.000e+300; Newton per step max 50 mean 21.65 (9 hit the cap); PCG per step mean 21.65
+GPU per step (ms): prepare 0.09, update 0.60, assemble 0.00, solve 0.00, converge 0.00, ccd 0.00, line search 0.00, graph 47.45, total 48.24; energy evaluations per step 20.67
+GPU per Newton iteration: 485 contacts, 485 rows, 1.0 PCG iterations, 1.00 CCD segments (0.95 culls); 1 body pairs per query
+ACCD tail: 11974 pairs handed over (1.11 per CCD segment), 11343 proved to return 1, 631 finished serially
+inertia curvature left out 0 times on the GPU (tree x iteration, not positive definite)
+ACCD prefilter: 2578 pairs per CCD segment skipped in single precision
+wrote D:\Project\rcipc\compare\rigid_ipc\results\bolt\rcipc_gpu_relax_0.csv (replay: python tools/replay.py D:\Project\rcipc\compare\rigid_ipc\bolt.xml D:\Project\rcipc\compare\rigid_ipc\results\bolt\rcipc_gpu_relax_0.csv)

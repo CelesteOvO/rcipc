@@ -1,0 +1,30 @@
+running: D:\Project\rcipc\build\Release\scene_demo.exe model=D:\Project\rcipc\compare\rigid_ipc\cone_pile.xml T=4 h=0.01 dhat=0.001 mu=0 gpu=1 out=D:\Project\rcipc\compare\rigid_ipc\results\cone_pile\rcipc_gpu.csv
+compare/rigid_ipc/cone_pile.xml (gpu): 400 steps
+  ms/step: mean 33.2  total 13.3 s
+  newton/step: mean 21.34  max 50  (hit the cap: 46)  PCG/step mean 179.2
+  min distance at step ends: 4.370e-07
+  log: compare/rigid_ipc/results/cone_pile\rcipc_gpu.log
+running: D:\Project\rcipc\build\Release\scene_demo.exe model=D:\Project\rcipc\compare\rigid_ipc\pendulum.xml T=10 h=0.01 dhat=0.0001 mu=0 gpu=1 out=D:\Project\rcipc\compare\rigid_ipc\results\pendulum\rcipc_gpu.csv
+compare/rigid_ipc/pendulum.xml (gpu): 1000 steps
+  ms/step: mean 16.1  total 16.1 s
+  newton/step: mean 15.48  max 50  (hit the cap: 66)  PCG/step mean 15.5
+  min distance at step ends: 1.002e-07
+  log: compare/rigid_ipc/results/pendulum\rcipc_gpu.log
+running: D:\Project\rcipc\build\Release\scene_demo.exe model=D:\Project\rcipc\compare\rigid_ipc\bolt.xml T=5 h=0.01 dhat=0.0001 mu=0 gpu=1 out=D:\Project\rcipc\compare\rigid_ipc\results\bolt\rcipc_gpu.csv
+compare/rigid_ipc/bolt.xml (gpu): 500 steps
+  ms/step: mean 54.9  total 27.5 s
+  newton/step: mean 23.00  max 50  (hit the cap: 3)  PCG/step mean 23.0
+  min distance at step ends: 3.579e-07
+  log: compare/rigid_ipc/results/bolt\rcipc_gpu.log
+running: D:\Project\rcipc\build\Release\scene_demo.exe model=D:\Project\rcipc\compare\rigid_ipc\card_house_2.xml T=2 h=0.01 dhat=0.001 mu=0.5 gpu=1 out=D:\Project\rcipc\compare\rigid_ipc\results\card_house_2\rcipc_gpu.csv
+compare/rigid_ipc/card_house_2.xml (gpu): 200 steps
+  ms/step: mean 3.2  total 0.6 s
+  newton/step: mean 5.11  max 24  (hit the cap: 0)  PCG/step mean 56.6
+  min distance at step ends: 2.365e-06
+  log: compare/rigid_ipc/results/card_house_2\rcipc_gpu.log
+running: D:\Project\rcipc\build\Release\scene_demo.exe model=D:\Project\rcipc\compare\rigid_ipc\blender_25.xml T=5 h=0.005 dhat=0.001 mu=0 gpu=1 out=D:\Project\rcipc\compare\rigid_ipc\results\blender_25\rcipc_gpu.csv
+compare/rigid_ipc/blender_25.xml (gpu): 1000 steps
+  ms/step: mean 46.2  total 46.2 s
+  newton/step: mean 18.39  max 50  (hit the cap: 38)  PCG/step mean 194.7
+  min distance at step ends: 2.527e-06
+  log: compare/rigid_ipc/results/blender_25\rcipc_gpu.log

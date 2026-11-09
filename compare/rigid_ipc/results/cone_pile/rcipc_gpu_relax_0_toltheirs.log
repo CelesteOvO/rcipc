@@ -1,0 +1,49 @@
+D:\Project\rcipc\compare\rigid_ipc\cone_pile.xml: 10 bodies, 10 trees, nv 60, 85 vertices, 188 edges, 124 faces; h 0.01, T 4, dhat 0.001, mu 0, eps_v 0.001, tol 0.28 m/s, GPU, Gauss-Newton contact Hessian
+t  0.01  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00    10.5 ms/step
+t  0.10  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.6 ms/step
+t  0.20  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.7 ms/step
+t  0.30  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.6 ms/step
+t  0.40  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.5 ms/step
+t  0.50  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.6 ms/step
+t  0.60  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.5 ms/step
+t  0.70  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.5 ms/step
+t  0.80  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.6 ms/step
+t  0.90  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.5 ms/step
+t  1.00  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.4 ms/step
+t  1.10  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.5 ms/step
+t  1.20  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.4 ms/step
+t  1.30  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.4 ms/step
+t  1.40  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.3 ms/step
+t  1.50  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.4 ms/step
+t  1.60  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.4 ms/step
+t  1.70  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.4 ms/step
+t  1.80  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.4 ms/step
+t  1.90  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.4 ms/step
+t  2.00  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.5 ms/step
+t  2.10  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.4 ms/step
+t  2.20  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.4 ms/step
+t  2.30  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.4 ms/step
+t  2.40  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.5 ms/step
+t  2.50  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.4 ms/step
+t  2.60  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.4 ms/step
+t  2.70  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.4 ms/step
+t  2.80  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.5 ms/step
+t  2.90  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.4 ms/step
+t  3.00  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.4 ms/step
+t  3.10  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.4 ms/step
+t  3.20  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.4 ms/step
+t  3.30  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.4 ms/step
+t  3.40  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.4 ms/step
+t  3.50  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.3 ms/step
+t  3.60  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.4 ms/step
+t  3.70  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.4 ms/step
+t  3.80  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.4 ms/step
+t  3.90  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.4 ms/step
+t  4.00  gap       inf  limit       inf  newton  1  pcg   1  kappa 0.00e+00     0.4 ms/step
+done: 400 steps in 0.2 s (0.5 ms/step)
+min distance at step ends 1.000e+300 m
+min joint-limit distance 1.000e+300; Newton per step max 1 mean 1.00 (0 hit the cap); PCG per step mean 1.00
+GPU per step (ms): prepare 0.12, update 0.12, assemble 0.00, solve 0.00, converge 0.00, ccd 0.00, line search 0.00, graph 0.18, total 0.44; energy evaluations per step 0.00
+GPU per Newton iteration: 0 contacts, 0 rows, 1.0 PCG iterations, 0.00 CCD segments (0.00 culls); 0 body pairs per query
+inertia curvature left out 0 times on the GPU (tree x iteration, not positive definite)
+wrote D:\Project\rcipc\compare\rigid_ipc\results\cone_pile\rcipc_gpu_relax_0_toltheirs.csv (replay: python tools/replay.py D:\Project\rcipc\compare\rigid_ipc\cone_pile.xml D:\Project\rcipc\compare\rigid_ipc\results\cone_pile\rcipc_gpu_relax_0_toltheirs.csv)

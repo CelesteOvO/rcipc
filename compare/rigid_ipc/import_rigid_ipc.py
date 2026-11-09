@@ -14,6 +14,7 @@ Rigid-IPC 的刚体是最大坐标（6 个自由度），没有关节；它能�
   的轨迹上；这里变成那个 hinge 上的 velocity 驱动，kv 很大（默认 1e4），ctrl 用一个关键帧写成常数。
   带 kinematic_poses 的运动学体暂不支持。
 - enabled = false 的刚体跳过（场景里的 pin 只用来和 IPC 原版对比）。
+- 会动的零体积网格（一片四边形）换成半厚 --thin 的薄盒子，质量按密度乘面积。
 
 坐标系原样保留（Rigid-IPC 的场景多是 y 轴朝上），重力、步长照抄到 <option>。
 rotation 是角度制的 xyz 欧拉角，R = Rz * Ry * Rx（read_rb_scene.cpp 第 199 行），绕网格原点转，再平移到 position。
@@ -74,6 +75,74 @@ def read_obj(path):
     return np.array(V), np.array(F, dtype=int)
 
 
+def orient_consistently(V, F):
+    """把三角形的绕向调成一致、朝外（MuJoCo 不收朝向不一致的网格；suzanne.obj 有几个面反着）。返回 (F, 改了几个面)。"""
+    from collections import defaultdict
+    # 重复的三角形（suzanne.obj 有一个面写了两遍）只留一个
+    keep, seen_sets = [], set()
+    for i, t in enumerate(F):
+        key = frozenset(int(x) for x in t)
+        if key not in seen_sets:
+            seen_sets.add(key)
+            keep.append(i)
+    dropped = len(F) - len(keep)
+    F = F[keep]
+    # 被三个面共用的边（suzanne.obj 的对称缝上有一个三点都在 x=0 的小片）：去掉那条边上面积最小的面，直到每条边最多两个面
+    while True:
+        und = defaultdict(list)
+        for i, (a, b, c) in enumerate(F):
+            for u, v in ((a, b), (b, c), (c, a)):
+                und[(min(u, v), max(u, v))].append(i)
+        bad = [fs for fs in und.values() if len(fs) > 2]
+        if not bad:
+            break
+        area = lambda i: np.linalg.norm(np.cross(V[F[i][1]] - V[F[i][0]], V[F[i][2]] - V[F[i][0]]))
+        worst = min(bad[0], key=area)
+        F = np.delete(F, worst, axis=0)
+        dropped += 1
+    edge_faces = defaultdict(list)
+    for i, (a, b, c) in enumerate(F):
+        for u, v in ((a, b), (b, c), (c, a)):
+            edge_faces[(min(u, v), max(u, v))].append(i)
+    F = F.copy()
+    seen = np.zeros(len(F), dtype=bool)
+    flipped = 0
+    for root in range(len(F)):
+        if seen[root]:
+            continue
+        seen[root] = True
+        stack = [root]
+        while stack:
+            i = stack.pop()
+            a, b, c = F[i]
+            for u, v in ((a, b), (b, c), (c, a)):
+                for j in edge_faces[(min(u, v), max(u, v))]:
+                    if j == i or seen[j]:
+                        continue
+                    seen[j] = True
+                    fj = list(F[j])
+                    # 相邻面上这条边应当反向（v -> u）；同向就翻过来
+                    same = any(fj[k] == u and fj[(k + 1) % 3] == v for k in range(3))
+                    if same:
+                        F[j] = [fj[0], fj[2], fj[1]]
+                        flipped += 1
+                    stack.append(j)
+    vol, _ = mesh_volume_centroid(V, F)
+    if vol < 0:
+        F = F[:, [0, 2, 1]]
+        flipped = len(F) - flipped
+    return F, flipped + dropped
+
+
+def write_obj(path, V, F):
+    with open(path, "w") as f:
+        f.write("# 由 import_rigid_ipc.py 重写，三角形绕向调成一致（几何没变）\n")
+        for v in V:
+            f.write(f"v {v[0]:.9g} {v[1]:.9g} {v[2]:.9g}\n")
+        for t in F:
+            f.write(f"f {t[0] + 1} {t[1] + 1} {t[2] + 1}\n")
+
+
 def mesh_volume_centroid(V, F):
     """闭合三角网格的体积和质心（原点出发的四面体求和）。体积为 0 时质心取顶点均值。"""
     a, b, c = V[F[:, 0]], V[F[:, 1]], V[F[:, 2]]
@@ -95,6 +164,7 @@ def main():
     ap.add_argument("out")
     ap.add_argument("--meshdir", required=True, help="Rigid-IPC 的 meshes 目录")
     ap.add_argument("--kv", type=float, default=1e4, help="运动学体换成 velocity 驱动时的增益")
+    ap.add_argument("--thin", type=float, default=5e-4, help="零体积的运动刚体换成薄盒子时的半厚度（m）")
     ap.add_argument("--check", action="store_true", help="用 mujoco 读一遍，打印每个刚体的质量")
     a = ap.parse_args()
 
@@ -112,8 +182,9 @@ def main():
         T = int(S["max_iterations"]) * h
     time_stepper = P.get("time_stepper", "default")
 
-    meshes = {}      # (file, scale, shell) -> mesh 名
+    meshes = {}      # (file, scale, static) -> mesh 名
     bodies_xml, world_xml, act_xml, ctrl = [], [], [], []
+    rewritten = {}   # 绕向修过的网格：原文件名 -> 重写后的路径
     notes = []
     for n, rb in enumerate(P["rigid_bodies"]):
         if not rb.get("enabled", True):
@@ -125,6 +196,18 @@ def main():
             V, F = read_obj(os.path.join(a.meshdir, mesh_file))
         else:
             sys.exit(f"body {n}: only .obj meshes are supported, got {mesh_file}")
+        F2, flipped = orient_consistently(V, F)
+        if 0 < flipped < len(F):
+            # 绕向不一致的网格重写一份放在输出旁边的 meshes/ 里，用绝对路径引用（Rigid-IPC 不在乎绕向，我们的距离也不在乎，只有 MuJoCo 的加载器挑）
+            fixed_dir = os.path.join(os.path.dirname(os.path.abspath(a.out)), "meshes")
+            os.makedirs(fixed_dir, exist_ok=True)
+            fixed = os.path.join(fixed_dir, os.path.basename(mesh_file))
+            if mesh_file not in rewritten:
+                write_obj(fixed, V, F2)
+                rewritten[mesh_file] = fixed
+                notes.append(f"{mesh_file}: {flipped} of {len(F)} faces had the opposite winding, were duplicates or sat on a non-manifold edge; "
+                             f"rewritten to {os.path.relpath(fixed)} ({len(F2)} faces)")
+            F = F2
         name = rb.get("name") or f"{os.path.splitext(os.path.basename(mesh_file))[0]}{n}"
         scale = rb.get("scale", 1.0)
         if "dimensions" in rb:
@@ -166,7 +249,11 @@ def main():
             nrm = (nrm * np.sign(nrm @ nrm[0])[:, None]).sum(axis=0)
             nrm /= np.linalg.norm(nrm)
             if np.abs((V - V[0]) @ nrm).max() > 1e-9 * max(1.0, float(np.abs(V).max())):
-                sys.exit(f"body {n} ({name}): zero-volume static mesh that is not planar")
+                # 不平的开口网格（piles/cone.json 的圆锥面）：顶点不共面，凸包算得出来，照常当网格；质量无所谓（固定）
+                meshes[mkey] = mname
+                world_xml.append(f'    <geom name="{name}" type="mesh" mesh="{mname}" pos="{fmt(pos)}" quat="{fmt(quat)}"/>')
+                notes.append(f"{name}: open static mesh kept as a mesh (shell inertia)")
+                continue
             n_world = R @ nrm
             # 平面 geom 的局部 z 轴是法向；取一个和法向垂直的 x 轴拼出姿态
             x_axis = np.cross([0.0, 1.0, 0.0], n_world) if abs(n_world[1]) < 0.9 else np.cross([1.0, 0.0, 0.0], n_world)
@@ -181,6 +268,32 @@ def main():
         if static:
             world_xml.append(f'    <geom name="{name}" type="mesh" mesh="{mname}" pos="{fmt(pos)}" quat="{fmt(quat)}"/>')
             continue
+        if abs(vol) < 1e-12 * max(1.0, float(np.abs(V).max())) ** 3:
+            # 会动的零体积网格（搅拌机的叶片、纸牌屋的牌都是一片四边形）：MuJoCo 不收共面的网格（算不出凸包），
+            # 换成厚 2*thin 的薄盒子，质量按薄壳算（密度乘面积）。Rigid-IPC 对零体积的网格也按面积算（纸牌屋的牌
+            # 两边都是 3125 kg），质量一致。
+            del meshes[mkey]
+            Vs = V * scale
+            a0, b0, c0 = Vs[F[:, 0]], Vs[F[:, 1]], Vs[F[:, 2]]
+            nrm = np.cross(b0 - a0, c0 - a0)
+            area = 0.5 * np.linalg.norm(nrm, axis=1).sum()
+            nrm = (nrm * np.sign(nrm @ nrm[0])[:, None]).sum(axis=0)
+            nrm /= np.linalg.norm(nrm)
+            if np.abs((Vs - Vs[0]) @ nrm).max() > 1e-9 * max(1.0, float(np.abs(Vs).max())):
+                sys.exit(f"body {n} ({name}): zero-volume moving mesh that is not planar")
+            cms = Vs.mean(axis=0)
+            # 盒子的长宽沿第一个三角形最短的那条边取（plane.obj 是对角线切开的矩形，最短边就是矩形的边）
+            edges = [Vs[F[0, (k + 1) % 3]] - Vs[F[0, k]] for k in range(3)]
+            e = min(edges, key=np.linalg.norm)
+            e = e - (e @ nrm) * nrm
+            x_axis = e / np.linalg.norm(e)
+            y_axis = np.cross(nrm, x_axis)
+            ext = np.abs((Vs - cms) @ np.column_stack([x_axis, y_axis])).max(axis=0)
+            Rb = np.column_stack([x_axis, y_axis, nrm])
+            geom = (f'<geom name="{name}" type="box" size="{fmt(ext)} {a.thin:.9g}" pos="{fmt(cms)}" quat="{fmt(quat_from_matrix(Rb))}" '
+                    f'mass="{density * area:.9g}"/>')
+            notes.append(f"{name}: zero-volume moving mesh -> thin box {fmt(2 * ext)} x {2 * a.thin:g}, mass {density * area:.6g} (shell)")
+            vol = 1.0  # 下面不要再当零体积处理
 
         cm_body = scale * cm  # 质心在刚体坐标系（缩放后、转动前）里的位置
         lines = [f'    <body name="{name}" pos="{fmt(pos)}" quat="{fmt(quat)}">']
@@ -221,7 +334,8 @@ def main():
     for (mesh_file, scale, static), mname in meshes.items():
         # 动的刚体用 inertia="exact"：MuJoCo 默认按凸包算质量和惯量，圆环这种有洞的网格会差一倍（torus.obj 142 kg 对 72.7 kg）
         extra = ' inertia="shell"' if static else ' inertia="exact"'
-        asset.append(f'    <mesh name="{mname}" file="{mesh_file}" scale="{fmt(scale)}"{extra}/>')
+        path = rewritten[mesh_file].replace("\\", "/") if mesh_file in rewritten else mesh_file
+        asset.append(f'    <mesh name="{mname}" file="{path}" scale="{fmt(scale)}"{extra}/>')
 
     meshdir = os.path.abspath(a.meshdir).replace("\\", "/")
     xml = [

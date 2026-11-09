@@ -15,6 +15,7 @@ Newton 计数两边不一样：Rigid-IPC 的 total_iter 是走了几步（newton
 --gear-angles：齿轮场景专用。两边从动轮的转角随时间，看传动比是不是一样。Rigid-IPC 的 state_sequence 只有
 enabled 的刚体，齿轮场景里两根销子 enabled=false，所以从动轮是下标 1；我们是 qpos 的第 2 个。两边都是绕世界
 z 轴的铰链，转角 = 相对初始姿态绕 z 的角。
+--track R:O：跟踪一个刚体（钟摆的臂、螺栓的螺杆）：y 位移和绕 --axis 的转角随时间，两边各一行。
 --final-y：链条这类自由刚体场景，打印每个刚体最后一步的 y（重力方向）；Rigid-IPC 按 state_sequence 的顺序，
 我们按 freejoint 的顺序（qpos 每 7 个一块，第 2 个是 y）。
 """
@@ -54,11 +55,33 @@ def rigid_ipc_min_distance(sim, skip=0):
     return (min(md), len(md)) if md else (float("inf"), 0)
 
 
+def quat_to_matrix(q):
+    """MuJoCo 顺序 (w, x, y, z) 的单位四元数 -> 转动矩阵。"""
+    w, x, y, z = q
+    return np.array([[1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+                     [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
+                     [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)]])
+
+
+def angles_about_axis(Rs, axis):
+    """一串转动矩阵相对第一个绕世界轴 axis 转过的角（弧度，累计解卷绕）：取一个垂直于轴的向量，看它转到哪。"""
+    a = np.zeros(3)
+    a["xyz".index(axis)] = 1.0
+    u = np.array([0.0, 0.0, 1.0]) if axis != "z" else np.array([1.0, 0.0, 0.0])
+    R0 = Rs[0]
+    out = []
+    for R in Rs:
+        w = R @ R0.T @ u
+        out.append(math.atan2(np.cross(u, w) @ a, u @ w))
+    return np.unwrap(np.array(out))
+
+
 def rcipc_rows(csv_path):
     with open(csv_path, newline="") as f:
         reader = csv.reader(f)
         next(reader)
-        return [[float(x) for x in row] for row in reader if row and all(row)]  # 正在写的文件最后一行可能不完整
+        rows = [[float(x) for x in row] for row in reader if row and all(row)]
+        return [r for r in rows if len(r) == len(rows[0])]  # 正在写的文件最后一行可能不完整
 
 
 def sim_files(d):
@@ -71,6 +94,9 @@ def main():
     ap.add_argument("--gear-angles", action="store_true")
     ap.add_argument("--driven", type=int, default=1, help="Rigid-IPC state_sequence 里从动轮的下标")
     ap.add_argument("--final-y", action="store_true")
+    ap.add_argument("--track", help="R:O——跟踪一个刚体：Rigid-IPC state_sequence 里的下标 R，我们 freejoint 的序号 O；"
+                    "打印它在 t = 0.5, 1, 2, 3, 5, 10 s 的 y 位移（相对 t=0）和绕 --axis 转过的角")
+    ap.add_argument("--axis", default="z", help="--track 的转轴（世界坐标，x/y/z）")
     ap.add_argument("--skip", type=int, default=0)
     a = ap.parse_args()
 
@@ -125,6 +151,30 @@ def main():
             picks = [int(np.argmin(np.abs(t - T))) for T in (1, 2, 5, 10) if T <= t[-1] + 1e-9]
             print(f"  {os.path.basename(path):<14} " + "  ".join(f"{q[k]:8.4f}" for k in picks))
         print("  (driver: -100 deg/s = -1.7453 rad/s; equal gears -> driven +1.7453 rad/s, 1.7453 rad after 1 s)")
+
+    if a.track:
+        ri, oi = (int(x) for x in a.track.split(":"))
+        picks_T = (0.5, 1, 2, 3, 5, 10)
+        print(f"\nbody {a.track}: y displacement since t=0 (m) and rotation about world {a.axis} (rad) at t = {picks_T} s:")
+        for path, S in sims.items():
+            seq = S["animation"]["state_sequence"]
+            h = S["args"]["timestep"]
+            ys = np.array([st["rigid_bodies"][ri]["position"][1] for st in seq]) - seq[0]["rigid_bodies"][ri]["position"][1]
+            ang = angles_about_axis([rotvec_to_matrix(st["rigid_bodies"][ri]["rotation"]) for st in seq], a.axis)
+            picks = [int(round(T / h)) for T in picks_T if int(round(T / h)) < len(seq)]
+            print(f"  {os.path.basename(path):<14} dy  " + "  ".join(f"{ys[k]:8.4f}" for k in picks))
+            print(f"  {'':<14} ang " + "  ".join(f"{ang[k]:8.4f}" for k in picks))
+        for path in sorted(glob.glob(os.path.join(a.dir, "rcipc_*.csv"))):
+            R = rcipc_rows(path)
+            t = np.array([r[0] for r in R])
+            q = np.array([r[5 + 7 * oi: 5 + 7 * oi + 7] for r in R])
+            ys = q[:, 1] - q[0, 1]
+            ang = angles_about_axis([quat_to_matrix(row[3:7]) for row in q], a.axis)
+            picks = [int(np.argmin(np.abs(t - T))) for T in picks_T if T <= t[-1] + 1e-9]
+            print(f"  {os.path.basename(path):<14} dy  " + "  ".join(f"{ys[k]:8.4f}" for k in picks))
+            print(f"  {'':<14} ang " + "  ".join(f"{ang[k]:8.4f}" for k in picks))
+        print("  (Rigid-IPC's position is the centre of mass, ours the body origin: dy differs by the rotation of that offset; "
+              "our t=0 row is the first step, not the initial state)")
 
     if a.final_y:
         print("\nfinal y of each body (m):")

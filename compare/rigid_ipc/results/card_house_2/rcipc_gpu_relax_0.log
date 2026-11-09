@@ -1,0 +1,31 @@
+D:\Project\rcipc\compare\rigid_ipc\card_house_2.xml: 7 bodies, 7 trees, nv 42, 56 vertices, 84 edges, 84 faces; h 0.01, T 2, dhat 0.001, mu 0.5, eps_v 0.001, tol 1e-06 m/s, GPU, Gauss-Newton contact Hessian
+t  0.01  gap       inf  limit       inf  newton  2  pcg   1  kappa 0.00e+00     9.8 ms/step
+t  0.10  gap       inf  limit       inf  newton  2  pcg   1  kappa 0.00e+00     0.8 ms/step
+t  0.20  gap 3.378e-04  limit       inf  newton  7  pcg 104  kappa 5.90e+12     4.8 ms/step
+t  0.30  gap 4.711e-04  limit       inf  newton  7  pcg 110  kappa 5.90e+12     7.0 ms/step
+t  0.40  gap 4.766e-04  limit       inf  newton  6  pcg 101  kappa 5.90e+12     4.1 ms/step
+t  0.50  gap 4.801e-04  limit       inf  newton  6  pcg  82  kappa 5.90e+12     3.6 ms/step
+t  0.60  gap 4.789e-04  limit       inf  newton  6  pcg  92  kappa 5.90e+12     3.4 ms/step
+t  0.70  gap 4.738e-04  limit       inf  newton  6  pcg  84  kappa 5.90e+12     3.5 ms/step
+t  0.80  gap 4.702e-04  limit       inf  newton  6  pcg  84  kappa 5.90e+12     3.6 ms/step
+t  0.90  gap 4.677e-04  limit       inf  newton  6  pcg  82  kappa 5.90e+12     3.5 ms/step
+t  1.00  gap 4.662e-04  limit       inf  newton  6  pcg  85  kappa 5.90e+12     3.4 ms/step
+t  1.10  gap 4.654e-04  limit       inf  newton  6  pcg  80  kappa 5.90e+12     3.4 ms/step
+t  1.20  gap 4.649e-04  limit       inf  newton  6  pcg  81  kappa 5.90e+12     3.4 ms/step
+t  1.30  gap 4.647e-04  limit       inf  newton  6  pcg  81  kappa 5.90e+12     4.1 ms/step
+t  1.40  gap 4.647e-04  limit       inf  newton  6  pcg  89  kappa 5.90e+12     3.6 ms/step
+t  1.50  gap 4.648e-04  limit       inf  newton  6  pcg  87  kappa 5.90e+12     3.3 ms/step
+t  1.60  gap 4.633e-04  limit       inf  newton  6  pcg  90  kappa 5.90e+12     3.5 ms/step
+t  1.70  gap 4.619e-04  limit       inf  newton  6  pcg  96  kappa 5.90e+12     3.5 ms/step
+t  1.80  gap 4.605e-04  limit       inf  newton 10  pcg 144  kappa 5.90e+12     4.2 ms/step
+t  1.90  gap 4.591e-04  limit       inf  newton 13  pcg 193  kappa 5.90e+12     6.9 ms/step
+t  2.00  gap 4.576e-04  limit       inf  newton 14  pcg 210  kappa 5.90e+12     9.1 ms/step
+done: 200 steps in 0.8 s (4.2 ms/step)
+min distance at step ends 9.117e-05 m
+min joint-limit distance 1.000e+300; Newton per step max 24 mean 6.91 (0 hit the cap); PCG per step mean 96.19
+GPU per step (ms): prepare 0.27, update 0.17, assemble 0.00, solve 0.00, converge 0.00, ccd 0.00, line search 0.00, graph 3.60, total 4.15; energy evaluations per step 7.75
+GPU per Newton iteration: 116 contacts, 345 rows, 13.9 PCG iterations, 0.86 CCD segments (0.86 culls); 9 body pairs per query
+ACCD tail: 91 pairs handed over (0.08 per CCD segment), 91 proved to return 1, 0 finished serially
+inertia curvature left out 0 times on the GPU (tree x iteration, not positive definite)
+ACCD prefilter: 8 pairs per CCD segment skipped in single precision
+wrote D:\Project\rcipc\compare\rigid_ipc\results\card_house_2\rcipc_gpu_relax_0.csv (replay: python tools/replay.py D:\Project\rcipc\compare\rigid_ipc\card_house_2.xml D:\Project\rcipc\compare\rigid_ipc\results\card_house_2\rcipc_gpu_relax_0.csv)

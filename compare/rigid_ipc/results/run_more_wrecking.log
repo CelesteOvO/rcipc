@@ -1,0 +1,15 @@
+running: D:\Project\rcipc\build\Release\scene_demo.exe model=D:\Project\rcipc\compare\rigid_ipc\wrecking_ball.xml T=10 h=0.01 dhat=0.001 mu=0 gpu=1 out=D:\Project\rcipc\compare\rigid_ipc\results\wrecking_ball\rcipc_gpu.csv
+compare/rigid_ipc/wrecking_ball.xml (gpu): 1000 steps
+  ms/step: mean 112.8  total 112.8 s
+  newton/step: mean 47.41  max 50  (hit the cap: 844)  PCG/step mean 1370.2
+  min distance at step ends: 1.161e-08
+  log: compare/rigid_ipc/results/wrecking_ball\rcipc_gpu.log
+running: D:\Project\rigid-ipc\build\Release\rigid_ipc_sim.exe --ngui D:\Project\rigid-ipc\fixtures\3D\chain\wrecking-ball.json D:\Project\rcipc\compare\rigid_ipc\results\wrecking_ball --loglevel info -f sim.json
+exit 1, wall 529.0 s (incl. start-up and writing sim.json)
+Traceback (most recent call last):
+  File "D:\Project\rcipc\compare\rigid_ipc\run_rigid_ipc.py", line 97, in <module>
+    main()
+  File "D:\Project\rcipc\compare\rigid_ipc\run_rigid_ipc.py", line 91, in main
+    print(log.read()[-3000:])
+          ^^^^^^^^^^
+UnicodeDecodeError: 'gbk' codec can't decode byte 0x80 in position 122595: illegal multibyte sequence

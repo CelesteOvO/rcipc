@@ -1,0 +1,21 @@
+{
+ "steps": 1000,
+ "total_s": 144.3,
+ "ms_mean": 144.3,
+ "min_dist": 5.623e-11,
+ "newton_max": 50,
+ "newton_mean": 49.78,
+ "newton_capped": 994,
+ "pcg_mean": 50.14,
+ "solver": "gpu_kappa_2.2e9_adapt_0",
+ "args": {
+  "T": 10.0,
+  "h": 0.01,
+  "dhat": 0.0001,
+  "mu": 0.0,
+  "extra": [
+   "kappa=2.2e9",
+   "adapt=0"
+  ]
+ }
+}

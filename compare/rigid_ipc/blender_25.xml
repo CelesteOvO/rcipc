@@ -1,0 +1,128 @@
+<!--
+  由 compare/rigid_ipc/import_rigid_ipc.py 从 Rigid-IPC 的 ../../../rigid-ipc/fixtures/3D/blender/blender-25.json 生成，
+  scene_demo 参数：T=5 h=0.005 dhat=0.001 mu=0（笔记 notes/compare_rigid_ipc.md）。
+-->
+<mujoco model="blender-25">
+  <compiler angle="radian" meshdir="D:/Project/rigid-ipc/meshes"/>
+  <option gravity="0 -9.8 0" timestep="0.005"/>
+  <default>
+    <geom friction="0 0 0"/>
+  </default>
+  <asset>
+    <mesh name="pot" file="pot.obj" scale="2.2 1 2.2" inertia="shell"/>
+    <mesh name="suzanne" file="D:/Project/rcipc/compare/rigid_ipc/meshes/suzanne.obj" scale="0.25 0.25 0.25" inertia="exact"/>
+  </asset>
+  <worldbody>
+    <geom name="pot1" type="mesh" mesh="pot" pos="0 0.61 0" quat="1 0 0 0"/>
+    <body name="plane0" pos="0 0 0" quat="0.707106781 0 0 0.707106781">
+      <joint name="plane0_j" type="hinge" axis="1 6.123234e-17 0" pos="0 0 0"/>
+      <geom name="plane0" type="box" size="0.375 2.1 0.0005" pos="0 0 0" quat="0.707106781 -0.707106781 0 0" mass="24192"/>
+    </body>
+    <body name="suzanne2" pos="-1.5 1 -0.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="suzanne2" type="mesh" mesh="suzanne" density="1000"/>
+    </body>
+    <body name="suzanne3" pos="-1.5 1 -0.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="suzanne3" type="mesh" mesh="suzanne" density="1000"/>
+    </body>
+    <body name="suzanne4" pos="-1.5 1 0" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="suzanne4" type="mesh" mesh="suzanne" density="1000"/>
+    </body>
+    <body name="suzanne5" pos="-1.5 1 0.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="suzanne5" type="mesh" mesh="suzanne" density="1000"/>
+    </body>
+    <body name="suzanne6" pos="-1.5 1 0.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="suzanne6" type="mesh" mesh="suzanne" density="1000"/>
+    </body>
+    <body name="suzanne7" pos="-0.75 1 -0.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="suzanne7" type="mesh" mesh="suzanne" density="1000"/>
+    </body>
+    <body name="suzanne8" pos="-0.75 1 -0.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="suzanne8" type="mesh" mesh="suzanne" density="1000"/>
+    </body>
+    <body name="suzanne9" pos="-0.75 1 0" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="suzanne9" type="mesh" mesh="suzanne" density="1000"/>
+    </body>
+    <body name="suzanne10" pos="-0.75 1 0.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="suzanne10" type="mesh" mesh="suzanne" density="1000"/>
+    </body>
+    <body name="suzanne11" pos="-0.75 1 0.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="suzanne11" type="mesh" mesh="suzanne" density="1000"/>
+    </body>
+    <body name="suzanne12" pos="0 1 -0.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="suzanne12" type="mesh" mesh="suzanne" density="1000"/>
+    </body>
+    <body name="suzanne13" pos="0 1 -0.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="suzanne13" type="mesh" mesh="suzanne" density="1000"/>
+    </body>
+    <body name="suzanne14" pos="0 1 0" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="suzanne14" type="mesh" mesh="suzanne" density="1000"/>
+    </body>
+    <body name="suzanne15" pos="0 1 0.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="suzanne15" type="mesh" mesh="suzanne" density="1000"/>
+    </body>
+    <body name="suzanne16" pos="0 1 0.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="suzanne16" type="mesh" mesh="suzanne" density="1000"/>
+    </body>
+    <body name="suzanne17" pos="0.75 1 -0.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="suzanne17" type="mesh" mesh="suzanne" density="1000"/>
+    </body>
+    <body name="suzanne18" pos="0.75 1 -0.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="suzanne18" type="mesh" mesh="suzanne" density="1000"/>
+    </body>
+    <body name="suzanne19" pos="0.75 1 0" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="suzanne19" type="mesh" mesh="suzanne" density="1000"/>
+    </body>
+    <body name="suzanne20" pos="0.75 1 0.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="suzanne20" type="mesh" mesh="suzanne" density="1000"/>
+    </body>
+    <body name="suzanne21" pos="0.75 1 0.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="suzanne21" type="mesh" mesh="suzanne" density="1000"/>
+    </body>
+    <body name="suzanne22" pos="1.5 1 -0.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="suzanne22" type="mesh" mesh="suzanne" density="1000"/>
+    </body>
+    <body name="suzanne23" pos="1.5 1 -0.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="suzanne23" type="mesh" mesh="suzanne" density="1000"/>
+    </body>
+    <body name="suzanne24" pos="1.5 1 0" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="suzanne24" type="mesh" mesh="suzanne" density="1000"/>
+    </body>
+    <body name="suzanne25" pos="1.5 1 0.45" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="suzanne25" type="mesh" mesh="suzanne" density="1000"/>
+    </body>
+    <body name="suzanne26" pos="1.5 1 0.9" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="suzanne26" type="mesh" mesh="suzanne" density="1000"/>
+    </body>
+  </worldbody>
+  <actuator>
+    <velocity name="plane0_drive" joint="plane0_j" kv="10000"/>
+  </actuator>
+  <keyframe>
+    <key name="drive" time="0" ctrl="3.4906585"/>
+  </keyframe>
+</mujoco>

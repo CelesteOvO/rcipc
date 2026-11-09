@@ -1,0 +1,21 @@
+{
+ "steps": 1000,
+ "total_s": 1.2,
+ "ms_mean": 1.2,
+ "min_dist": 1.196e-06,
+ "newton_max": 5,
+ "newton_mean": 1.05,
+ "newton_capped": 0,
+ "pcg_mean": 34.44,
+ "solver": "gpu_relax_0_toltheirs",
+ "args": {
+  "T": 10.0,
+  "h": 0.01,
+  "dhat": 0.001,
+  "mu": 0.0,
+  "extra": [
+   "relax=0",
+   "tol=0.061"
+  ]
+ }
+}

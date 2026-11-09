@@ -1,0 +1,22 @@
+<!--
+  由 compare/rigid_ipc/import_rigid_ipc.py 从 Rigid-IPC 的 ../../../rigid-ipc/fixtures/3D/mechanisms/bolt.json 生成，
+  scene_demo 参数：T=5 h=0.01 dhat=0.0001 mu=0（笔记 notes/compare_rigid_ipc.md）。
+-->
+<mujoco model="bolt">
+  <compiler angle="radian" meshdir="D:/Project/rigid-ipc/meshes"/>
+  <option gravity="0 -9.81 0" timestep="0.01"/>
+  <default>
+    <geom friction="0 0 0"/>
+  </default>
+  <asset>
+    <mesh name="nut-big" file="screw-and-nut/nut-big.obj" scale="0.01 0.01 0.01" inertia="shell"/>
+    <mesh name="screw-big" file="screw-and-nut/screw-big.obj" scale="0.01 0.01 0.01" inertia="exact"/>
+  </asset>
+  <worldbody>
+    <geom name="nut-big0" type="mesh" mesh="nut-big" pos="0 0 0" quat="1 0 0 0"/>
+    <body name="screw-big1" pos="0 0 0" quat="1 0 0 0">
+      <freejoint/>
+      <geom name="screw-big1" type="mesh" mesh="screw-big" density="8050"/>
+    </body>
+  </worldbody>
+</mujoco>

@@ -1,0 +1,49 @@
+running: D:\Project\rigid-ipc\build\Release\rigid_ipc_sim.exe --ngui D:\Project\rigid-ipc\fixtures\3D\piles\cone.json D:\Project\rcipc\compare\rigid_ipc\results\cone_pile --loglevel info -f sim.json
+exit 0, wall 43.2 s (incl. start-up and writing sim.json)
+D:\Project\rcipc\compare\rigid_ipc\results\cone_pile\sim.json: 400 steps, 11 bodies, h 0.01, dhat 0.001, trajectory piecewise_linear, mu 0.0, time_stepper default, newton tol 0.01 (velocity)
+  ms/step: mean 107.5  median 27.6  max 2107.9  total 43.0 s
+  newton steps/step: mean 4.47  max 45  (steps at >= 100: 0)
+  contacts/step: mean 46.6  max 150
+  min distance at step ends: 3.183e-04
+running: D:\Project\rigid-ipc\build\Release\rigid_ipc_sim.exe --ngui D:\Project\rigid-ipc\fixtures\3D\pendulum\pendulum.json D:\Project\rcipc\compare\rigid_ipc\results\pendulum --loglevel info -f sim.json
+exit 0, wall 53.6 s (incl. start-up and writing sim.json)
+D:\Project\rcipc\compare\rigid_ipc\results\pendulum\sim.json: 1000 steps, 2 bodies, h 0.01, dhat 0.0001, trajectory piecewise_linear, mu 0.0, time_stepper default, newton tol 0.01 (velocity)
+  ms/step: mean 53.5  median 19.9  max 600.8  total 53.5 s
+  newton steps/step: mean 2.82  max 13  (steps at >= 100: 0)
+  contacts/step: mean 38.6  max 304
+  min distance at step ends: 2.588e-05
+running: D:\Project\rigid-ipc\build\Release\rigid_ipc_sim.exe --ngui D:\Project\rigid-ipc\fixtures\3D\pendulum\pendulum.json D:\Project\rcipc\compare\rigid_ipc\results\pendulum --loglevel info -f sim_abs.json --patch {"newton_solver": {"velocity_conv_tol": 1e-6, "is_velocity_conv_tol_abs": true}}
+exit 0, wall 49.4 s (incl. start-up and writing sim.json)
+D:\Project\rcipc\compare\rigid_ipc\results\pendulum\sim_abs.json: 1000 steps, 2 bodies, h 0.01, dhat 0.0001, trajectory piecewise_linear, mu 0.0, time_stepper default, newton tol 1e-06 (velocity)
+  ms/step: mean 49.3  median 16.5  max 562.0  total 49.3 s
+  newton steps/step: mean 2.72  max 10  (steps at >= 100: 0)
+  contacts/step: mean 40.7  max 306
+  min distance at step ends: 2.087e-05
+running: D:\Project\rigid-ipc\build\Release\rigid_ipc_sim.exe --ngui D:\Project\rigid-ipc\fixtures\3D\mechanisms\bolt.json D:\Project\rcipc\compare\rigid_ipc\results\bolt --loglevel info -f sim.json
+exit 0, wall 641.2 s (incl. start-up and writing sim.json)
+D:\Project\rcipc\compare\rigid_ipc\results\bolt\sim.json: 500 steps, 2 bodies, h 0.01, dhat 0.0001, trajectory piecewise_linear, mu 0.0, time_stepper default, newton tol 0.01 (velocity)
+  ms/step: mean 1282.1  median 99.4  max 6460.5  total 641.1 s
+  newton steps/step: mean 8.04  max 62  (steps at >= 100: 0)
+  contacts/step: mean 350.9  max 772
+  min distance at step ends: 6.988e-05
+running: D:\Project\rigid-ipc\build\Release\rigid_ipc_sim.exe --ngui D:\Project\rigid-ipc\fixtures\3D\mechanisms\bolt.json D:\Project\rcipc\compare\rigid_ipc\results\bolt --loglevel info -f sim_abs.json --patch {"newton_solver": {"velocity_conv_tol": 1e-6, "is_velocity_conv_tol_abs": true}}
+exit 0, wall 633.9 s (incl. start-up and writing sim.json)
+D:\Project\rcipc\compare\rigid_ipc\results\bolt\sim_abs.json: 500 steps, 2 bodies, h 0.01, dhat 0.0001, trajectory piecewise_linear, mu 0.0, time_stepper default, newton tol 1e-06 (velocity)
+  ms/step: mean 1267.7  median 92.9  max 6978.6  total 633.8 s
+  newton steps/step: mean 8.32  max 70  (steps at >= 100: 0)
+  contacts/step: mean 324.8  max 811
+  min distance at step ends: 6.919e-05
+running: D:\Project\rigid-ipc\build\Release\rigid_ipc_sim.exe --ngui D:\Project\rigid-ipc\fixtures\3D\friction\card-house\card-house-2-levels.json D:\Project\rcipc\compare\rigid_ipc\results\card_house_2 --loglevel info -f sim.json
+exit 0, wall 1.2 s (incl. start-up and writing sim.json)
+D:\Project\rcipc\compare\rigid_ipc\results\card_house_2\sim.json: 200 steps, 8 bodies, h 0.01, dhat 0.001, trajectory piecewise_linear, mu 0.5, time_stepper default, newton tol 0.01 (velocity)
+  ms/step: mean 5.9  median 3.5  max 124.0  total 1.2 s
+  newton steps/step: mean 3.29  max 73  (steps at >= 100: 0)
+  contacts/step: mean 73.6  max 92
+  min distance at step ends: 9.821e-04
+running: D:\Project\rigid-ipc\build\Release\rigid_ipc_sim.exe --ngui D:\Project\rigid-ipc\fixtures\3D\blender\blender-25.json D:\Project\rcipc\compare\rigid_ipc\results\blender_25 --loglevel info -f sim.json
+exit 0, wall 3928.7 s (incl. start-up and writing sim.json)
+D:\Project\rcipc\compare\rigid_ipc\results\blender_25\sim.json: 1000 steps, 27 bodies, h 0.005, dhat 0.001, trajectory piecewise_linear, mu 0, time_stepper default, newton tol 0.01 (velocity)
+  ms/step: mean 3927.6  median 3793.2  max 46899.3  total 3927.6 s
+  newton steps/step: mean 28.55  max 81  (steps at >= 100: 0)
+  contacts/step: mean 55.7  max 97
+  min distance at step ends: 7.831e-04

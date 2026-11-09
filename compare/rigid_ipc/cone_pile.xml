@@ -1,0 +1,58 @@
+<!--
+  由 compare/rigid_ipc/import_rigid_ipc.py 从 Rigid-IPC 的 ../../../rigid-ipc/fixtures/3D/piles/cone.json 生成，
+  scene_demo 参数：T=4 h=0.01 dhat=0.001 mu=0（笔记 notes/compare_rigid_ipc.md）。
+-->
+<mujoco model="cone">
+  <compiler angle="radian" meshdir="D:/Project/rigid-ipc/meshes"/>
+  <option gravity="0 -9.8 0" timestep="0.01"/>
+  <default>
+    <geom friction="0 0 0"/>
+  </default>
+  <asset>
+    <mesh name="cube" file="cube.obj" scale="0.25 0.25 0.25" inertia="exact"/>
+    <mesh name="cone" file="cone.obj" scale="2 2 2" inertia="shell"/>
+  </asset>
+  <worldbody>
+    <geom name="cone10" type="mesh" mesh="cone" pos="0 -5 0" quat="1 0 0 0"/>
+    <body name="cube0" pos="1.5 1 0" quat="0.907962524 0.0210049709 0.414221242 -0.0598632525">
+      <freejoint/>
+      <geom name="cube0" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube1" pos="-1.5 3 0" quat="0.50369742 -0.679299217 0.276791887 0.456319772">
+      <freejoint/>
+      <geom name="cube1" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube2" pos="0 5 1.5" quat="0.644934053 0.564588431 0.346863824 0.38076956">
+      <freejoint/>
+      <geom name="cube2" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube3" pos="0 7 -1.5" quat="-0.36845567 0.555577294 0.743800149 0.0483283424">
+      <freejoint/>
+      <geom name="cube3" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube4" pos="0 9 0" quat="0.737826504 0.418093409 0.529592795 0.0184776389">
+      <freejoint/>
+      <geom name="cube4" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube5" pos="1.5 11 0" quat="0.907962524 0.0210049709 0.414221242 -0.0598632525">
+      <freejoint/>
+      <geom name="cube5" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube6" pos="-1.5 13 0" quat="0.50369742 -0.679299217 0.276791887 0.456319772">
+      <freejoint/>
+      <geom name="cube6" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube7" pos="0 15 1.5" quat="0.644934053 0.564588431 0.346863824 0.38076956">
+      <freejoint/>
+      <geom name="cube7" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube8" pos="0 17 -1.5" quat="-0.36845567 0.555577294 0.743800149 0.0483283424">
+      <freejoint/>
+      <geom name="cube8" type="mesh" mesh="cube" density="1000"/>
+    </body>
+    <body name="cube9" pos="0 19 0" quat="0.737826504 0.418093409 0.529592795 0.0184776389">
+      <freejoint/>
+      <geom name="cube9" type="mesh" mesh="cube" density="1000"/>
+    </body>
+  </worldbody>
+</mujoco>

@@ -1,0 +1,44 @@
+<!--
+  由 compare/rigid_ipc/import_rigid_ipc.py 从 Rigid-IPC 的 ../../../rigid-ipc/fixtures/3D/friction/card-house/card-house-2-levels.json 生成，
+  scene_demo 参数：T=2 h=0.01 dhat=0.001 mu=0.5（笔记 notes/compare_rigid_ipc.md）。
+-->
+<mujoco model="card-house-2-levels">
+  <compiler angle="radian" meshdir="D:/Project/rigid-ipc/meshes"/>
+  <option gravity="0 -9.8 0" timestep="0.01"/>
+  <default>
+    <geom friction="0.5 0 0"/>
+  </default>
+  <asset>
+  </asset>
+  <worldbody>
+    <geom name="plane0" type="plane" pos="0 0 0" quat="-0.5 0.5 0.5 0.5" size="5 5 0.1"/>
+    <body name="plane1" pos="-1.65 1.20830308 0" quat="0.843391446 0 0 0.537299608">
+      <freejoint/>
+      <geom name="plane1" type="box" size="0.625 1.25 0.0005" pos="0 0 0" quat="-0.5 0.5 0.5 0.5" mass="3125"/>
+    </body>
+    <body name="plane2" pos="-0.55 1.20830308 0" quat="0.843391446 0 0 -0.537299608">
+      <freejoint/>
+      <geom name="plane2" type="box" size="0.625 1.25 0.0005" pos="0 0 0" quat="-0.5 0.5 0.5 0.5" mass="3125"/>
+    </body>
+    <body name="plane3" pos="0.55 1.20830308 0" quat="0.843391446 0 0 0.537299608">
+      <freejoint/>
+      <geom name="plane3" type="box" size="0.625 1.25 0.0005" pos="0 0 0" quat="-0.5 0.5 0.5 0.5" mass="3125"/>
+    </body>
+    <body name="plane4" pos="1.65 1.20830308 0" quat="0.843391446 0 0 -0.537299608">
+      <freejoint/>
+      <geom name="plane4" type="box" size="0.625 1.25 0.0005" pos="0 0 0" quat="-0.5 0.5 0.5 0.5" mass="3125"/>
+    </body>
+    <body name="plane5" pos="0 2.41660617 0" quat="0.999961923 0 0 -0.0087265355">
+      <freejoint/>
+      <geom name="plane5" type="box" size="0.625 1.25 0.0005" pos="0 0 0" quat="-0.5 0.5 0.5 0.5" mass="3125"/>
+    </body>
+    <body name="plane6" pos="-0.55 3.62490925 0" quat="0.843391446 0 0 0.537299608">
+      <freejoint/>
+      <geom name="plane6" type="box" size="0.625 1.25 0.0005" pos="0 0 0" quat="-0.5 0.5 0.5 0.5" mass="3125"/>
+    </body>
+    <body name="plane7" pos="0.55 3.62490925 0" quat="0.843391446 0 0 -0.537299608">
+      <freejoint/>
+      <geom name="plane7" type="box" size="0.625 1.25 0.0005" pos="0 0 0" quat="-0.5 0.5 0.5 0.5" mass="3125"/>
+    </body>
+  </worldbody>
+</mujoco>
