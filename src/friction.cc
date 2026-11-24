@@ -38,7 +38,7 @@ std::vector<FrictionContact> lag_friction(const Model& model, const Frames& fram
   for (const Contact& c : contacts) {
     FrictionContact f;
     f.contact = c;
-    f.lambda = -kappa * c.moll * barrier(c.d * c.d, dhat * dhat).db * 2 * c.d;
+    f.lambda = -kappa * c.kw * c.moll * barrier(c.d * c.d, dhat * dhat).db * 2 * c.d;
     if (f.lambda <= 0) continue;
     // 切向基：先挑一个不和 n 平行的轴，叉乘得到 t1，再叉乘得到 t2（书第 187 页的 lag_friction）。
     const Vector3d& n = c.n;

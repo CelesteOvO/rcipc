@@ -5,9 +5,10 @@
 //   Terms.*   能量、梯度、稠密 Hessian（惯性和它的曲率项、接触三种、mollifier、摩擦、曲率上界、限位、世界上的静态几何）
 //   Pcg.*     PCG 的解和稠密 LDLT 的解
 //   Ccd.*     CCD 的步长上限（地面、刚体之间、网格）
-//   Step.*    整步：落地盒子、堆叠、布娃娃，和 CPU 版的轨迹一致；网格布娃娃堆不穿透
+//   Step.*    整步：落地盒子、堆叠、布娃娃、链条，和 CPU 版的轨迹一致；网格布娃娃堆不穿透
 //   Topology.*  穿透会改变拓扑的两个场景：锁链的环绕数不变、搅拌机的球不出罐子（notes/14_visible.md）
 //   Drift.*     摆锤越过矮墙：轻链吊重物，关节精确、刚体刚性，链不会被拉长（notes/15_drift.md）
+//   PrimalDual.*  原始-对偶障碍（StepParams::primal_dual）：开、关都和 CPU 版一致
 // GPU 的原子加让求和顺序不固定，所以都按相对误差比（1e-9 量级），不要求逐位相同。没有显卡时整组跳过。
 #include "rcipc/gpu.h"
 
@@ -17,6 +18,7 @@
 
 #include <gtest/gtest.h>
 
+#include "rcipc/barrier.h"
 #include "rcipc/ccd.h"
 #include "rcipc/contact.h"
 #include "rcipc/drive.h"
@@ -51,8 +53,9 @@ const char* kCaps8 = RCIPC_MODEL_DIR "/../compare/libuipc/ragdolls_8.xml";
   if (!gpu::available()) GTEST_SKIP() << "no CUDA device"
 
 // CPU 版在 q 处的各项（和 GPU 的 Stepper::terms 一一对应）：步首 (q0, v0) 的惯性目标和滞后摩擦。
+// rank1_rows：两阶段曲率用秩 1 行的那一次迭代（同 Stepper::terms 的 rank1_rows）。
 gpu::Stepper::Terms cpu_terms(const Model& M, const StepParams& P, const VectorXd& q0, const VectorXd& v0, double kappa,
-                              const VectorXd& q) {
+                              const VectorXd& q, bool rank1_rows = false) {
   const VectorXd q_prev = integrate(M, q0, v0, -P.h);
   const Frames F0 = forward_kinematics(M, q0);
   const InertiaTargets T = inertia_targets(M, F0, forward_kinematics(M, q_prev), P.h);
@@ -62,24 +65,35 @@ gpu::Stepper::Terms cpu_terms(const Model& M, const StepParams& P, const VectorX
   const std::vector<Contact> C = find_contacts(M, F, P.dhat);
   gpu::Stepper::Terms out;
   out.energy = inertia_energy(M, F, T, P.h) + contact_energy(M, C, kappa, P.dhat) +
-               friction_energy(M, F, FC, P.h, P.mu, P.eps_v) + limit_energy(M, q, P.limit_k, P.limit_dhat);
+               friction_energy(M, F, FC, P.h, P.mu, P.eps_v) + limit_energy(M, q, P.limit_barrier());
   out.g = inertia_gradient(M, F, T, P.h) + contact_gradient(M, F, C, kappa, P.dhat) +
-          friction_gradient(M, F, FC, P.h, P.mu, P.eps_v) + limit_gradient(M, q, P.limit_k, P.limit_dhat);
+          friction_gradient(M, F, FC, P.h, P.mu, P.eps_v) + limit_gradient(M, q, P.limit_barrier());
   const MatrixXd Mh = inertia_hessian(M, F, P.h);
-  if (P.full_contact_hessian) {
+  if (P.full_contact_hessian) {  } else if (P.full_contact_hessian) {
     // 阶段 14：行是每个接触的旋量块的半正定部分，链上剩余项和惯性的曲率项一起检查（同 step.cc）。
     NewtonSystem sys;
     sys.Hk = MatrixXd::Zero(M.nv, M.nv);
     contact_rows_full(M, F, C, kappa, P.dhat, &sys.rows);
     out.H = Mh + dense(sys) + friction_hessian(M, F, FC, P.h, P.mu, P.eps_v);
-    out.H.diagonal() += limit_hessian_diagonal(M, q, P.limit_k, P.limit_dhat);
+    out.H.diagonal() += limit_hessian_diagonal(M, q, P.limit_barrier());
     MatrixXd K = contact_chain_curvature(M, F, C, kappa, P.dhat);
     if (P.inertia_curvature) K += inertia_curvature(M, F, T, P.h, P.inertia_curvature_rot);
     add_inertia_curvature(M, Mh, K, &out.H, P.inertia_curvature_floor);
+  } else if (rank1_rows) {
+    // 两阶段曲率用秩 1 行的那一次迭代（同 step.cc 的 curv_rows）：不加阶段 6 的上界，每一行的权重加
+    // contact_curvature_row_weight。
+    out.H = Mh + contact_hessian(M, F, C, kappa, P.dhat) + friction_hessian(M, F, FC, P.h, P.mu, P.eps_v);
+    for (const Contact& c : C) {
+      const Eigen::RowVectorXd r = contact_row(M, F, c);
+      out.H += contact_curvature_row_weight(M, F, c, r, kappa, P.dhat) * (r.transpose() * r);
+    }
+    out.H.diagonal() += limit_hessian_diagonal(M, q, P.limit_barrier());
+    if (P.inertia_curvature) add_inertia_curvature(M, Mh, inertia_curvature(M, F, T, P.h, P.inertia_curvature_rot), &out.H,
+                                               P.inertia_curvature_floor);
   } else {
     out.H = Mh + contact_curvature(M, q, C, kappa, P.dhat, P.curv_scale) + contact_hessian(M, F, C, kappa, P.dhat) +
             friction_hessian(M, F, FC, P.h, P.mu, P.eps_v);
-    out.H.diagonal() += limit_hessian_diagonal(M, q, P.limit_k, P.limit_dhat);
+    out.H.diagonal() += limit_hessian_diagonal(M, q, P.limit_barrier());
     if (P.inertia_curvature) add_inertia_curvature(M, Mh, inertia_curvature(M, F, T, P.h, P.inertia_curvature_rot), &out.H,
                                                P.inertia_curvature_floor);  // 阶段 13
   }
@@ -106,10 +120,11 @@ State cpu_run(const Model& M, const StepParams& P, int n, VectorXd q, VectorXd v
 double rel(const VectorXd& a, const VectorXd& b) { return (a - b).norm() / std::max(1.0, b.norm()); }
 double rel(const MatrixXd& a, const MatrixXd& b) { return (a - b).norm() / std::max(1.0, b.norm()); }
 
-void expect_terms_match(const Model& M, const StepParams& P, const State& s, const VectorXd& q, const char* what) {
+void expect_terms_match(const Model& M, const StepParams& P, const State& s, const VectorXd& q, const char* what,
+                        bool rank1_rows = false) {
   gpu::Stepper G(M);
-  const gpu::Stepper::Terms g = G.terms(P, s.q, s.v, s.S.kappa, q);
-  const gpu::Stepper::Terms c = cpu_terms(M, P, s.q, s.v, s.S.kappa, q);
+  const gpu::Stepper::Terms g = G.terms(P, s.q, s.v, s.S.kappa, q, rank1_rows);
+  const gpu::Stepper::Terms c = cpu_terms(M, P, s.q, s.v, s.S.kappa, q, rank1_rows);
   EXPECT_EQ(g.ncontact, c.ncontact) << what;
   EXPECT_EQ(g.nfriction, c.nfriction) << what;
   EXPECT_NEAR(g.energy, c.energy, 1e-10 * std::max(1.0, std::abs(c.energy))) << what;
@@ -198,6 +213,27 @@ TEST(Terms, LedgeWithStaticGeometry) {
   StepParams P;
   const State s = cpu_run(M, P, 120, M.qpos0, VectorXd::Zero(6));
   expect_terms_match(M, P, s, s.q, "ledge");
+}
+
+// 焊在世界上的刚体（models/welded_base.xml，notes/07_contact.md 第 1.1 节）：底座的盒子在地面下 0.03 mm。
+// GPU 的地面检测（k_ground_detect）和地面 CCD（k_ground_ccd）和 CPU 一样跳过 weld 为 0 的刚体：球离地 0.5 mm 时
+// 只有球一个地面接触，能量、梯度、Hessian 一致；往下走 1 mm 的 CCD 步长一致，而且没有被底座的顶点卡成 0。
+TEST(Terms, BodiesWeldedToTheWorldSkipThePlane) {
+  REQUIRE_GPU();
+  const Model M = load("welded_base.xml");
+  StepParams P;
+  VectorXd q = M.qpos0;
+  q[2] = 0.08 + 0.03 + 0.5e-3;
+  State s{q, VectorXd::Zero(M.nv), {}};
+  s.S.kappa = 1e3;
+  EXPECT_EQ(find_contacts(M, forward_kinematics(M, q), P.dhat).size(), 1u);
+  expect_terms_match(M, P, s, q, "welded base");
+  VectorXd p = VectorXd::Zero(M.nv);
+  p[2] = -1e-3;
+  const double b = std::min(curved_ccd(M, q, p, P.dhat, P.c), limit_ccd(M, q, p, P.c));
+  EXPECT_GT(b, 0.25);
+  gpu::Stepper G(M);
+  EXPECT_NEAR(G.ccd(P, q, p), b, 1e-12);
 }
 
 // 阶段 13：惯性的曲率项。摆锤摆到最低点附近（链上拉力最大，这一项比 M / h^2 大几十倍），以及 zoo.xml
@@ -300,6 +336,34 @@ TEST(Terms, MeshRagdoll) {
   const State s = cpu_run(M, P, 60, M.qpos0, VectorXd::Zero(M.nv));  // 0.6 s：已经落地
   ASSERT_GT(s.S.kappa, 0);
   expect_terms_match(M, P, s, s.q, "mesh ragdoll");
+}
+
+// 两阶段曲率的秩 1 行：GPU 每一侧只沿链走一遍、就地算行的分量，CPU 对每个模板顶点各走一遍。
+// 布娃娃（球关节的三个转动、自由关节的根）落地以后；布娃娃堆里手臂碰到自己躯干的时候（两侧在同一棵树里，
+// 行在共同的祖先上要把两侧加起来）。逐项比稠密的 Hessian；再确认秩 1 行真的进了 Hessian（和不开时不一样）。
+TEST(Terms, RankOneCurvatureRows) {
+  REQUIRE_GPU();
+  for (const char* file : {"ragdoll.xml", "ragdoll_pile.xml"}) {
+    const Model M = load(file);
+    StepParams P;
+    State s{M.qpos0, VectorXd::Zero(M.nv), {}};
+    int same_tree = 0;
+    if (file[7] == '.') {
+      s = cpu_run(M, P, 300, s.q, s.v);
+    } else {
+      for (int k = 0; k < 40 && same_tree == 0; ++k) {  // 每 25 步看一次，直到有自己碰自己的接触
+        s = cpu_run(M, P, 25, s.q, s.v);
+        for (const Contact& c : find_contacts(M, forward_kinematics(M, s.q), P.dhat))
+          if (c.bodyA > 0 && c.bodyB > 0 && M.body_tree[c.bodyA] == M.body_tree[c.bodyB]) ++same_tree;
+      }
+      ASSERT_GT(same_tree, 0);
+    }
+    ASSERT_GT(s.S.kappa, 0) << file;
+    expect_terms_match(M, P, s, s.q, file, true);
+    const MatrixXd H1 = cpu_terms(M, P, s.q, s.v, s.S.kappa, s.q, true).H;
+    const MatrixXd H0 = cpu_terms(M, P, s.q, s.v, s.S.kappa, s.q).H;
+    EXPECT_GT((H1 - H0).norm(), 1e-6 * H0.norm()) << file;
+  }
 }
 
 // ---------- 预条件器 ----------
@@ -413,11 +477,12 @@ TEST(Ccd, MatchesCpu) {
 }
 
 // ACCD 的尾巴（笔记第 14 节）：走了 16 步还没完的对交给整个 warp，先证明它返回 1，证不出来再接着走。
+// 有了分离平面的界（笔记 22 第 3 节）以后，ACCD 很少走到 16 步：下面两种运动里贴着平面滑动第一步就返回 1，
+// 沉下去几步就截断，用不上尾巴。这里只确认交不交给 warp 结果都逐位相同、和 CPU 版一致。
 // 两个盒子一起绕 y 轴倾斜 0.3 rad（倾斜的面上，三角形的盒子在 z 方向有厚度，扫掠盒才会重叠；水平的面上，
 // 平移的滑动早被盒子规则剔掉了），上面的盒子离下面 0.1 mm，沿下面盒子的顶面滑 3 cm：贴着滑的对要走约 330 步。
 //   - 只滑：距离一直是 0.1 mm，证得出返回 1；
 //   - 滑的同时沿法向沉 0.2 mm：中途会碰上，证不出来，接着串行走完。
-// 交不交给 warp，结果都要逐位相同，并且和 CPU 版一致。
 TEST(Ccd, TailMatchesSerial) {
   REQUIRE_GPU();
   const Model M = load("stack.xml");
@@ -434,7 +499,6 @@ TEST(Ccd, TailMatchesSerial) {
   q.segment<4>(3) << tilt.w(), tilt.x(), tilt.y(), tilt.z();
   q.segment<3>(7) = centre + (0.2 + gap) * nrm;
   q.segment<4>(10) << up.w(), up.x(), up.y(), up.z();
-  long tail = 0, proved = 0, serial = 0;
   for (int k = 0; k < 2; ++k) {
     VectorXd p = VectorXd::Zero(M.nv);
     p.segment<3>(6) = 0.03 * tan - (k == 1 ? 2 * gap : 0.0) * nrm;
@@ -448,13 +512,44 @@ TEST(Ccd, TailMatchesSerial) {
     EXPECT_NEAR(a1, b, 1e-12) << "direction " << k;
     if (k == 0) EXPECT_EQ(a1, 1.0);
     if (k == 1) EXPECT_LT(a1, 0.6);  // 真的截断了
-    tail += G.timers().ccd_tail;
-    proved += G.timers().ccd_tail_proved;
-    serial += G.timers().ccd_tail_serial;
+    std::printf("  direction %d: tail %ld, proved %ld, serial %ld\n", k, G.timers().ccd_tail, G.timers().ccd_tail_proved,
+                G.timers().ccd_tail_serial);
   }
-  EXPECT_GT(tail, 0);
-  EXPECT_GT(proved, 0);
-  EXPECT_GT(serial, 0);
+}
+
+// 分离平面的界（笔记 22 第 3 节）：搅拌机里球 0 贴着叶片 0 的面（间隙 1e-7 m），转子转 theta，
+//   球沿法向跟着叶片在它那里的速度走直线。转动的平面几步就停；交不交给 warp 逐位相同、和 CPU 版一致。
+TEST(Ccd, PlaneBoundTailMatchesSerial) {
+  REQUIRE_GPU();
+  const Model M = load("blender.xml");
+  StepParams P;
+  gpu::Stepper G(M);
+  VectorXd q = M.qpos0;
+  const double gap = 1e-7, rb = 0.15;
+  q.segment<3>(1) = Eigen::Vector3d(rb, 0.0015 + 0.012 + gap, 0.036 + 0.005);  // 球 0 的球心
+  {
+    for (const double theta : {0.02, 0.06, 0.13}) {
+      for (const double sink : {0.0, 2 * gap}) {
+        VectorXd p = VectorXd::Zero(M.nv);
+        p[0] = theta;                          // 转子
+        p[2] = rb * std::sin(theta) - sink;    // 球 0 沿 y 跟着叶片走（sink：再往叶片里压一点）
+        const double b = std::min(curved_ccd(M, q, p, P.dhat, P.c), limit_ccd(M, q, p, P.c));
+        G.set_ccd_tail(false);
+        const double a0 = G.ccd(P, q, p);
+        G.set_ccd_tail(true);
+        G.reset_timers();
+        const double a1 = G.ccd(P, q, p);
+        EXPECT_EQ(a0, a1) << "theta " << theta << " sink " << sink;
+        // 和 CPU 版只差舍入，但这里被放大了：快停下时二次式的常数项 A = n·m - level 是两个约 0.012 m（球的半径）
+        //   的数之差，只剩 1e-10 m 左右，1e-18 m 的舍入（GPU 合并乘加，CPU 不合并）就是 1e-8 的相对误差，
+        //   最后一步的步长跟着差。两边的结果都是安全的；交不交给 warp 仍然逐位相同（上面）。
+        EXPECT_NEAR(a1, b, 1e-8 * std::max(1.0, b)) << "theta " << theta << " sink " << sink;
+        EXPECT_LT(a1, 1.0) << "theta " << theta << " sink " << sink;
+        std::printf("  theta %.2f sink %.0e: alpha %.6f, tail %ld, proved %ld, serial %ld\n", theta, sink, a1,
+                    G.timers().ccd_tail, G.timers().ccd_tail_proved, G.timers().ccd_tail_serial);
+      }
+    }
+  }
 }
 
 // ---------- 整步 ----------
@@ -491,6 +586,13 @@ TEST(Step, BoxDropMatchesCpu) {
   REQUIRE_GPU();
   const Model M = load("drop.xml");
   expect_same_run(M, StepParams{}, M.qpos0, VectorXd::Zero(6), 400, 1e-8, "drop");
+}
+
+// 焊在世界上的底座（models/welded_base.xml）：自由盒子带着焊在它下面的球落到地面，底座的盒子在地面下 0.03 mm。
+TEST(Step, WeldedBaseMatchesCpu) {
+  REQUIRE_GPU();
+  const Model M = load("welded_base.xml");
+  expect_same_run(M, StepParams{}, M.qpos0, VectorXd::Zero(M.nv), 100, 1e-8, "welded base");
 }
 
 TEST(Step, StackMatchesCpu) {
@@ -665,8 +767,10 @@ TEST(Topology, RingChainStaysLinked) {
   REQUIRE_GPU();
   const Model M = load("ring_chain.xml");
   // 环：有 12 条边的刚体。胶囊的边是 (轴的终点, 起点)，按边的顺序取起点就是环的 12 边形。
+  //   胶囊端点的退化边（v0 == v1，点–边接触用）不是环的边，跳过。
   std::vector<std::vector<int>> ring_verts(M.nbody());
-  for (const Edge& e : M.edges) ring_verts[e.body].push_back(e.v1);
+  for (const Edge& e : M.edges)
+    if (e.v0 != e.v1) ring_verts[e.body].push_back(e.v1);
   std::vector<int> rings;
   for (int b = 1; b < M.nbody(); ++b)
     if (ring_verts[b].size() == 12) rings.push_back(b);
@@ -807,4 +911,93 @@ TEST(Drift, WreckingBallClearsWall) {
   EXPECT_TRUE(crossed);           // 0.8 s 内越过了墙
   EXPECT_GT(clearance, 0.005);    // 名义 2 cm；摆锤绕自己的铰链转一点，最低的角低几毫米
   EXPECT_LE(newton_max, 10);      // 阶段 13 之前是 50（上限）
+}
+
+// ---------- 原始-对偶障碍（StepParams::primal_dual，GPU 版的 DPd） ----------
+
+namespace {
+// drop.xml 的盒子 4 个下角离地 gap，静止；kappa 选成平衡间隙正好是 dstar（同 test_primal_dual.cc）。
+VectorXd pd_box_at(const Model& M, double gap) {
+  VectorXd q = M.qpos0;
+  q[2] = 0.2 + gap;
+  return q;
+}
+double pd_kappa_for_rest_gap(double dstar, double dhat) {
+  return 9.81 / (4 * std::abs(barrier(dstar * dstar, dhat * dhat).db) * 2 * dstar);
+}
+}  // namespace
+
+// test_primal_dual.cc 的 SqueezedGapSameSolutionFewerIterations 搬到 GPU：间隙压到平衡值的 1/10，kappa 固定。
+// 原始障碍和原始-对偶两种，GPU 和 CPU 的迭代次数一样、走到同一个点；GPU 上原始-对偶也比原始方法少迭代
+// （pd 在 GPU 上真的起了作用）。图版和逐个发射的都比。
+TEST(PrimalDual, SqueezedGapMatchesCpu) {
+  REQUIRE_GPU();
+  const Model M = load("drop.xml");
+  const double dhat = 1e-3, dstar = 0.02 * dhat;
+  const double kappa = pd_kappa_for_rest_gap(dstar, dhat);
+  for (bool graphs : {true, false}) {
+    gpu::Stepper G(M);
+    G.set_graphs(graphs);
+    int newton_g[2] = {0, 0};
+    for (int pd : {0, 1}) {
+      StepParams P;
+      P.adapt_kappa = false;
+      P.primal_dual = pd != 0;
+      SolverState Sc, Sg;
+      Sc.kappa = Sg.kappa = kappa;
+      const VectorXd q0 = pd_box_at(M, 0.1 * dstar), v0 = VectorXd::Zero(6);
+      const StepResult rc = step(M, P, q0, v0, &Sc);
+      const StepResult rg = G.step(P, q0, v0, &Sg);
+      newton_g[pd] = rg.newton;
+      EXPECT_EQ(rg.newton, rc.newton) << "pd " << pd << " graphs " << graphs;
+      EXPECT_LT((rg.q - rc.q).norm(), 1e-9) << "pd " << pd << " graphs " << graphs;
+      EXPECT_FALSE(rg.capped) << "pd " << pd << " graphs " << graphs;
+      if (graphs && G.set_cooperative_pcg(true)) EXPECT_TRUE(G.used_graphs()) << "pd " << pd;
+    }
+    EXPECT_LT(newton_g[1], newton_g[0]) << "graphs " << graphs;
+  }
+}
+
+// 整段仿真（默认参数：原始-对偶、两阶段曲率、分离平面的界）：布娃娃、两个叠着的盒子落地、12 节链条，GPU 和 CPU
+// 走同一条轨迹。图版、逐个发射，第三遍把容量改得很小：接触的缓冲区一步中间扩容，lambda 的表换成大表时重新散列，
+// 结果不变。链条最吃两阶段曲率（上界在深链上太硬），GPU 在接触内核里算秩 1 行，开关每次迭代写进 DIter::crow。
+TEST(Step, DefaultSolverMatchesCpu) {
+  REQUIRE_GPU();
+  struct Case {
+    const char* file;
+    int steps;
+    double tol;
+  };
+  for (const Case& k : {Case{"ragdoll.xml", 200, 1e-5}, Case{"stack.xml", 300, 1e-6}, Case{"chain.xml", 300, 1e-4}}) {
+    const Model M = load(k.file);
+    StepParams P;
+    P.h = M.timestep;
+    for (int pass = 0; pass < 3; ++pass) {
+      const bool graphs = pass != 1;
+      gpu::Stepper G(M);
+      G.set_graphs(graphs);
+      if (pass == 2) G.set_capacities(2, 2, 4, 4);
+      VectorXd qc = M.qpos0, vc = VectorXd::Zero(M.nv), qg = qc, vg = vc;
+      SolverState Sc, Sg;
+      int newton_diff = 0;
+      long newton_c = 0, newton_g = 0;
+      for (int i = 0; i < k.steps; ++i) {
+        const StepResult rc = step(M, P, qc, vc, &Sc);
+        const StepResult rg = G.step(P, qg, vg, &Sg);
+        newton_diff += rc.newton != rg.newton;
+        newton_c += rc.newton;
+        newton_g += rg.newton;
+        qc = rc.q;
+        vc = rc.v;
+        qg = rg.q;
+        vg = rg.v;
+        EXPECT_GT(rg.min_distance, 0.0) << k.file << " step " << i << " pass " << pass;
+        if (graphs && G.set_cooperative_pcg(true)) EXPECT_TRUE(G.used_graphs()) << k.file << " step " << i;
+      }
+      std::printf("[default gpu] %s pass %d: newton CPU %ld GPU %ld, steps differing %d, |dq| %.3g\n", k.file, pass,
+                  newton_c, newton_g, newton_diff, (qg - qc).norm());
+      EXPECT_LE(newton_diff, k.steps / 10) << k.file << " pass " << pass;
+      EXPECT_LT((qg - qc).norm(), k.tol) << k.file << " pass " << pass;
+    }
+  }
 }

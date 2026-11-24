@@ -107,6 +107,7 @@ struct BV {
 };
 RC_HD BV barrier(double x, double xhat) {
   if (x >= xhat) return BV{0, 0, 0};
+  if (x <= 0) return BV{INFINITY, 0, 0};  // 可行域之外：能量 +无穷（同 barrier.cc）
   const double r = x - xhat;
   const double L = log(x / xhat);
   return BV{-r * r * L, -2 * r * L - r * r / x, -2 * L - 4 * r / x + r * r / (x * x)};

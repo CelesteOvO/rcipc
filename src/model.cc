@@ -1,7 +1,10 @@
 #include "rcipc/model.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <map>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -147,10 +150,17 @@ Model from_mujoco(const mjModel* m) {
         M.edges.push_back({M.nvertex() - 1, M.nvertex() - 1, b});
         break;
       case mjGEOM_CAPSULE:
-        // 胶囊：轴是 geom 坐标系的 z 轴，size[1] 是半长，size[0] 是半径。两个端点（球心）加半径，一条边。
+        // 胶囊：轴是 geom 坐标系的 z 轴，size[1] 是半长，size[0] 是半径。两个端点（球心）加半径，一条边，
+        //   再加两条退化的边（每个端点一条，和球一样）。退化的边对别的边就是“点–边”接触，没有 mollifier。
+        //   为什么要加：两根胶囊接近平行时，它们那一对边–边的 mollifier 趋于 0，障碍被关掉；网格上这时由点–三角形接管，
+        //   胶囊没有三角形，没有东西接管，间隙可以一直塌到浮点分辨率然后穿透（notes/22_primal_dual.md 第 5 节）。
+        //   平行的两条线段，最近距离总能在某个端点对另一条线段上取到，所以端点–边这几对正好补上。
+        //   C-IPC（Li 等 2021）对杆也是这样：除了边–边，杆的节点另加点–边对。
         M.vertices.push_back({b, pos + quat * Eigen::Vector3d(0, 0, size[1]), size[0]});
         M.vertices.push_back({b, pos - quat * Eigen::Vector3d(0, 0, size[1]), size[0]});
         M.edges.push_back({M.nvertex() - 2, M.nvertex() - 1, b});
+        M.edges.push_back({M.nvertex() - 2, M.nvertex() - 2, b});
+        M.edges.push_back({M.nvertex() - 1, M.nvertex() - 1, b});
         break;
       case mjGEOM_CYLINDER: {
         // 圆柱（阶段 12 之后，为了 Go2 这类机器人模型）：轴是 geom 坐标系的 z 轴，size[0] 是半径，size[1] 是半长。
@@ -185,20 +195,36 @@ Model from_mujoco(const mjModel* m) {
         break;
       }
       case mjGEOM_MESH: {
-        // 三角网格（阶段 11 前加的，为了和 libuipc 用同一套几何）：顶点半径 0，三角形照抄，边从三角形里去重得到。
+        // 三角网格（阶段 11 前加的，为了和 libuipc 用同一套几何）：顶点半径 0，三角形照抄（重合的顶点先合并，见下），
+        //   边从三角形里去重得到。
         //   MuJoCo 编译时会把网格挪到它自己的质心、转到主轴上（mesh_vert 在这个网格坐标系里），
         //   并把这个变换并进 geom_pos、geom_quat，所以 pos + quat * mesh_vert 就是刚体坐标系里的位置。
         const int mid = m->geom_dataid[gi];
         const int nv_mesh = m->mesh_vertnum[mid], vadr = m->mesh_vertadr[mid];
         const int nf_mesh = m->mesh_facenum[mid], fadr = m->mesh_faceadr[mid];
+        //   重合的顶点合并成一个。MuJoCo 读 OBJ 时，同一个位置在不同的面上带不同的法向或纹理坐标，就拆成几个顶点
+        //   （Panda 的 finger_0.obj 编译后 1062 个顶点，只有 185 个不同的位置）。障碍能量是对图元对求和的：
+        //   一个点出现 k 次，它和对面三角形的点–三角形对就算 k 次，这个点上的 kappa 等于大了 k 倍；拆开的三角形之间
+        //   也不共享边，边–边对同样重复。所以按位置完全相等（float 逐位比较，不用容差：容差会把本来不同的点捏在一起，
+        //   改了几何）合并；合并后退化的三角形（两个角是同一个点）丢掉，三个角都相同的三角形只留一个。
         const int v0 = M.nvertex();
+        std::map<std::array<float, 3>, int> where;
+        std::vector<int> remap(nv_mesh);
         for (int k = 0; k < nv_mesh; ++k) {
           const float* p = m->mesh_vert + 3 * (vadr + k);
-          M.vertices.push_back({b, pos + quat * Eigen::Vector3d(p[0], p[1], p[2]), 0.0});
+          const auto [it, fresh] = where.try_emplace({p[0], p[1], p[2]}, M.nvertex() - v0);
+          remap[k] = it->second;
+          if (fresh) M.vertices.push_back({b, pos + quat * Eigen::Vector3d(p[0], p[1], p[2]), 0.0});
         }
+        std::set<std::array<int, 3>> seen;
         std::vector<std::pair<int, int>> edges;
         for (int f = 0; f < nf_mesh; ++f) {
-          const int* tri = m->mesh_face + 3 * (fadr + f);
+          const int* raw = m->mesh_face + 3 * (fadr + f);
+          const int tri[3] = {remap[raw[0]], remap[raw[1]], remap[raw[2]]};
+          if (tri[0] == tri[1] || tri[1] == tri[2] || tri[0] == tri[2]) continue;
+          std::array<int, 3> key = {tri[0], tri[1], tri[2]};
+          std::sort(key.begin(), key.end());
+          if (!seen.insert(key).second) continue;
           M.faces.push_back({v0 + tri[0], v0 + tri[1], v0 + tri[2], b});
           for (int e = 0; e < 3; ++e) {
             const int a = tri[e], c = tri[(e + 1) % 3];

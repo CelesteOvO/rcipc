@@ -1,0 +1,28 @@
+<!--
+  焊在世界上的刚体和地面（notes/07_contact.md 第 1.1 节）。
+  base：worldbody 下没有关节的刚体（像 Franka Panda 的 link0），盒子底面在地面下 0.03 mm。
+  plate：焊在 base 上（也没有关节），所以也焊在世界上（MuJoCo 的 body_weldid 是传递的），底面同样在地面下 0.03 mm。
+  box：自由的盒子，下面焊一个球 ball（没有关节，但焊在自由刚体上，weld 不是 0）：它们照样和地面比。
+  检验：base、plate 的顶点不和地面比（它们不动，和世界上的静态几何一样）；box、ball 的照样比；整段不穿透。
+-->
+<mujoco model="welded_base">
+  <compiler angle="radian"/>
+  <option gravity="0 0 -9.81" timestep="0.002"/>
+
+  <worldbody>
+    <geom name="floor" type="plane" size="2 2 0.1"/>
+    <body name="base" pos="0 0 0.04997">
+      <geom type="box" size="0.1 0.1 0.05"/>
+      <body name="plate" pos="0.25 0 0">
+        <geom type="box" size="0.1 0.1 0.05"/>
+      </body>
+    </body>
+    <body name="box" pos="-0.5 0 0.2">
+      <freejoint/>
+      <geom type="box" size="0.05 0.05 0.05" mass="1"/>
+      <body name="ball" pos="0 0 -0.08">
+        <geom type="sphere" size="0.03" mass="0.1"/>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>

@@ -21,7 +21,7 @@ constexpr int kThreads = 128;
 inline int blocks(int n) { return (n + kThreads - 1) / kThreads; }
 
 // 紧界（ccd.cc 的 tight_acceleration_bounds，阶段 5 笔记第 6 节）：s = 0 处的二阶导数沿链递推，取刚体顶点上的最大值，
-// 再加整段上三阶导数的界 T。jid 是链上的关节（根在前），th 是它们的转速；链上没有滑动关节。
+// 再加整段上三阶导数的界 T（笔记第 6.1–6.4 节）。jid 是链上的关节（根在前），th 是它们的转速；链上没有滑动关节。
 __device__ double tight_bound(const DModel& m, const DFrames& F, const double* p, int b, const int* jid,
                               const double* th, int n) {
   V3 W = v3(0, 0, 0), Al = v3(0, 0, 0), O = v3(0, 0, 0), AO = v3(0, 0, 0);
@@ -50,40 +50,28 @@ __device__ double tight_bound(const DModel& m, const DFrames& F, const double* p
     const V3 r = v3load(F.X + 3 * v) - O;
     p2 = fmax(p2, norm(AO + cross(Al, r) + cross(W, cross(W, r))));
   }
-  double S = 0, TB = 0;
-  for (int k = 0; k < n; ++k) {
-    TB += th[k] * S;
-    S += th[k];
-  }
+  // T：逐层的递推（ccd.cc 的 third_derivative_bound，算式和顺序一样）。v、a、t 是把 j 之前的关节冻住时
+  // 点的速度、加速度、三阶导数的界，从刚体往根走。
   const V3 centre = v3load(F.xpos + 3 * b);
   const double lever = m.radius[b];
-  double below = 0, sx = 0, sy = 0, Pth = 0, PthA = 0, T = 0;
+  double v = 0, a = 0, t = 0;
   for (int k = n - 1; k >= 0; --k) {
     if (th[k] == 0) continue;
     const int j = jid[k], type = m.jtype[j];
-    Pth += th[k];
-    const double above = S - Pth;
-    PthA += th[k] * above;
-    const double Bv = TB - PthA;
     const V3 anchor = type == kFree ? v3load(F.xpos + 3 * m.jbody[j]) : v3load(F.danchor + 3 * m.jdadr[j]);
     const V3 off = centre - anchor;
-    const double full = norm(off);
-    double dist = full;
+    double dist = norm(off);
     if (type == kHinge) {
       const V3 ax = v3load(F.daxis + 3 * m.jdadr[j]);
       const V3 axn = (1.0 / norm(ax)) * ax;
       dist = norm(off - dot(off, axn) * axn);
     }
-    const double cj = th[k] * (dist + lever + below);
-    const double rho = full + lever + below;
-    const double M = below + cj;
-    below += cj;
-    sx += th[k] * (2 * above * rho + M);
-    sy += th[k] * 2 * rho;
-    const double Rge = sx - above * sy;
-    T += th[k] * (2 * Bv * rho + 4 * above * above * rho + 4 * above * M + Rge);
+    const double c = th[k] * (dist + lever + v);
+    t += th[k] * (3 * a + th[k] * (3 * v + c));
+    a += th[k] * (2 * v + c);
+    v += c;
   }
-  return p2 + T;
+  return p2 + t;
 }
 
 __global__ void k_accel_bounds(DModel m, const double* q, DFrames F, const double* p, int tight, double* A) {
@@ -92,7 +80,12 @@ __global__ void k_accel_bounds(DModel m, const double* q, DFrames F, const doubl
   const int b = blockIdx.x * blockDim.x + threadIdx.x;
   if (b >= m.nbody) return;
   if (b == 0) {
-    A[0] = 0;
+    A[b] = 0;
+    return;
+  }
+  // 没有顶点的刚体碰不到东西，不该缩短段长（同 CPU 版 curved_ccd 开头）：界记成 0。它没有图元，也不在任何刚体对里。
+  if (m.bnvert[b] == 0) {
+    A[b] = 0;
     return;
   }
   // 第 1 步：沿链往上收集（和 chain_joints 一样，力臂里含滑动关节现在的伸长），再反过来变成根在前。
@@ -156,19 +149,23 @@ __global__ void k_accel_bounds(DModel m, const double* q, DFrames F, const doubl
 }
 
 __global__ void k_ground_ccd(DModel m, const double* Xa, const double* Xb, const double* A, DScalar lenp, double c,
-                             double* tmin, double* ds_need) {
+                             double sep, double* tmin, double* ds_need) {
   const double len = lenp.get();
   // curved_ccd 的顶点–平面部分：弦上距离线性，带矢高余量的闭式解。
   const int v = blockIdx.x * blockDim.x + threadIdx.x;
   if (v >= m.nvert) return;
   const int b = m.vbody[v];
-  if (b == 0) return;
+  if (m.weld[b] == 0) return;  // 焊在世界上的静态顶点不和平面比（同 k_ground_detect）
   const double xi = A[b] * len * len / 8;
   const V3 xa = v3load(Xa + 3 * v), xb = v3load(Xb + 3 * v);
   for (int pl = 0; pl < m.nplane; ++pl) {
     const V3 n = v3load(m.pn + 3 * pl);
-    const double ya = dot(n, xa) - m.poff[pl] - m.vradius[v];
-    const double yb = dot(n, xb) - m.poff[pl] - m.vradius[v];
+    const double ya = dot(n, xa) - m.poff[pl] - m.vradius[v] - sep;
+    const double yb = dot(n, xb) - m.poff[pl] - m.vradius[v] - sep;
+    if (ya <= 0) {  // 起点已经在最小分离以内：卡住（同 curved_ccd）。原来这里 sqrt 得 NaN，atomic_min 会把 NaN 写进 ds_need
+      atomic_min(tmin, 0.0);
+      continue;
+    }
     if (xi > 0.5 * ya) {
       atomic_min(ds_need, 0.9 * sqrt(4 * ya / A[b]));
       continue;
@@ -178,51 +175,149 @@ __global__ void k_ground_ccd(DModel m, const double* Xa, const double* Xb, const
   }
 }
 
+// pair_offset_at：一对图元在弦上 t 处的最近点之差 r = x_A - x_B，P 返回 4 个顶点在 t 处的位置（同 CPU 版 ccd.cc）。
+__device__ V3 pair_offset_at(const double* Xa, const double* Xb, const int ids[4], bool pt, double t, V3 P[4]) {
+  for (int i = 0; i < 4; ++i) P[i] = (1 - t) * v3load(Xa + 3 * ids[i]) + t * v3load(Xb + 3 * ids[i]);
+  if (pt) {
+    const V3 lam = point_triangle_closest(P[0], P[1], P[2], P[3]);
+    return P[0] - (lam.x * P[1] + lam.y * P[2] + lam.z * P[3]);
+  }
+  double s, u;
+  segment_segment_closest(P[0], P[1], P[2], P[3], s, u);
+  return ((1 - s) * P[0] + s * P[1]) - ((1 - u) * P[2] + u * P[3]);
+}
+
 // pair_distance_at：一对图元在弦上 t 处的距离（已减半径）。
 __device__ double pair_distance_at(const double* Xa, const double* Xb, const int ids[4], bool pt, double radii,
                                    double t) {
   V3 P[4];
-  for (int i = 0; i < 4; ++i) P[i] = (1 - t) * v3load(Xa + 3 * ids[i]) + t * v3load(Xb + 3 * ids[i]);
-  if (pt) {
-    const V3 lam = point_triangle_closest(P[0], P[1], P[2], P[3]);
-    return norm(P[0] - (lam.x * P[1] + lam.y * P[2] + lam.z * P[3])) - radii;
-  }
-  double s, u;
-  segment_segment_closest(P[0], P[1], P[2], P[3], s, u);
-  return norm(((1 - s) * P[0] + s * P[1]) - ((1 - u) * P[2] + u * P[3])) - radii;
+  return norm(pair_offset_at(Xa, Xb, ids, pt, t, P)) - radii;
 }
 
-// ACCD 的循环：从 (t, d)、第 it 步接着走，最多走到第 it_end 步（CPU 版一共 kAccdMax 步）。
+// ---- 分离平面的界（CPU 版 ccd.cc 的 plane_step、plane_steps，笔记 notes/22_primal_dual.md 第 3 节） ----
+// 对任何单位向量 n(tau)，d(t + tau) + radii >= min_{j in A, i in B} n(tau)·(P_j(tau) - P_i(tau))。
+// n(tau) = (n + tau nu) / |n + tau nu|：每对顶点一个二次式 A + B tau + C tau^2 >= 0，走到第一个正根。
+// 算式和 CPU 版逐条对应（GPU 上乘加会合并，结果只差舍入）。
+
+// A + B tau + C tau^2（A > 0）的第一个正根，没有就返回 +无穷。
+__device__ double first_positive_root(double A, double B, double C) {
+  if (C == 0) return B < 0 ? A / -B : DBL_MAX * 2;  // DBL_MAX * 2 = +无穷
+  const double disc = B * B - 4 * A * C;
+  if (disc < 0) return DBL_MAX * 2;
+  const double qq = -0.5 * (B + (B >= 0 ? 1.0 : -1.0) * sqrt(disc));
+  double best = DBL_MAX * 2;
+  const double r1 = qq / C, r2 = A / qq;
+  if (r1 > 0) best = fmin(best, r1);
+  if (r2 > 0) best = fmin(best, r2);
+  return best;
+}
+
+// 转动的分离平面的转速 nu（垂直于 n）：每条“边” (u, w) 要求 nu·(P_w - P_u) = -n·(D_w - D_u)，最小二乘加一点正则。
+__device__ V3 plane_rate(const V3 P[4], const V3 D[4], bool pt, V3 n) {
+  const V3 a = fabs(n.x) < 0.9 ? v3(1, 0, 0) : v3(0, 1, 0);
+  V3 u1 = cross(n, a);
+  u1 = u1 / norm(u1);
+  const V3 u2 = cross(n, u1);
+  const int e0[2] = {pt ? 1 : 0, pt ? 1 : 2}, e1[2] = {pt ? 2 : 1, 3};
+  double m00 = 0, m01 = 0, m11 = 0, r0 = 0, r1 = 0;
+  for (int k = 0; k < 2; ++k) {
+    const V3 ed = P[e1[k]] - P[e0[k]];
+    const double g0 = dot(ed, u1), g1 = dot(ed, u2);
+    const double sk = dot(n, D[e1[k]] - D[e0[k]]);
+    m00 += g0 * g0;
+    m01 += g0 * g1;
+    m11 += g1 * g1;
+    r0 -= sk * g0;
+    r1 -= sk * g1;
+  }
+  const double reg = 1e-9 * (m00 + m11) + 1e-300;
+  m00 += reg;
+  m11 += reg;
+  const double det = m00 * m11 - m01 * m01;
+  const double x0 = m11 * r0 - m01 * r1, x1 = m00 * r1 - m01 * r0;
+  if (!(det > 0) || !isfinite(x0 / det) || !isfinite(x1 / det)) return v3(0, 0, 0);
+  return (x0 * u1 + x1 * u2) / det;
+}
+
+// 一个分离方向 r（归一化）、固定（rotating = false）或转动的平面：所有顶点对都满足的最长的 tau。
+__device__ double plane_step(const V3 P[4], const V3 D[4], bool pt, V3 r, double level, bool rotating) {
+  const double rn = norm(r);
+  if (!(rn > 0)) return 0.0;
+  const V3 n = r / rn;
+  const V3 nu = rotating ? plane_rate(P, D, pt, n) : v3(0, 0, 0);
+  const double half_nu2 = 0.5 * norm2(nu);
+  double tau = DBL_MAX * 2;
+  const int na = pt ? 1 : 2;
+  for (int j = 0; j < na; ++j) {
+    for (int i = na; i < 4; ++i) {
+      const V3 m = P[j] - P[i], s = D[j] - D[i];
+      const double A = dot(n, m) - level;
+      if (!(A > 0)) return 0.0;
+      tau = fmin(tau, first_positive_root(A, dot(n, s) + dot(nu, m), dot(nu, s) - level * half_nu2));
+    }
+  }
+  return tau;
+}
+
+// 两个分离方向（最近点的方向、图元的法向），固定的平面和转动的平面，取走得最远的那个。
+__device__ double plane_steps(const V3 P[4], const V3 D[4], bool pt, V3 r, double level) {
+  double best = plane_step(P, D, pt, r, level, false);
+  best = fmax(best, plane_step(P, D, pt, r, level, true));
+  const V3 e1 = pt ? P[2] - P[1] : P[1] - P[0];
+  const V3 e2 = pt ? P[3] - P[1] : P[3] - P[2];
+  const V3 N = cross(e1, e2);
+  const double side = dot(N, r);
+  if (!(norm(N) > 1e-6 * norm(e1) * norm(e2)) || side == 0) return best;
+  const V3 n = side > 0 ? N : -N;
+  best = fmax(best, plane_step(P, D, pt, n, level, false));
+  best = fmax(best, plane_step(P, D, pt, n, level, true));
+  return best;
+}
+
+// 一对的 ACCD 状态（accd_begin 先走 split 步以后）。r 是 t 处的最近点之差（分离平面的界用）。
+struct AccdState {
+  double t = 0, d = 0, d0 = 0, ell = 0, stop = 0;
+  int it = 0;
+  V3 r = V3{0, 0, 0};
+};
+
+// ACCD 的循环：从 S 的 (t, d, r)、第 it 步接着走，最多走到第 it_end 步（CPU 版一共 kAccdMax 步）。
 // 返回 0：这一对返回 1（走到了 1，或者别的对已经截得更早）；1：停下了，结果是 t；2：走到第 it_end 步还没完。
 // 分两次走（先 split 步，再走完）和一次走完，每一步的算式一样，结果逐位相同。
-__device__ int accd_steps(const double* Xa, const double* Xb, const int ids[4], bool pt, double radii, double xi,
-                          double ell, double c, double stop, const double* tmin, double& t, double& d, int& it,
-                          int it_end) {
-  for (; it < it_end; ++it) {
-    const double tn = t + c * (d - xi) / ell;
+// 每步再用分离平面的界，目标不低于停下的门槛，离门槛 10% 以内就停（同 CPU 版 accd_pair）。
+// __noinline__：两处调用（accd_begin 里、尾巴证不出来以后接着走）用同一份机器码。内联成两份时编译器可能把
+//   乘加合并得不一样，交不交给 warp 的结果就差在末位（2026-11-14，Ccd.TailMatchesSerial 差 6e-14）。
+__device__ __noinline__ int accd_steps(const double* Xa, const double* Xb, const int ids[4], bool pt, double radii, double xi,
+                          double c, const double* tmin, AccdState& S, int it_end) {
+  V3 D[4];
+  for (int i = 0; i < 4; ++i) D[i] = v3load(Xb + 3 * ids[i]) - v3load(Xa + 3 * ids[i]);
+  for (; S.it < it_end; ++S.it) {
+    V3 P[4];
+    for (int i = 0; i < 4; ++i) P[i] = (1 - S.t) * v3load(Xa + 3 * ids[i]) + S.t * v3load(Xb + 3 * ids[i]);
+    const double level = xi + fmax(S.stop, (1 - c) * (S.d - xi));
+    const double step = fmax((S.d - level) / S.ell, plane_steps(P, D, pt, S.r, radii + level));
+    const double tn = S.t + step;
     if (tn >= 1.0) return 0;
     // t 只增不减：别的对已经找到的截断位置 *tmin 不比 tn 大时，这一对最后的结果也不会更小，
     // 不影响所有对的最小值，可以提前停（只是少算，结果和 CPU 版一样）。
     if (tmin && tn >= *static_cast<const volatile double*>(tmin)) return 0;
-    t = tn;
-    d = pair_distance_at(Xa, Xb, ids, pt, radii, t);
-    if (d - xi <= stop) return 1;
+    S.t = tn;
+    S.r = pair_offset_at(Xa, Xb, ids, pt, S.t, P);
+    S.d = norm(S.r) - radii;
+    if (S.d - xi <= 1.1 * S.stop) return 1;
   }
   return 2;
 }
-
-// 一对的 ACCD 状态（accd_begin 先走 split 步以后）。
-struct AccdState {
-  double t = 0, d = 0, d0 = 0, ell = 0, stop = 0;
-  int it = 0;
-};
 
 // accd_pair 的前半段：起点的距离、矢高太大时要求缩短段长、ell，然后串行走 split 步。
 // 返回 0：这一对返回 1；1：截断，结果是 S.t（停下了，或者走满 kAccdMax 步，和 CPU 版一样）；2：还没走完。
 __device__ int accd_begin(const double* Xa, const double* Xb, const int ids[4], bool pt, double radii, double xi,
                           double A_pair, double c, double* ds_need, const double* tmin, int split, AccdState& S) {
   S.d0 = pair_distance_at(Xa, Xb, ids, pt, radii, 0.0);
-  if (S.d0 <= 0) return 0;
+  if (S.d0 <= 0) {  // radii 里含最小分离：起点已经 <= sep，卡住（同 accd_pair）。原来返回 0 = 这一对放行
+    S.t = 0;
+    return 1;
+  }
   if (xi > 0.5 * S.d0) {
     atomic_min(ds_need, 0.9 * sqrt(4 * S.d0 / A_pair));
     return 0;
@@ -242,7 +337,9 @@ __device__ int accd_begin(const double* Xa, const double* Xb, const int ids[4], 
   S.d = S.d0;
   S.it = 0;
   S.stop = (1 - c) * (S.d0 - xi);
-  const int st = accd_steps(Xa, Xb, ids, pt, radii, xi, S.ell, c, S.stop, tmin, S.t, S.d, S.it, split);
+  V3 P[4];
+  S.r = pair_offset_at(Xa, Xb, ids, pt, 0.0, P);
+  const int st = accd_steps(Xa, Xb, ids, pt, radii, xi, c, tmin, S, split);
   return st == 2 && S.it >= kAccdMax ? 1 : st;
 }
 
@@ -405,6 +502,9 @@ __device__ inline bool box_rule(const DModel& m, const double* Xa, const double*
 // 参数整个 warp 一样。tend = min(1, tmin)：之后的步一定因为 tn >= tmin 或 tn >= 1 停下、返回 1，不用管。
 // L - xi 比停下的门槛 stop 大（留一点余量盖住舍入）时，每一步都停不下来，而且每步至少前进 c (L - xi) / ell；
 // 照这个步长在第 kAccdMax 步之前走得到 tend，这一对就一定返回 1。
+// 分离平面的界：停下的门槛是 1.1 stop；每步的 ell 那一部分是 (d - level) / ell，
+//   level = xi + max(stop, (1 - c)(d - xi))，所以至少前进 min(gap - stop, c gap) / ell（gap = L - xi <= d - xi），
+//   平面的界只会走得更远。
 constexpr int kTailPieces = 128;
 
 __device__ bool warp_proves_one(const double* Xa, const double* Xb, const int ids[4], bool pt, double radii, double xi,
@@ -418,11 +518,14 @@ __device__ bool warp_proves_one(const double* Xa, const double* Xb, const int id
   }
   for (int o = 16; o > 0; o >>= 1) L = fmin(L, __shfl_xor_sync(0xffffffffu, L, o));
   const double gap = L - xi;
-  return gap - S.stop > 1e-12 + 1e-9 * (fabs(S.d0) + xi) && S.it + (tend - S.t) * S.ell / (c * gap) + 2 < kAccdMax;
+  const double pad = 1e-12 + 1e-9 * (fabs(S.d0) + xi);
+  const double adv = fmin(gap - S.stop, c * gap);
+  return gap - 1.1 * S.stop > pad && adv > 0 && S.it + (tend - S.t) * S.ell / adv + 2 < kAccdMax;
 }
 
 __global__ void k_ccd_exact(DModel m, const double* Xa, const double* Xb, const double* boxes, const double* A,
-                            DScalar lenp, double c, DCands C, const int* npairs_d, const int* work_n, const float* xfa,
+                            DScalar lenp, double c, double sep, DCands C, const int* npairs_d, const int* work_n,
+                            const float* xfa,
                             const float* xfb, DTail tail, double* tmin, double* ds_need, double* seen) {
   const double len = lenp.get();
   // 一个线程一个候选（narrow.cu 剔下来的）。剔除只保证“段起点的距离不小于阈值 T 的对一定被剔掉”，所以这里先按
@@ -454,9 +557,9 @@ __global__ void k_ccd_exact(DModel m, const double* Xa, const double* Xb, const 
       ee = decode_cand(m, C.item[k], ids, ba, bb);
       const double A_pair = A[ba] + A[bb];
       xi = A_pair * len * len / 8;
-      radii = m.vradius[ids[0]] + m.vradius[ids[ee ? 2 : 1]];
+      radii = m.vradius[ids[0]] + m.vradius[ids[ee ? 2 : 1]] + sep;  // 距离都是 d - sep（同 curved_ccd）
       skip = xfa && float_trivial(xfa, xfb, ids, !ee, radii, xi, c);
-      if (!skip && box_rule(m, Xa, Xb, boxes, ids, ee, bb, xi)) {
+      if (!skip && box_rule(m, Xa, Xb, boxes, ids, ee, bb, xi + sep)) {  // 盒子的余量也加 sep
         const int st = accd_begin(Xa, Xb, ids, !ee, radii, xi, A_pair, c, ds_need, tmin, split, S);
         if (st == 1 && S.t < 1.0) atomic_min(tmin, S.t);
         pending = st == 2;
@@ -488,7 +591,7 @@ __global__ void k_ccd_exact(DModel m, const double* Xa, const double* Xb, const 
     }
     if (pending) {
       if (tail.stats) atomicAdd(tail.stats + 2, 1ull);
-      const int st = accd_steps(Xa, Xb, ids, !ee, radii, xi, S.ell, c, S.stop, tmin, S.t, S.d, S.it, kAccdMax);
+      const int st = accd_steps(Xa, Xb, ids, !ee, radii, xi, c, tmin, S, kAccdMax);
       if (st != 0 && S.t < 1.0) atomic_min(tmin, S.t);
     }
   }
@@ -501,8 +604,8 @@ void launch_accel_bounds(const DModel& m, const double* q, const DFrames& F, con
 }
 
 void launch_ground_ccd(const DModel& m, const double* Xa, const double* Xb, const double* A, DScalar len, double c,
-                       double* tmin, double* ds_need) {
-  if (m.nplane > 0 && m.nvert > 0) k_ground_ccd<<<blocks(m.nvert), kThreads>>>(m, Xa, Xb, A, len, c, tmin, ds_need);
+                       double sep, double* tmin, double* ds_need) {
+  if (m.nplane > 0 && m.nvert > 0) k_ground_ccd<<<blocks(m.nvert), kThreads>>>(m, Xa, Xb, A, len, c, sep, tmin, ds_need);
 }
 
 void launch_body_disp(const DModel& m, const double* Xa, const double* Xb, double* D) {
@@ -515,16 +618,17 @@ void launch_ccd_init(double* tmin, double* ds_need, double* seen, DScalar len) {
 }
 
 void launch_ccd_cull(const DModel& m, const DFrames& Fa, const double* boxes, const double* D, const double* A,
-                     DScalar len, double c, const int* pairs, const int* npairs_d, int pair_cap, DNarrow N, DCands C,
-                     bool window) {
-  launch_narrow(m, Fa, boxes, pairs, npairs_d, pair_cap, 0.0, A, D, len, c, N, C, window);
+                     DScalar len, double c, double sep, const int* pairs, const int* npairs_d, int pair_cap, DNarrow N,
+                     DCands C, bool window) {
+  launch_narrow(m, Fa, boxes, pairs, npairs_d, pair_cap, sep, A, D, len, c, N, C, window);  // CCD 时 dmax 的位置传 sep
 }
 
 void launch_ccd_exact(const DModel& m, const double* Xa, const double* Xb, const double* boxes, const double* A,
-                      DScalar len, double c, const int* npairs_d, int pair_cap, DNarrow N, DCands C, DTail tail,
-                      double* tmin, double* ds_need, double* seen) {
+                      DScalar len, double c, double sep, const int* npairs_d, int pair_cap, DNarrow N, DCands C,
+                      DTail tail, double* tmin, double* ds_need, double* seen) {
   if (pair_cap > 0)
-    k_ccd_exact<<<std::min(blocks(C.cap), 1024), kThreads>>>(m, Xa, Xb, boxes, A, len, c, C, npairs_d, N.work_n, N.xa, N.xb, tail,
+    k_ccd_exact<<<std::min(blocks(C.cap), 1024), kThreads>>>(m, Xa, Xb, boxes, A, len, c, sep, C, npairs_d, N.work_n, N.xa,
+                                                             N.xb, tail,
                                                            tmin, ds_need, seen);
 }
 

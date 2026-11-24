@@ -1,0 +1,20 @@
+<!-- 限位的激活距离按关节的单位取（tests/test_scenes.cc 的 Limits.WidthFollowsJointUnits）。
+     滑块：滑动关节，行程 0..0.04 m（像 Panda 的手指），ref 0.02 让它从行程中间开始；位置驱动推向 ctrl。
+     摆臂：铰链，-1..1 rad。没有重力。 -->
+<mujoco model="slide_limit">
+  <compiler angle="radian"/>
+  <option gravity="0 0 0"/>
+  <worldbody>
+    <body name="carriage" pos="0 0 0.5">
+      <joint name="slide" type="slide" axis="1 0 0" limited="true" range="0 0.04" ref="0.02" damping="2"/>
+      <geom type="box" size="0.02 0.02 0.02" density="1000"/>
+      <body name="arm" pos="0 0 0.05">
+        <joint name="hinge" type="hinge" axis="0 1 0" limited="true" range="-1 1" damping="0.01"/>
+        <geom type="capsule" fromto="0 0 0 0.1 0 0" size="0.01" density="1000"/>
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <position name="push" joint="slide" kp="100"/>
+  </actuator>
+</mujoco>

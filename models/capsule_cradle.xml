@@ -1,0 +1,22 @@
+<!--
+  平行的胶囊（阶段 7 之后补的，notes/07_contact.md 第 2.3 节）：世界上两根固定的胶囊沿 x 轴并排放（y = ±0.04，
+  半径 0.03，中间留 2 cm 的缝），上面一根自由的胶囊（半径 0.03，长 0.3）也沿 x 轴，从 1.5 cm 高落进这道槽里。
+  三根胶囊严格平行：自由胶囊和每根固定胶囊之间的边–边接触，mollifier 恰好是 0。
+  检验：撑住它的是自由胶囊两个端点对固定胶囊的“点–边”接触（胶囊端点的退化边）。没有这几对时没有任何障碍力，
+  胶囊一直往缝里掉，间隙每次迭代被 CCD 压掉九成，塌到浮点分辨率以后穿透。
+  静止位置：两根轴相距 0.06，水平错开 0.04，所以自由胶囊的轴比固定胶囊高 sqrt(0.06^2 - 0.04^2) = 0.0447。
+-->
+<mujoco model="capsule_cradle">
+  <compiler angle="radian"/>
+  <option gravity="0 0 -9.81" timestep="0.002"/>
+
+  <worldbody>
+    <geom name="floor" type="plane" size="2 2 0.1"/>
+    <geom name="left" type="capsule" fromto="-0.2 -0.04 0.2 0.2 -0.04 0.2" size="0.03"/>
+    <geom name="right" type="capsule" fromto="-0.2 0.04 0.2 0.2 0.04 0.2" size="0.03"/>
+    <body name="rod" pos="0 0 0.26">
+      <freejoint/>
+      <geom type="capsule" fromto="-0.15 0 0 0.15 0 0" size="0.03" mass="1"/>
+    </body>
+  </worldbody>
+</mujoco>

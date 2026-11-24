@@ -6,7 +6,9 @@
 //   Slope.*      第 5 节：斜面上的盒子，tan theta < mu 静止、> mu 匀加速下滑；滑动的盒子被摩擦刹住
 #include "rcipc/friction.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 #include <Eigen/Eigenvalues>
 #include <gtest/gtest.h>

@@ -92,9 +92,9 @@ __device__ inline void append(DContact* out, int cap, int* count, const DContact
 }
 
 __global__ void k_ground_detect(DModel m, const double* X, double dmax, DContact* out, int cap, int* count) {
-  // 顶点–平面（for_each_candidate 的第一段）。世界上的静态顶点不和平面比。
+  // 顶点–平面（for_each_candidate 的第一段）。焊在世界上（weld 为 0）的静态顶点不和平面比。
   const int v = blockIdx.x * blockDim.x + threadIdx.x;
-  if (v >= m.nvert || m.vbody[v] == 0) return;
+  if (v >= m.nvert || m.weld[m.vbody[v]] == 0) return;
   const V3 x = v3load(X + 3 * v);
   for (int p = 0; p < m.nplane; ++p) {
     const V3 n = v3load(m.pn + 3 * p);
@@ -255,16 +255,83 @@ __device__ int chain_joints(const DModel& m, const double* q, int body, CJ* out)
   return n;
 }
 
+// ---------- 秩 1 曲率行（两阶段曲率；CPU 版是 contact.cc 的 contact_curvature_row_weight） ----------
+
+// r^T S r / |r|^4（只在 r 这一个方向上精确，负的不加）。r = 2d n^T sum_v w_v J(X_v) 是接触行，db = b'(d^2)，
+// S r . r = kappa m b' 2d n . sum_v w_v X_v''[r, r]（X'' 见 contact.cc 的 point_acceleration_along）。
+//
+// 每一侧只沿链走一遍（CPU 版对每个模板顶点各走一遍）：X''[v, v] 对 X 是仿射的（X 只出现在 J = a x (X - o) 里），
+// 所以同一侧的顶点先合成 P = sum w_v X_v、W = sum w_v（和行一样，side_sums），转动的 J 换成 a x (P - W o)、平移的换成 W a。
+// 走的同时就地算出 r 在这个自由度上的值（两侧共同的祖先上要加上另一侧的那一份）和 |r|^2。
+//
+// 链按关节从根往叶走（chain_dof 是从叶往根存的，倒着走；同一个关节的自由度挨着，刚体相同）。每个关节：
+//   平移 l：2 v_l Omega x J_l；转动 l：v_l^2 a_l x J_l + 2 v_l Omega x J_l；Omega 只含上游关节的转动；
+//   同一个关节里的两个转动 i、l：v_i v_l (a_i x J_l + a_l x J_i)（二阶导数是对称的，和关节里的顺序无关）；
+//   然后 Omega += sum_{这个关节的转动} v a。自由关节的平移和它自己的转动之间没有交叉项，这样写自然满足。
+__device__ double row_curvature_weight(const DModel& m, const DFrames& F, const DContact& c, const V3 P[2],
+                                       const double W[2], V3 n, double kappa, double db) {
+  if (c.d <= 0) return 0;
+  const int body[2] = {c.bodyA, c.bodyB};
+  const double scale = 2 * c.d;
+  double r2 = 0;
+  V3 Dpp = v3(0, 0, 0);
+  for (int side = 0; side < 2; ++side) {
+    const int b = body[side], other = body[1 - side];
+    if (b == 0) continue;
+    const int* chain = m.chain_dof + b * m.CH;
+    V3 acc = v3(0, 0, 0), Om = v3(0, 0, 0);
+    int k = m.chain_n[b] - 1;
+    while (k >= 0) {
+      const int jb = m.dbody[chain[k]];
+      // 这一侧和另一侧共用这个关节（共同的祖先）时，r 在它上面要加上另一侧的那一份，|r|^2 只在 A 侧算一次。
+      const bool shared = other != 0 && jb <= other && other < m.bsub_end[jb];
+      V3 ra[3], rJ[3], Omj = v3(0, 0, 0);
+      double rv[3];
+      int nr = 0;
+      for (; k >= 0 && m.dbody[chain[k]] == jb; --k) {
+        const int d = chain[k];
+        const V3 a = v3load(F.daxis + 3 * d);
+        const bool rot = m.drot[d] != 0;
+        const V3 o = rot ? v3load(F.danchor + 3 * d) : v3(0, 0, 0);
+        const V3 J = rot ? cross(a, P[side] - W[side] * o) : W[side] * a;
+        double rd = dot(n, J);
+        if (shared) rd += rot ? dot(n, cross(a, P[1 - side] - W[1 - side] * o)) : W[1 - side] * dot(n, a);
+        const double v = scale * rd;
+        if (side == 0 || !shared) r2 += v * v;
+        acc = acc + (2 * v) * cross(Om, J);
+        if (!rot) continue;
+        acc = acc + (v * v) * cross(a, J);
+        for (int i = 0; i < nr; ++i) acc = acc + (rv[i] * v) * (cross(ra[i], J) + cross(a, rJ[i]));
+        if (nr < 3) {
+          ra[nr] = a;
+          rJ[nr] = J;
+          rv[nr] = v;
+          ++nr;
+        }
+        Omj = Omj + v * a;
+      }
+      Om = Om + Omj;
+    }
+    Dpp = Dpp + acc;
+  }
+  if (!(r2 > 0)) return 0;
+  const double rSr = kappa * c.moll * db * 2 * c.d * dot(n, Dpp);
+  return rSr > 0 ? rSr / (r2 * r2) : 0;
+}
+
 __global__ void k_contact_terms(DModel m, DFrames F, const double* q, const DContact* cs, DCount ncs, DScalar kp,
-                                double dhat, double curv_scale, double* e, double* g, double* Hk, DRows rows) {
+                                double dhat, double curv_scale, double* e, double* g, double* Hk, DRows rows,
+                                const double* pd_scale, DCount crows) {
   // 一个线程一个接触：contact_energy、contact_gradient、contact_rows、contact_curvature 里属于它的那一份。
+  // pd_scale（原始-对偶障碍）：Hessian 的两项（行的权重、曲率上界）乘上 lambda_eff / F，能量、梯度仍是原始的（同 step.cc 的 Cpd）。
   const int i = blockIdx.x * blockDim.x + threadIdx.x;
   const int nc = ncs.get();
   const double kappa = kp.get();
   if (i >= nc) return;
   const DContact c = cs[i];
+  const double hs = pd_scale ? pd_scale[i] : 1.0;
   const BV bv = barrier(c.d * c.d, dhat * dhat);
-  if (e) atomicAdd(e, kappa * c.moll * bv.b);
+  if (e) atomicAdd(e, c.d <= 0 ? INFINITY : kappa * c.moll * bv.b);  // 穿透：+无穷（同 contact_energy）
   if (!g && !rows.D && !(Hk && curv_scale > 0)) return;  // 线搜索只要能量
 
   // 接触行 r = 2 d n^T sum_v w_v J(X_v)，按两侧合并。
@@ -301,17 +368,25 @@ __global__ void k_contact_terms(DModel m, DFrames F, const double* q, const DCon
       }
     }
   }
+  // 两阶段曲率（笔记 22 第 4 节）：这一次迭代 Gauss-Newton 行的接触用秩 1 曲率，不加上界。
+  const bool rank1 = crows.get() != 0;
   if (rows.D) {
     // 行按力旋量存（rows.cuh）：两侧各是 (刚体, f = 2d W n, tau = 2d P x n)。
     rows.body[2 * i] = c.bodyA;
     rows.body[2 * i + 1] = c.bodyB;
     side_wrench(PA, WA, n, 2 * c.d, rows.w + 12 * static_cast<size_t>(i));
     side_wrench(PB, WB, n, 2 * c.d, rows.w + 12 * static_cast<size_t>(i) + 6);
-    rows.D[i] = kappa * c.moll * barrier_row_weight(c.d, dhat);
+    double D = kappa * c.moll * barrier_row_weight(c.d, dhat);
+    if (rank1) {
+      const V3 P[2] = {PA, PB};
+      const double W[2] = {WA, WB};
+      D += row_curvature_weight(m, F, c, P, W, n, kappa, bv.db);
+    }
+    rows.D[i] = hs * D;  // 原始-对偶障碍：行和秩 1 曲率一起乘 lambda_eff / F（同 step.cc：Cb 来自乘过的 Cpd）
   }
-  if (Hk && curv_scale > 0) {
+  if (Hk && curv_scale > 0 && !rank1) {
     // contact_curvature：f C_j 加到两侧链上每个转动组的对角。
-    const double f = 2 * kappa * c.moll * fabs(bv.db) * c.d;
+    const double f = hs * 2 * kappa * c.moll * fabs(bv.db) * c.d;
     for (int side = 0; side < 2; ++side) {
       const int body = side == 0 ? c.bodyA : c.bodyB;
       if (body == 0) continue;
@@ -439,6 +514,133 @@ __global__ void k_friction_terms(DModel m, DFrames F, const DFriction* fs, DCoun
   }
 }
 
+// ---------- 原始-对偶障碍（StepParams::primal_dual，DPd；CPU 版在 step.cc） ----------
+
+// 键：图元的类型、模板顶点、平面的 64 位散列（splitmix64 的混合函数，逐个混进去）。不会是 kPdEmpty。
+__device__ inline unsigned long long pd_mix(unsigned long long x) {
+  x += 0x9E3779B97F4A7C15ull;
+  x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ull;
+  x = (x ^ (x >> 27)) * 0x94D049BB133111EBull;
+  return x ^ (x >> 31);
+}
+__device__ inline unsigned long long pd_key_of(const DContact& c) {
+  unsigned long long h = pd_mix(static_cast<unsigned long long>(c.type) + 1);
+  for (int k = 0; k < c.nst; ++k) h = pd_mix(h ^ static_cast<unsigned int>(c.v[k]));
+  h = pd_mix(h ^ static_cast<unsigned int>(c.plane));
+  return h == kPdEmpty ? h - 1 : h;
+}
+// 开放寻址（线性探测）。表在一次 Newton 迭代里先只读（组装）、后只写（更新），读写不会同时发生。
+__device__ inline bool pd_find(const DPd& pd, unsigned long long k, double* out) {
+  const unsigned mask = static_cast<unsigned>(pd.tcap - 1);
+  unsigned s = static_cast<unsigned>(k) & mask;
+  for (int t = 0; t < pd.tcap; ++t) {
+    const unsigned long long x = pd.tkey[s];
+    if (x == kPdEmpty) return false;
+    if (x == k) {
+      *out = pd.tval[s];
+      return true;
+    }
+    s = (s + 1) & mask;
+  }
+  return false;
+}
+__device__ inline void pd_insert(const DPd& pd, unsigned long long k, double v) {
+  const unsigned mask = static_cast<unsigned>(pd.tcap - 1);
+  unsigned s = static_cast<unsigned>(k) & mask;
+  for (int t = 0; t < pd.tcap; ++t) {
+    const unsigned long long prev = atomicCAS(pd.tkey + s, kPdEmpty, k);
+    if (prev == kPdEmpty || prev == k) {
+      pd.tval[s] = v;
+      return;
+    }
+    s = (s + 1) & mask;
+  }
+}
+// 原始障碍的法向力 F = -2 kappa m b'(d^2) d 和 F'/F（同 step.cc 的 pd_force；GPU 版没有 kw，即 kw = 1）。
+__device__ inline double pd_force(const DContact& c, double kappa, double dhat, double* dlog) {
+  const BV bv = barrier(c.d * c.d, dhat * dhat);
+  *dlog = bv.db != 0 ? (bv.db + 2 * c.d * c.d * bv.ddb) / (c.d * bv.db) : 0;
+  return -2 * kappa * c.moll * bv.db * c.d;
+}
+// 一侧合并后的行和 p 的点积：sum_d p_d (dir . (a_d x (P - W o_d)) 或 W dir . a_d)（同 side_entries，scale = 1）。
+__device__ double side_dot(const DModel& m, const DFrames& F, int body, V3 P, double W, V3 dir, const double* p) {
+  if (body == 0) return 0;
+  double s = 0;
+  for (int k = 0; k < m.chain_n[body]; ++k) {
+    const int d = m.chain_dof[body * m.CH + k];
+    const V3 a = v3load(F.daxis + 3 * d);
+    s += p[d] * (m.drot[d] ? dot(dir, cross(a, P - W * v3load(F.danchor + 3 * d))) : W * dot(dir, a));
+  }
+  return s;
+}
+
+__global__ void k_pd_scale(const DContact* cs, DCount ncs, DScalar kp, double dhat, DPd pd) {
+  // step.cc 组装前的那一段：查到 lambda 的接触，Hessian 乘 lambda_eff / F（见 launch_pd_scale）。
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= ncs.get()) return;
+  const DContact c = cs[i];
+  const double kappa = kp.get();
+  double dlog = 0;
+  const double Fc = pd_force(c, kappa, dhat, &dlog);
+  double s = 1, lam = Fc, t = 0;
+  if (Fc > 0 && pd_find(pd, pd_key_of(c), &t)) {
+    const double k0 = *pd.kappa;  // kappa 变了（翻倍、减半）就按比例缩放，否则 lambda / F 会跟着 kappa 跳
+    lam = k0 > 0 && kappa != k0 ? t * (kappa / k0) : t;
+    const double g = -c.d * dlog;  // 局部幂次：对数区 <= 1，截断带里很大
+    const double w = g > 1 ? 1 / g : 1.0;
+    s = w * lam / Fc + (1 - w);
+  }
+  pd.scale[i] = s;
+  pd.lam[i] = lam;
+}
+
+__global__ void k_pd_count(DCount ncs, const DIter* it, DPd pd) {
+  *pd.n = it == nullptr || it->status == kIterRunning ? ncs.get() : 0;
+}
+
+__global__ void k_pd_prepare(DModel m, DFrames F, const DContact* cs, DCount ncs, DScalar kp, double dhat,
+                             const double* p, const DIter* it, DPd pd) {
+  // 对偶更新要的、只和迭代开头的点有关的量。dd = 行 . p / (2 d) = n^T sum_v w_v J(X_v) p（行见 contact.cc 的 contact_row）。
+  if (it && it->status != kIterRunning) return;
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= ncs.get()) return;
+  const DContact c = cs[i];
+  double dlog = 0;
+  pd.F[i] = pd_force(c, kp.get(), dhat, &dlog);
+  pd.dlog[i] = dlog;
+  pd.key[i] = pd_key_of(c);
+  const int na = side_a_count(c);
+  V3 PA, PB;
+  double WA, WB;
+  side_sums(c, F.X, 0, na, PA, WA);
+  side_sums(c, F.X, na, c.nst, PB, WB);
+  const V3 n = v3load(c.n);
+  pd.dd[i] = side_dot(m, F, c.bodyA, PA, WA, n, p) + side_dot(m, F, c.bodyB, PB, WB, n, p);
+}
+
+__global__ void k_pd_clear(const DIter* it, DPd pd) {
+  if (it && it->status != kIterDone) return;
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < pd.tcap) pd.tkey[i] = kPdEmpty;
+}
+
+__global__ void k_pd_insert(DScalar kp, const DIter* it, DPd pd) {
+  // step.cc 迭代末尾的对偶更新：lambda+ = max(F + lambda (F'/F) dd, 0.01 lambda)，dd 沿整步的 Newton 方向。
+  if (it && it->status != kIterDone) return;
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i == 0) *pd.kappa = kp.get();
+  if (i >= *pd.n) return;
+  const double Fc = pd.F[i];
+  if (!(Fc > 0)) return;
+  const double lam = pd.lam[i];
+  pd_insert(pd, pd.key[i], fmax(Fc + lam * pd.dlog[i] * pd.dd[i], 0.01 * lam));
+}
+
+__global__ void k_pd_rehash(const unsigned long long* okey, const double* oval, int ocap, DPd pd) {
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < ocap && okey[i] != kPdEmpty) pd_insert(pd, okey[i], oval[i]);
+}
+
 }  // namespace
 
 void launch_body_boxes(const DModel& m, const double* X, double* boxes) {
@@ -473,8 +675,35 @@ void launch_detect_async(const DModel& m, const DFrames& F, const double* boxes,
 }
 
 void launch_contact_terms(const DModel& m, const DFrames& F, const double* q, const DContact* c, DCount n, DScalar kappa,
-                          double dhat, double curv_scale, double* e, double* g, double* Hk, DRows rows) {
-  if (n.grid() > 0) k_contact_terms<<<blocks(n.grid()), kThreads>>>(m, F, q, c, n, kappa, dhat, curv_scale, e, g, Hk, rows);
+                          double dhat, double curv_scale, double* e, double* g, double* Hk, DRows rows,
+                          const double* pd_scale, DCount crow) {
+  if (n.grid() > 0)
+    k_contact_terms<<<blocks(n.grid()), kThreads>>>(m, F, q, c, n, kappa, dhat, curv_scale, e, g, Hk, rows, pd_scale,
+                                                    crow);
+}
+
+void launch_pd_scale(const DContact* c, DCount n, DScalar kappa, double dhat, const DPd& pd) {
+  if (n.grid() > 0) k_pd_scale<<<blocks(n.grid()), kThreads>>>(c, n, kappa, dhat, pd);
+}
+
+void launch_pd_prepare(const DModel& m, const DFrames& F, const DContact* c, DCount n, DScalar kappa, double dhat,
+                       const double* p, const DIter* it, const DPd& pd) {
+  k_pd_count<<<1, 1>>>(n, it, pd);
+  if (n.grid() > 0) k_pd_prepare<<<blocks(n.grid()), kThreads>>>(m, F, c, n, kappa, dhat, p, it, pd);
+}
+
+void launch_pd_update(DScalar kappa, const DIter* it, const DPd& pd) {
+  k_pd_clear<<<blocks(pd.tcap), kThreads>>>(it, pd);
+  k_pd_insert<<<blocks(pd.cap), kThreads>>>(kappa, it, pd);
+}
+
+void launch_pd_clear(const DPd& pd) {
+  k_pd_clear<<<blocks(pd.tcap), kThreads>>>(nullptr, pd);
+  cudaMemsetAsync(pd.kappa, 0, sizeof(double));
+}
+
+void launch_pd_rehash(const unsigned long long* okey, const double* oval, int ocap, const DPd& pd) {
+  if (ocap > 0) k_pd_rehash<<<blocks(ocap), kThreads>>>(okey, oval, ocap, pd);
 }
 
 void launch_rows_expand(const DModel& m, const DFrames& F, DRows rows, int nrow, int* idx, double* val) {

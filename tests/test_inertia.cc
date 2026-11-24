@@ -6,6 +6,7 @@
 //   Gradient.*  第 3 节：梯度，用有限差分检查
 //   Hessian.*   第 4 节：Gauss-Newton Hessian = M(q) / h^2，和 MuJoCo 的 mj_fullM 比较
 //   Curvature.* 阶段 13（notes/16_inertia_curvature.md）：Gauss-Newton 丢掉的那一项，加上以后 Hessian 是精确的
+//   Assembly.*  按子树求和（组合刚体）的 Hessian 和曲率，和逐个刚体直接求和一致
 //
 // 模型主要用 models/zoo.xml（四种关节、两棵树），每个测试在几个随机姿态上比较，随机数种子固定。
 #include "rcipc/inertia.h"
@@ -264,4 +265,79 @@ TEST(Curvature, IsAddedOnlyWhereItKeepsTheBlockPositiveDefinite) {
   MatrixXd K = 0.5 * Mh;  // 正定的方向：加上
   EXPECT_EQ(add_inertia_curvature(M, Mh, K, &H), 0);
   EXPECT_LT((H - 1.5 * Mh).norm(), 1e-12 * Mh.norm());
+}
+
+namespace {
+
+// 改成子树累加之前的直接写法，留作参照：每个刚体用整行宽的 Jacobian 加一遍，代价 O(刚体数 x nv^2)。
+MatrixXd direct_hessian(const Model& model, const Frames& F, double h) {
+  MatrixXd H = MatrixXd::Zero(model.nv, model.nv);
+  for (int b = 1; b < model.nbody(); ++b) {
+    const Body& B = model.bodies[b];
+    const Matrix3d R = F.xquat[b].toRotationMatrix();
+    const Eigen::Matrix3Xd V = point_jacobian(model, F, b, body_com(model, F, b));
+    const Eigen::Matrix3Xd W = angular_jacobian(model, F, b);
+    H += B.mass * V.transpose() * V + W.transpose() * (R * B.inertia * R.transpose()) * W;
+  }
+  return H / (h * h);
+}
+
+double rot_rot(const Vector3d& a, const Matrix3d& Q, const Vector3d& b) { return a.dot(Q * b) - a.dot(b) * Q.trace(); }
+
+// 同上，K 逐个刚体、对它链上的每一对自由度累加，代价 O(刚体数 x 深度^2)。
+MatrixXd direct_curvature(const Model& model, const Frames& F, const InertiaTargets& T, double h, bool rot) {
+  MatrixXd K = MatrixXd::Zero(model.nv, model.nv);
+  for (int b = 1; b < model.nbody(); ++b) {
+    const Body& B = model.bodies[b];
+    const Vector3d c = body_com(model, F, b);
+    const Matrix3d R = F.xquat[b].toRotationMatrix();
+    const Vector3d f = B.mass * (c - T.c[b]) / (h * h);
+    const Matrix3d P = rot ? Matrix3d(R * B.S * (R - T.A[b]).transpose() / (h * h)) : Matrix3d::Zero();
+    std::vector<int> chain;
+    for (int x = b; x != 0; x = model.bodies[x].parent) {
+      const int j = model.bodies[x].joint;
+      if (j < 0) continue;
+      for (int k = 0; k < model.joints[j].nv; ++k) chain.push_back(model.joints[j].dadr + k);
+    }
+    for (size_t u = 0; u < chain.size(); ++u) {
+      for (size_t w = u; w < chain.size(); ++w) {
+        const int i = chain[u], j = chain[w];
+        double term = 0;
+        if (model.dof_joint[i] == model.dof_joint[j]) {
+          if (model.dof_rot[i] && model.dof_rot[j]) {
+            const Matrix3d Q = (c - F.dof_anchor[j]) * f.transpose() + P;
+            term = 0.5 * (rot_rot(F.dof_axis[i], Q, F.dof_axis[j]) + rot_rot(F.dof_axis[j], Q, F.dof_axis[i]));
+          }
+        } else if (model.dof_rot[j]) {  // j 在上游
+          if (model.dof_rot[i]) term = rot_rot(F.dof_axis[j], (c - F.dof_anchor[i]) * f.transpose() + P, F.dof_axis[i]);
+          else term = F.dof_axis[j].cross(F.dof_axis[i]).dot(f);
+        }
+        K(i, j) += term;
+        if (i != j) K(j, i) += term;
+      }
+    }
+  }
+  return K;
+}
+
+}  // namespace
+
+// 复合刚体算法组装的 M / h^2 和按子树累加的 K，和直接写法逐项一致（只差舍入）。
+// 模型：zoo（四种关节、两棵树、有分叉和焊接）、12 节的球关节链、布娃娃（树）、单个自由刚体。
+TEST(Assembly, SubtreeSumsMatchTheDirectSums) {
+  for (const char* file : {"zoo.xml", "chain.xml", "ragdoll.xml", "drop.xml"}) {
+    const Model model = from_mujoco(load_mjcf(std::string(RCIPC_MODEL_DIR "/") + file).get());
+    std::mt19937 rng(7);
+    for (int k = 0; k < 5; ++k) {
+      const VectorXd q = random_q(model, rng);
+      const InertiaTargets T = random_targets(model, q, rng);
+      const Frames F = forward_kinematics(model, q);
+      const MatrixXd M0 = direct_hessian(model, F, kH), M1 = inertia_hessian(model, F, kH);
+      EXPECT_LT((M1 - M0).norm(), 1e-12 * M0.norm()) << file << " pose " << k;
+      for (const bool rot : {false, true}) {
+        const MatrixXd K0 = direct_curvature(model, F, T, kH, rot), K1 = inertia_curvature(model, F, T, kH, rot);
+        EXPECT_LT((K1 - K0).norm(), 1e-11 * std::max(1.0, K0.norm())) << file << " pose " << k << " rot " << rot;
+      }
+    }
+  }
 }

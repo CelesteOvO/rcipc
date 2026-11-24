@@ -440,11 +440,13 @@ __global__ void k_inertia_curvature(DModel m, DFrames F, const double* tc, const
   }
 }
 
-__global__ void k_limits(DModel m, const double* q, double k, double dhat, double* e, double* g, double* Hk) {
-  // limits.cc：到两端的距离各一个一维障碍。
+__global__ void k_limits(DModel m, const double* q, double k, double dhat_hinge, double dhat_slide, double* e, double* g,
+                         double* Hk) {
+  // limits.cc：到两端的距离各一个一维障碍，激活距离按关节类型（LimitBarrier::dhat）。
   const int j = blockIdx.x * blockDim.x + threadIdx.x;
   if (j >= m.njnt || !m.jlimited[j]) return;
   const int a = m.jqadr[j], d = m.jdadr[j];
+  const double dhat = m.jtype[j] == kSlide ? dhat_slide : dhat_hinge;
   const BV lo = barrier(q[a] - m.jrange[2 * j], dhat), hi = barrier(m.jrange[2 * j + 1] - q[a], dhat);
   if (e) atomicAdd(e, k * (lo.b + hi.b));
   if (g) atomicAdd(g + d, k * (lo.db - hi.db));
@@ -503,14 +505,14 @@ __global__ void k_drives(DModel m, DDrive D, const double* q, double* e, double*
   }
 }
 
-__global__ void k_limit_ccd(DModel m, const double* q, const double* p, double c, double* tmin) {
-  // limit_ccd：和阶段 1 的 ccd_max_step 一样的闭式解。
+__global__ void k_limit_ccd(DModel m, const double* q, const double* p, double c, double sep, double* tmin) {
+  // limit_ccd：和阶段 1 的 ccd_max_step 一样的闭式解，距离减去最小分离 sep，夹到 >= 0。
   const int j = blockIdx.x * blockDim.x + threadIdx.x;
   if (j >= m.njnt || !m.jlimited[j]) return;
   const int a = m.jqadr[j], d = m.jdadr[j];
   const double dlo = q[a] - m.jrange[2 * j], dhi = m.jrange[2 * j + 1] - q[a];
-  if (p[d] < 0) atomic_min(tmin, c * dlo / -p[d]);
-  if (p[d] > 0) atomic_min(tmin, c * dhi / p[d]);
+  if (p[d] < 0) atomic_min(tmin, fmax(0.0, c * (dlo - sep) / -p[d]));
+  if (p[d] > 0) atomic_min(tmin, fmax(0.0, c * (dhi - sep) / p[d]));
 }
 
 __global__ void k_fill(double* p, double v) { *p = v; }
@@ -519,6 +521,22 @@ __global__ void k_max_displacement(const double* Xa, const double* Xb, int n, do
   const int v = blockIdx.x * blockDim.x + threadIdx.x;
   if (v >= n) return;
   atomic_max(out, norm(v3load(Xb + 3 * v) - v3load(Xa + 3 * v)));
+}
+
+// 没有顶点的模型的收敛判据（同 CPU 版 step.cc 的 max_vertex_displacement）：刚体质量的均方根位移
+//   d_b^2 = |dc|^2 + th^T (R I R^T) th / m，th 是从 Fa 到 Fb 的转动向量。没有质量的刚体不算。
+__global__ void k_max_body_rms(DModel m, DFrames Fa, DFrames Fb, double* out) {
+  const int b = blockIdx.x * blockDim.x + threadIdx.x + 1;
+  if (b >= m.nbody || m.mass[b] <= 0) return;
+  const Q4 qa = q4load(Fa.xquat + 4 * b);
+  Q4 dq = qmul(q4load(Fb.xquat + 4 * b), qconj(qa));
+  if (dq.w < 0) dq = Q4{-dq.w, -dq.x, -dq.y, -dq.z};
+  const double s = norm(qvec(dq));
+  const V3 th = s > 0 ? (2 * atan2(s, dq.w) / s) * qvec(dq) : 2.0 * qvec(dq);
+  const V3 tb = qrot(qconj(qa), th);  // 转到刚体坐标系：th^T R I R^T th = tb^T I tb
+  const M3 I = mload(m.inertia + 9 * b);
+  const double d2 = norm2(com(m, Fb, b) - com(m, Fa, b)) + dot(tb, mv(I, tb)) / m.mass[b];
+  atomic_max(out, sqrt(d2));
 }
 
 }  // namespace
@@ -588,18 +606,23 @@ void launch_drives(const DModel& m, const DDrive& D, const double* q, double* e,
   if (n > 0) k_drives<<<(n + 127) / 128, 128>>>(m, D, q, e, g, Hk);
 }
 
-void launch_limits(const DModel& m, const double* q, double k, double dhat, double* e, double* g, double* Hk) {
-  if (m.njnt > 0) k_limits<<<blocks(m.njnt), kThreads>>>(m, q, k, dhat, e, g, Hk);
+void launch_limits(const DModel& m, const double* q, double k, double dhat_hinge, double dhat_slide, double* e, double* g,
+                   double* Hk) {
+  if (m.njnt > 0) k_limits<<<blocks(m.njnt), kThreads>>>(m, q, k, dhat_hinge, dhat_slide, e, g, Hk);
 }
 
-void launch_limit_ccd(const DModel& m, const double* q, const double* p, double c, double* tmin) {
-  if (m.njnt > 0) k_limit_ccd<<<blocks(m.njnt), kThreads>>>(m, q, p, c, tmin);
+void launch_limit_ccd(const DModel& m, const double* q, const double* p, double c, double sep, double* tmin) {
+  if (m.njnt > 0) k_limit_ccd<<<blocks(m.njnt), kThreads>>>(m, q, p, c, sep, tmin);
 }
 
 void launch_fill(double* p, double v) { k_fill<<<1, 1>>>(p, v); }
 
 void launch_max_displacement(const double* Xa, const double* Xb, int n, double* out) {
   if (n > 0) k_max_displacement<<<blocks(n), kThreads>>>(Xa, Xb, n, out);
+}
+
+void launch_max_body_rms(const DModel& m, const DFrames& Fa, const DFrames& Fb, double* out) {
+  if (m.nbody > 1) k_max_body_rms<<<blocks(m.nbody - 1), kThreads>>>(m, Fa, Fb, out);
 }
 
 }  // namespace rcipc::gpu

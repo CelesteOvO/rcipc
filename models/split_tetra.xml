@@ -1,0 +1,14 @@
+<!-- 重合顶点的网格（tests/test_pairs.cc 的 Mesh.CoincidentVerticesMerged）。
+     split_tetra.obj 是一个四面体，每个面的角各写一遍（12 个顶点，4 个不同的位置）。底面离地 0.5 mm。 -->
+<mujoco model="split_tetra">
+  <asset>
+    <mesh name="tetra" file="split_tetra.obj"/>
+  </asset>
+  <worldbody>
+    <geom name="floor" type="plane" size="1 1 0.1"/>
+    <body name="tetra" pos="0 0 0.0005">
+      <freejoint/>
+      <geom type="mesh" mesh="tetra" density="1000"/>
+    </body>
+  </worldbody>
+</mujoco>

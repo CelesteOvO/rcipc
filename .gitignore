@@ -13,3 +13,7 @@ media/
 
 # tools/make_robot_pile.py 生成的场景（机器人模型不在仓库里）
 models/local/
+
+# 根目录下的编译日志和 MuJoCo 的日志
+/build_*.log
+/MUJOCO_LOG.TXT

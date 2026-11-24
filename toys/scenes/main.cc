@@ -2,10 +2,13 @@
 //
 // 用法（参数都可以省略，写成 名字=值）：
 //   scene_demo model=ragdoll.xml [T=2] [h=..] [dhat=..] [mu=..] [eps_v=..] [tol=..] [semi=0|1] [adapt=0|1] [ldlt=0|1]
-//              [check=0|1] [debug=0|1|2] [gpu=0|1] [timing=0|1] [pcg_tol=..] [icurv=0|1|2] [icurv_floor=..] [out=traj.csv]
+//              [check=0|1] [debug=0|1|2] [gpu=0|1] [timing=0|1] [pcg_tol=..] [icurv=0|1|2] [icurv_floor=..] [pd=0|1]
+//              [out=traj.csv]
 //   gpu=1：用 GPU 版（阶段 11，需要编译时打开了 CUDA）。check 在 GPU 上不支持。
+//   pd=0：关掉原始-对偶障碍（StepParams::primal_dual，notes/22_primal_dual.md），退回原始障碍，只用来对比。
 //   icurv=0：惯性 Hessian 只用 M / h^2（阶段 13 之前的做法，notes/16_inertia_curvature.md）；icurv=2 连转动那一部分也加。
 //   fullh=1：完整的接触 Hessian（每个接触 12 x 12 的旋量块做半正定投影，阶段 14，notes/17_contact_hessian.md）。
+//     GPU 版要和 pd=0 一起用。
 //   timing=0：GPU 版不做分段计时（分段计时每段都要等 GPU，会拖慢整步；量墙钟时间时关掉）。
 //
 //   model：models/ 下的文件名（或绝对路径）。有的场景：ragdoll.xml、ragdoll_pile.xml、chain.xml、stack.xml、ledge.xml，
@@ -52,6 +55,7 @@ struct Args {
   double T = 2.0, h = NAN, dhat = 1e-3, mu = 0.2, eps_v = 1e-3, tol = 1e-6;
   int semi = 0, ldlt = 0, check = 0, debug = 0, adapt = 1, gpu = 0, timing = 1, graph = 1, tight = 1, reuse = 1, tail = 1, prefilter = 1;
   int icurv = 1, relax = 1, fullh = 0;  // fullh=1：完整的接触 Hessian（StepParams::full_contact_hessian，阶段 14）
+  int pd = 1;  // pd=0：原始障碍（StepParams::primal_dual = false）
   double kappa = 0;  // > 0：kappa 的预设值（跳过第一次接触时的梯度平衡初始化）
   double icurv_floor = NAN, curv = NAN;  // curv：StepParams::curv_scale（1 可证明的上界，0 纯 Gauss-Newton）
   double pcg_tol = NAN;
@@ -77,6 +81,7 @@ Args parse(int argc, char** argv) {
     else if (k == "adapt") a.adapt = std::atoi(v.c_str());
     else if (k == "relax") a.relax = std::atoi(v.c_str());
     else if (k == "fullh") a.fullh = std::atoi(v.c_str());
+    else if (k == "pd") a.pd = std::atoi(v.c_str());
     else if (k == "kappa") a.kappa = std::atof(v.c_str());
     else if (k == "gpu") a.gpu = std::atoi(v.c_str());
     else if (k == "timing") a.timing = std::atoi(v.c_str());
@@ -116,6 +121,7 @@ int main(int argc, char** argv) {
     P.adapt_kappa = a.adapt != 0;
     P.kappa_relax = a.relax != 0;
     P.full_contact_hessian = a.fullh != 0;
+    P.primal_dual = a.pd != 0;
     P.semi_implicit = a.semi != 0;
     P.inertia_curvature = a.icurv != 0;
     P.inertia_curvature_rot = a.icurv == 2;
@@ -143,10 +149,11 @@ int main(int argc, char** argv) {
 #endif
 
     std::printf("%s: %d bodies, %d trees, nv %d, %d vertices, %d edges, %d faces; h %g, T %g, dhat %g, mu %g, eps_v %g, "
-                "tol %g m/s, %s, %s contact Hessian%s%s\n",
+                "tol %g m/s, %s, %s contact Hessian%s%s%s\n",
                 a.model.c_str(), model.nbody() - 1, model.ntree, model.nv, model.nvertex(), model.nedge(), model.nface(),
                 P.h, a.T, P.dhat, P.mu, P.eps_v, P.tol, a.gpu ? "GPU" : (a.ldlt ? "LDLT" : "PCG"),
-                P.full_contact_hessian ? "full" : "Gauss-Newton", a.semi ? ", semi-implicit stop" : "",
+                P.full_contact_hessian ? "full" : "Gauss-Newton", P.primal_dual ? "" : ", primal barrier (pd=0)",
+                a.semi ? ", semi-implicit stop" : "",
                 model.filter_parent ? "" : ", parent-child contact on");
     if (model.nu() > 0) std::printf("%d actuators, %zu control keyframes\n", model.nu(), model.ctrl_keys.size());
     for (const std::string& s : model.ignored) std::printf("ignored (not supported): %s\n", s.c_str());
@@ -188,7 +195,7 @@ int main(int argc, char** argv) {
           std::printf("  it %2zu: gap %.3e |dx|/h %.3e alpha_max %.4f alpha %.4f pcg %d E %.12e\n", k + 1, trace[k].min_distance,
                       trace[k].step, trace[k].alpha_max, trace[k].alpha, trace[k].pcg, trace[k].energy);
       }
-      if (a.debug >= 2 && r.newton >= P.max_newton) {
+      if (a.debug >= 2 && r.capped) {
         // debug=2：撞上 Newton 上限的步，打印每次迭代的间隙、|dx|/h（收敛判据）、CCD 允许的最大步长和线搜索取的步长。
         std::printf("step %ld (t = %.4f) hit the Newton cap:\n", nstep + 1, t + P.h);
         for (size_t k = 0; k < trace.size(); ++k)
@@ -202,7 +209,7 @@ int main(int argc, char** argv) {
       dmin_iter = std::min(dmin_iter, r.iterate_min_distance);
       lmin = std::min(lmin, r.min_limit_distance);
       nmax = std::max(nmax, r.newton);
-      capped += r.newton >= P.max_newton;
+      capped += r.capped;
       nsum += r.newton;
       pcg_sum += r.pcg;
       dropped += r.curvature_dropped;

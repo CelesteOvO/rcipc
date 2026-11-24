@@ -92,9 +92,11 @@ __global__ void k_pair_cull(DModel m, DFrames F, const double* boxes, const int*
   double T = dmax, xm = 0;
   if (A) {
     const double xa = A[body[0]] * len * len / 8, xb = A[body[1]] * len * len / 8, xi = xa + xb;
+    // CCD 时 dmax 是最小分离 sep（launch_ccd_cull 传进来）：ACCD 用的距离是 d - sep，所以阈值、盒子的余量都加上它。
+    const double sep = dmax;
     if (!window) {
-      T = 1.01 * fmax(2 * xi, xi + 4 * fmax(D[body[0]], D[body[1]]) / c);
-      xm = xi;
+      T = 1.01 * fmax(2 * xi, xi + 4 * fmax(D[body[0]], D[body[1]]) / c) + sep;
+      xm = xi + sep;
     } else {
       // 窗口 [w0, w1]（len 是窗口长 L，D 是窗口两端之间的位移，F 是 w0 处的 FK）里的任何一段 [s0, s1]：
       //   顶点离窗口的弦不超过 xi_b = A_b L^2 / 8，所以它在窗口里离 w0 处的位置不超过 M_b = D_b + xi_b，
@@ -103,8 +105,8 @@ __global__ void k_pair_cull(DModel m, DFrames F, const double* boxes, const int*
       // 所以 w0 处距离不小于 T 的对，在窗口里任何一段的起点上都不小于那一段的阈值，ACCD 第一步就返回 1。
       // 盒子：一段的扫掠盒在窗口的扫掠盒放大 xi_b 以内，段的余量 xi_s <= xi，合起来余量 2 xi。
       const double Ds = fmax(D[body[0]] + 2 * xa, D[body[1]] + 2 * xb);
-      T = 1.01 * (fmax(2 * xi, xi + 4 * Ds / c) + (D[body[0]] + xa) + (D[body[1]] + xb));
-      xm = 2 * xi;
+      T = 1.01 * (fmax(2 * xi, xi + 4 * Ds / c) + (D[body[0]] + xa) + (D[body[1]] + xb)) + sep;
+      xm = 2 * xi + sep;
     }
   }
   double R = 0;

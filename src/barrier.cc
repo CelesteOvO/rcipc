@@ -1,12 +1,16 @@
 #include "rcipc/barrier.h"
 
 #include <cmath>
+#include <limits>
 
 namespace rcipc {
 
 BarrierValue barrier(double x, double xhat) {
   // 激活区之外（x >= xhat），b、b'、b'' 都是 0。
   if (x >= xhat) return {};
+  // 可行域之外（x <= 0）：能量 +无穷，导数记 0（同 IPC Toolkit）。原来 x < 0 时 log 得 NaN，线搜索的 NaN > e0 为假，
+  // 越过限位的试探点会被接受。接触传进来的是 d^2 >= 0，穿透要由 contact_energy 看 d 的符号。
+  if (x <= 0) return {std::numeric_limits<double>::infinity(), 0, 0};
 
   // 激活区之内，先算两个中间量（它们都是负数），这样 b = -r^2 * L：
   const double r = x - xhat;

@@ -32,7 +32,9 @@ constexpr int kDamped = 0, kServo = 1, kPushed = 2, kSpin = 3, kArm = 4;
 StepParams params(const Model& M) {
   StepParams P;
   P.h = M.timestep;
-  P.tol = 1e-9;
+  // 模型没有顶点，收敛判据是刚体质量的均方根位移 / h（m/s）。spin 的回转半径 sqrt(0.05 / 1) = 0.22 m，
+  // 1e-10 m/s 对应约 4.5e-10 rad/s，够下面 1e-9 rad/s 的比较。
+  P.tol = 1e-10;
   P.pcg_tol = 1e-14;
   return P;
 }

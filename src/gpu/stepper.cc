@@ -28,6 +28,7 @@
 #include "device_model.h"
 #include "iter.h"
 #include "kernels.h"
+#include "rcipc/ccd.h"
 #include "rcipc/contact.h"
 #include "rcipc/drive.h"
 #include "rcipc/limits.h"
@@ -279,8 +280,16 @@ struct Stepper::Impl {
   DBuf<double> Kc;
   DBuf<unsigned long long> curv_stats;
   bool icurv_fits = false;
+  // 模型没有顶点、但有带质量的刚体：收敛判据用刚体质量的均方根位移（launch_max_body_rms，同 CPU 版）。
+  bool body_rms_conv = false;
   // 阶段 14：完整的接触 Hessian。cb 是每个刚体接触的 (G, F, P)（nbody x 21，launch_contact_full 写、launch_inertia_curvature 读）。
   DBuf<double> cb;
+  // 原始-对偶障碍（StepParams::primal_dual，DPd）：每个接触的数组（contact_cap 个），和按图元记 lambda 的哈希表
+  //   （pd_tcap 个槽，不少于 2 contact_cap 的 2 的幂；接触的容量变大时换一张大表，旧的记录重新散列过去，不丢）。
+  DBuf<double> pd_scale, pd_lam, pd_F, pd_dlog, pd_dd, pd_tval, pd_kap;
+  DBuf<unsigned long long> pd_key, pd_tkey;
+  DBuf<int> pd_n;
+  int pd_tcap = 0;
   double last_eval_dmin = 0;  // energy_at 最后一次检测到的接触里最小的距离
   DBuf<double> pcg_acc;
 
@@ -290,24 +299,27 @@ struct Stepper::Impl {
   bool last_graph = false;    // 上一步是不是用图跑的（测试用）
   DBuf<DIter> d_it;
   DIter* h_it = nullptr;   // 锁页内存：迭代前写 kappa、nc、nf，迭代后整个读回
-  cudaGraph_t graph = nullptr;
-  cudaGraphExec_t graph_exec = nullptr;
+  // 两张图：[0] Gauss-Newton 行加曲率上界，[1] 完整的接触 Hessian（StepParams::full_contact_hessian）。各存一份，
+  //   两种参数交替跑（比如测试）时不用重录。
+  cudaGraph_t graph[2] = {nullptr, nullptr};
+  cudaGraphExec_t graph_exec[2] = {nullptr, nullptr};
   // 录图时写死的东西：缓冲区的版本，和 StepParams 里用到的常数。变了就重录。
   struct GraphKey {
     long gen = -1;
     double h = 0, dhat = 0, mu = 0, eps_v = 0, curv = 0, limit_k = 0, limit_dhat = 0, c = 0, tol = 0, pcg_tol = 0;
     int pcg_max = 0;
     bool tight = true, reuse = true, tail = true, prefilter = true, icurv = true, icurv_rot = false, fullh = false;
+    bool pd = false;  // StepParams::primal_dual
     double icurv_floor = 0;
     bool operator==(const GraphKey& o) const {
       return gen == o.gen && h == o.h && dhat == o.dhat && mu == o.mu && eps_v == o.eps_v && curv == o.curv &&
              limit_k == o.limit_k && limit_dhat == o.limit_dhat && c == o.c && tol == o.tol && pcg_tol == o.pcg_tol &&
              pcg_max == o.pcg_max && tight == o.tight && reuse == o.reuse && tail == o.tail &&
              prefilter == o.prefilter && icurv == o.icurv && icurv_rot == o.icurv_rot && icurv_floor == o.icurv_floor &&
-             fullh == o.fullh;
+             fullh == o.fullh && pd == o.pd;
     }
   };
-  GraphKey graph_key;
+  GraphKey graph_key[2];
 
   Timers timers;
 
@@ -571,6 +583,7 @@ struct Stepper::Impl {
     Kc.reserve(std::max(m.ntree, 1) * m.TD * m.TD);
     cb.reserve(21 * std::max(m.nbody, 1));
     icurv_fits = inertia_curvature_fits(m);
+    body_rms_conv = m.nvert == 0 && std::any_of(model.bodies.begin() + 1, model.bodies.end(), [](const Body& B) { return B.mass > 0; });
     P.reserve(2 * std::max(m.ntree, 1) * m.TD * m.TD);  // 逆 + 工作区（launch_precond_build）
     work.reserve(4 * nv + 18 * nb);  // PCG：r、z、p、Ap，加上力旋量形式的行用的工作区（launch_matvec）
     scal.reserve(16);
@@ -586,6 +599,9 @@ struct Stepper::Impl {
     pw_n.reserve(1);
     grow_cands(1 << 16);
     cnt.reserve(4);
+    pd_n.reserve(1);
+    pd_kap.reserve(1);
+    check(cudaMemset(pd_kap.get(), 0, sizeof(double)), "pd kappa");
     grow_pairs(1024);
     grow_contacts(1024);
     grow_rows(3 * 1024);
@@ -623,6 +639,44 @@ struct Stepper::Impl {
     contact_cap = n;
     contacts.reserve(n);
     ++g_buf_gen;
+    // 原始-对偶障碍的每个接触的数组（每次迭代重写，扩容时不用保留），和 lambda 的表（要保留：换大表时重新散列）。
+    for (DBuf<double>* b : {&pd_scale, &pd_lam, &pd_F, &pd_dlog, &pd_dd}) b->reserve(n);
+    pd_key.reserve(n);
+    int tcap = 1;
+    while (tcap < 2 * n) tcap *= 2;
+    if (tcap > pd_tcap) {
+      DBuf<unsigned long long> tkey;
+      DBuf<double> tval;
+      tkey.reserve(tcap);
+      tval.reserve(tcap);
+      check(cudaMemset(tkey.get(), 0xFF, sizeof(unsigned long long) * tcap), "pd table clear");
+      DPd to = pd_view();
+      to.tkey = tkey.get();
+      to.tval = tval.get();
+      to.tcap = tcap;
+      if (pd_tcap > 0) launch_pd_rehash(pd_tkey.get(), pd_tval.get(), pd_tcap, to);
+      check(cudaDeviceSynchronize(), "pd table rehash");
+      pd_tkey.swap(tkey);
+      pd_tval.swap(tval);
+      pd_tcap = tcap;
+    }
+  }
+  // 原始-对偶障碍的显存状态（DPd）。
+  DPd pd_view() const {
+    DPd d;
+    d.cap = contact_cap;
+    d.scale = pd_scale.get();
+    d.lam = pd_lam.get();
+    d.F = pd_F.get();
+    d.dlog = pd_dlog.get();
+    d.dd = pd_dd.get();
+    d.key = pd_key.get();
+    d.n = pd_n.get();
+    d.tkey = pd_tkey.get();
+    d.tval = pd_tval.get();
+    d.tcap = pd_tcap;
+    d.kappa = pd_kap.get();
+    return d;
   }
   void grow_cands(int n) {
     cand_cap = n;
@@ -808,7 +862,8 @@ struct Stepper::Impl {
   }
 
   // 在当前点（F 和 contacts 里的 nc 个接触）组装 Newton 系统：g、Hk、行，返回能量 e0。
-  void assemble(const StepParams& Pm, double kappa) {
+  // crow：这一次迭代 Gauss-Newton 行的接触用秩 1 曲率代替上界（两阶段曲率，同 step.cc 的 curv_rows）。
+  void assemble(const StepParams& Pm, double kappa, bool crow = false) {
     const auto t0 = Clock::now();
     const double h = Pm.h;
     cudaMemsetAsync(scal.get(), 0, sizeof(double));
@@ -826,11 +881,15 @@ struct Stepper::Impl {
                                  Hk.get(), Kc.get(), curv_stats.get(), full ? cb.get() : nullptr, Pm.inertia_curvature);
     launch_inertia_energy(m, F.view(), tc.get(), tA.get(), h, scal.get());
     launch_inertia_gradient(m, F.view(), tc.get(), tA.get(), h, g.get());
-    if (!full)
+    if (!full) {
+      // 原始-对偶障碍：接触的 Hessian 乘 lambda_eff / F（系数先按键查好，同 step.cc 的 Ch）。
+      const double* pds = Pm.primal_dual ? pd_scale.get() : nullptr;
+      if (Pm.primal_dual) launch_pd_scale(contacts.get(), nc, kappa, Pm.dhat, pd_view());
       launch_contact_terms(m, F.view(), q.get(), contacts.get(), nc, kappa, Pm.dhat, Pm.curv_scale, scal.get(), g.get(),
-                           Hk.get(), rows_view());
+                           Hk.get(), rows_view(), pds, DCount(crow ? 1 : 0));
+    }
     launch_friction_terms(m, F.view(), fric.get(), nf, h, Pm.mu, Pm.eps_v, scal.get(), g.get(), rows_view(), rpc * nc);
-    launch_limits(m, q.get(), Pm.limit_k, Pm.limit_dhat, scal.get(), g.get(), Hk.get());
+    launch_limits(m, q.get(), Pm.limit_k, Pm.limit_dhat, Pm.dhat, scal.get(), g.get(), Hk.get());
     if (drives_on) launch_drives(m, drive_view(), q.get(), scal.get(), g.get(), Hk.get());
     nrow = rpc * nc + 2 * nf;
     timers.contacts += nc;
@@ -848,7 +907,7 @@ struct Stepper::Impl {
     launch_inertia_energy(m, Ft.view(), tc.get(), tA.get(), Pm.h, scal.get());
     launch_contact_terms(m, Ft.view(), qd, contacts.get(), n, kappa, Pm.dhat, 0.0, scal.get(), nullptr, nullptr, DRows{});
     launch_friction_terms(m, Ft.view(), fric.get(), nf, Pm.h, Pm.mu, Pm.eps_v, scal.get(), nullptr, DRows{}, 0);
-    launch_limits(m, qd, Pm.limit_k, Pm.limit_dhat, scal.get(), nullptr, nullptr);
+    launch_limits(m, qd, Pm.limit_k, Pm.limit_dhat, Pm.dhat, scal.get(), nullptr, nullptr);
     if (drives_on) launch_drives(m, drive_view(), qd, scal.get(), nullptr, nullptr);
     // 顺便算接触里最小的距离（kappa 调整要用接受的那个点的，而接受的点就是最后一次试探的点），和能量一起读回。
     set_scalar(4, std::numeric_limits<double>::infinity());
@@ -902,7 +961,7 @@ struct Stepper::Impl {
     double w0 = 0, w1 = -1;
     // 限位的 CCD 和分段无关，先发出去；结果在 scal[3]，跟着每一段的结果一起读回。
     set_scalar(3, 1.0);
-    launch_limit_ccd(m, qd, pd, Pm.c, scal.get() + 3);
+    launch_limit_ccd(m, qd, pd, Pm.c, Pm.min_sep, scal.get() + 3);
     for (int guard = 0; guard < 10000 && s0 < 1.0; ++guard) {
       ++timers.ccd_segments;
       const double s1 = std::min(1.0, s0 + ds);
@@ -918,23 +977,23 @@ struct Stepper::Impl {
       // scal[1] 截断位置，scal[2] 需要的段长，scal[9..11] 候选、刚体对、工作项的个数。这一段只在最后读回一次。
       const double* Xa = Fs->X.get();
       launch_ccd_init(scal.get() + 1, scal.get() + 2, scal.get() + 9, len);
-      launch_ground_ccd(m, Xa, Fb.X.get(), A.get(), len, Pm.c, scal.get() + 1, scal.get() + 2);
+      launch_ground_ccd(m, Xa, Fb.X.get(), A.get(), len, Pm.c, Pm.min_sep, scal.get() + 1, scal.get() + 2);
       if (pairs_on) {
         launch_swept_boxes(m, Xa, Fb.X.get(), boxes.get());  // 复核用这一段的盒子；新窗口的剔除也用它
         launch_to_float(Xa, 3 * m.nvert, xfa.get());          // 单精度的两端：新窗口的剔除、预筛都用
         launch_to_float(Fb.X.get(), 3 * m.nvert, xfb.get());
         if (fresh) {
-          launch_body_pairs(m, boxes.get(), 0.0, A.get(), reuse ? kWindowPairLen * len : len, pairs.get(), pair_cap,
-                            cnt.get());
+          launch_body_pairs(m, boxes.get(), Pm.min_sep, A.get(), reuse ? kWindowPairLen * len : len, pairs.get(),
+                            pair_cap, cnt.get());
           launch_body_disp(m, Xa, Fb.X.get(), bdisp.get());
           DNarrow N = narrow();
           N.xa = xfa.get();
           N.xb = xfb.get();
-          launch_ccd_cull(m, Fs->view(), boxes.get(), bdisp.get(), A.get(), len, Pm.c, pairs.get(), cnt.get(), pair_cap,
-                          N, cands(), reuse);
+          launch_ccd_cull(m, Fs->view(), boxes.get(), bdisp.get(), A.get(), len, Pm.c, Pm.min_sep, pairs.get(), cnt.get(),
+                          pair_cap, N, cands(), reuse);
         }
-        launch_ccd_exact(m, Xa, Fb.X.get(), boxes.get(), A.get(), len, Pm.c, cnt.get(), pair_cap, exact_narrow(),
-                         cands(), tail_view(), scal.get() + 1, scal.get() + 2, scal.get() + 9);
+        launch_ccd_exact(m, Xa, Fb.X.get(), boxes.get(), A.get(), len, Pm.c, Pm.min_sep, cnt.get(), pair_cap,
+                         exact_narrow(), cands(), tail_view(), scal.get() + 1, scal.get() + 2, scal.get() + 9);
       }
       double out[11];  // scal[1..11]
       check(cudaMemcpy(out, scal.get() + 1, 11 * sizeof(double), cudaMemcpyDeviceToHost), "ccd read");
@@ -952,6 +1011,10 @@ struct Stepper::Impl {
         timers.pair_sum += static_cast<long>(out[9]);
       }
       const double t_min = out[0], ds_need = out[1];
+      if (t_min <= 0) {  // 有一对卡在最小分离以内：段起点之后一点也不能走（同 curved_ccd、k_ccd_seg_end）
+        result = s0;
+        break;
+      }
       if (ds_need < len) {
         ds = std::min(0.5 * len, ds_need);
         continue;
@@ -995,12 +1058,16 @@ struct Stepper::Impl {
   // 图录好以后内核参数固定，会变的数都在显存里的 DIter（d_it）；主机每个迭代只发一次图、读回一次 DIter。
   // 任何缓冲区放不下时这次迭代作废（不接受试探点），主机扩容、重新检测当前点的接触，重录以后再发一次。
 
+  void drop_graph(int gi) {
+    if (graph_exec[gi]) cudaGraphExecDestroy(graph_exec[gi]);
+    if (graph[gi]) cudaGraphDestroy(graph[gi]);
+    graph_exec[gi] = nullptr;
+    graph[gi] = nullptr;
+    graph_key[gi] = GraphKey();
+  }
   void drop_graph() {
-    if (graph_exec) cudaGraphExecDestroy(graph_exec);
-    if (graph) cudaGraphDestroy(graph);
-    graph_exec = nullptr;
-    graph = nullptr;
-    graph_key = GraphKey();
+    drop_graph(0);
+    drop_graph(1);
   }
 
   // f() 里发出去的操作捕获到图 g 里，接在 deps 后面；返回时 deps 是捕获出来的最后几个节点。
@@ -1048,64 +1115,16 @@ struct Stepper::Impl {
     cudaMemcpyAsync(to.X.get(), from.X.get(), sizeof(double) * 3 * m.nvert, cudaMemcpyDeviceToDevice);
   }
 
-  // 录一个 Newton 迭代。
-  void record_graph(const StepParams& Pm) {
+  // 图里 CCD 的分段循环（ccd()），接在 deps 后面；循环的句柄 hc 由 launch_ccd_setup 打开。
+  // 从 q 沿 p（第一段的起点 Fa 由调用者拷好），结果在 it->t_ccd、it->s0 和 scal[3]（限位）。
+  // 求候选（刚体对和剔除）放在一个 IF 条件节点里：k_ccd_seg_begin 判断这一段落不落在候选的窗口里，
+  // 不落在里面才打开（和 ccd() 里的 fresh 一样）。
+  void capture_ccd_loop(cudaGraph_t gr, std::vector<cudaGraphNode_t>& deps, cudaGraphConditionalHandle hc,
+                        const StepParams& Pm) {
     DIter* it = d_it.get();
     double* sc = scal.get();
-    const double h = Pm.h;
-    const DCount nc_d(&it->nc, contact_cap), nf_d(&it->nf, static_cast<int>(fric.size()));
-    const DCount nrow_d(&it->nrow, row_cap);
-    const DScalar kappa_d(0, &it->kappa), s_d(0, &it->s), len_d(0, &it->len);
-    const bool fr = Pm.mu > 0;
-    const bool full = Pm.full_contact_hessian;                               // 阶段 14
-    const DCount row0_d(&it->row0f, (full ? 12 : 1) * contact_cap);  // 摩擦行从第几行起（k_it_begin 算）
-    check(cudaGraphCreate(&graph, 0), "graph create");
-    cudaGraphConditionalHandle hc, hl;
-    check(cudaGraphConditionalHandleCreate(&hc, graph, 0, 0), "handle");
-    check(cudaGraphConditionalHandleCreate(&hl, graph, 0, 0), "handle");
-    std::vector<cudaGraphNode_t> deps;
-
-    // 第 1、2 步：组装（assemble）、预条件器和 PCG（pcg_solve）、收敛判断；第 3 步的开头。
-    capture_into(graph, deps, [&] {
-      launch_it_begin(it);
-      cudaMemsetAsync(sc, 0, sizeof(double));
-      cudaMemsetAsync(g.get(), 0, sizeof(double) * m.nv);
-      launch_inertia_hessian(m, F.view(), h, Hk.get());
-      if (full) {  // 阶段 14（同 assemble）
-        cudaMemsetAsync(cb.get(), 0, sizeof(double) * 21 * m.nbody);
-        launch_contact_full(m, F.view(), contacts.get(), nc_d, kappa_d, Pm.dhat, sc, g.get(), rows_view(), cb.get());
-      }
-      if ((Pm.inertia_curvature || full) && icurv_fits)
-        launch_inertia_curvature(m, F.view(), tc.get(), tA.get(), h, Pm.inertia_curvature_rot, Pm.inertia_curvature_floor,
-                                 Hk.get(), Kc.get(), curv_stats.get(), full ? cb.get() : nullptr, Pm.inertia_curvature);
-      launch_inertia_energy(m, F.view(), tc.get(), tA.get(), h, sc);
-      launch_inertia_gradient(m, F.view(), tc.get(), tA.get(), h, g.get());
-      if (!full)
-        launch_contact_terms(m, F.view(), q.get(), contacts.get(), nc_d, kappa_d, Pm.dhat, Pm.curv_scale, sc, g.get(),
-                             Hk.get(), rows_view());
-      if (fr) launch_friction_terms(m, F.view(), fric.get(), nf_d, h, Pm.mu, Pm.eps_v, sc, g.get(), rows_view(), row0_d);
-      launch_limits(m, q.get(), Pm.limit_k, Pm.limit_dhat, sc, g.get(), Hk.get());
-      if (drives_on) launch_drives(m, drive_view(), q.get(), sc, g.get(), Hk.get());
-      launch_precond_build(m, F.view(), Hk.get(), rows_view(), nrow_d, P.get(), scale.get(), precond_work());
-      if (run_pcg_coop(m, F.view(), Hk.get(), rows_view(), nrow_d, P.get(), g.get(), p.get(), Pm.pcg_tol, Pm.pcg_max,
-                       work.get(), pcg_acc.get(), sc + 12) != 0)
-        throw std::runtime_error("cooperative PCG does not fit");
-      launch_scale(p.get(), m.nv, -1.0);
-      launch_integrate(m, q.get(), p.get(), 1.0, qtrial.get());
-      launch_fk(m, qtrial.get(), F1.view());
-      launch_fill(sc + 7, 0.0);
-      launch_max_displacement(F.X.get(), F1.X.get(), m.nvert, sc + 7);
-      launch_it_converge(it, sc, h, Pm.tol);
-      launch_accel_bounds(m, q.get(), F.view(), p.get(), Pm.tight_bound, A.get());
-      launch_ccd_setup(it, A.get(), m.nbody, Pm.dhat, sc, hc);
-      launch_limit_ccd(m, q.get(), p.get(), Pm.c, sc + 3);
-      copy_frames(F, Fa);  // 第一段从当前点开始
-    });
-
-    // 第 3 步：CCD 的分段（ccd()）。
-    // 求候选（刚体对和剔除）放在一个 IF 条件节点里：k_ccd_seg_begin 判断这一段落不落在候选的窗口里，
-    // 不落在里面才打开（和 ccd() 里的 fresh 一样）。
-    cudaGraph_t body = add_cond(graph, deps, hc);
+    const DScalar s_d(0, &it->s), len_d(0, &it->len);
+    cudaGraph_t body = add_cond(gr, deps, hc);
     cudaGraphConditionalHandle hf = 0;
     if (pairs_on()) check(cudaGraphConditionalHandleCreate(&hf, body, 0, 0), "handle");
     std::vector<cudaGraphNode_t> bd;
@@ -1114,7 +1133,7 @@ struct Stepper::Impl {
       launch_integrate(m, q.get(), p.get(), s_d, qtrial.get());
       launch_fk(m, qtrial.get(), Fb.view());
       launch_ccd_init(sc + 1, sc + 2, sc + 9, len_d);
-      launch_ground_ccd(m, Fa.X.get(), Fb.X.get(), A.get(), len_d, Pm.c, sc + 1, sc + 2);
+      launch_ground_ccd(m, Fa.X.get(), Fb.X.get(), A.get(), len_d, Pm.c, Pm.min_sep, sc + 1, sc + 2);
       if (pairs_on()) {
         launch_swept_boxes(m, Fa.X.get(), Fb.X.get(), boxes.get());
         launch_to_float(Fa.X.get(), 3 * m.nvert, xfa.get());
@@ -1126,18 +1145,18 @@ struct Stepper::Impl {
       std::vector<cudaGraphNode_t> cd;
       const DScalar plen_d(0, reuse ? &it->plen : &it->len);
       capture_into(cull, cd, [&] {
-        launch_body_pairs(m, boxes.get(), 0.0, A.get(), plen_d, pairs.get(), pair_cap, cnt.get());
+        launch_body_pairs(m, boxes.get(), Pm.min_sep, A.get(), plen_d, pairs.get(), pair_cap, cnt.get());
         launch_body_disp(m, Fa.X.get(), Fb.X.get(), bdisp.get());
         DNarrow N = narrow();
         N.xa = xfa.get();
         N.xb = xfb.get();
-        launch_ccd_cull(m, Fa.view(), boxes.get(), bdisp.get(), A.get(), len_d, Pm.c, pairs.get(), cnt.get(), pair_cap,
-                        N, cands(), reuse);
+        launch_ccd_cull(m, Fa.view(), boxes.get(), bdisp.get(), A.get(), len_d, Pm.c, Pm.min_sep, pairs.get(), cnt.get(),
+                        pair_cap, N, cands(), reuse);
       });
     }
     capture_into(body, bd, [&] {
       if (pairs_on()) {
-        launch_ccd_exact(m, Fa.X.get(), Fb.X.get(), boxes.get(), A.get(), len_d, Pm.c, cnt.get(), pair_cap,
+        launch_ccd_exact(m, Fa.X.get(), Fb.X.get(), boxes.get(), A.get(), len_d, Pm.c, Pm.min_sep, cnt.get(), pair_cap,
                          exact_narrow(), cands(), tail_view(), sc + 1, sc + 2, sc + 9);
       } else {
         launch_fill(sc + 9, 0.0);
@@ -1147,11 +1166,18 @@ struct Stepper::Impl {
       launch_ccd_seg_end(it, sc, pair_cap, work_cap, cand_cap, hc);
       launch_copy_frames_if(it, Fb.view(), Fa.view(), m.nbody, m.nv, m.nvert);
     });
+  }
 
-    // 第 4 步：回溯线搜索（energy_at）。
-    capture_into(graph, deps, [&] { launch_ls_setup(it, sc, hl); });
-    body = add_cond(graph, deps, hl);
-    bd.clear();
+  // 图里的一次试探（energy_at）：q ⊕ s p（s = it->s）处的 FK、检测、能量 scal[0]、最小距离 scal[4]，
+  // 最后发 end()（判断要不要再试、接不接受）。
+  template <class Fn>
+  void capture_trial(cudaGraph_t body, std::vector<cudaGraphNode_t>& bd, const StepParams& Pm, Fn&& end) {
+    DIter* it = d_it.get();
+    double* sc = scal.get();
+    const double h = Pm.h;
+    const DCount nf_d(&it->nf, static_cast<int>(fric.size()));
+    const DScalar kappa_d(0, &it->kappa), s_d(0, &it->s);
+    const bool fr = Pm.mu > 0;
     capture_into(body, bd, [&] {
       launch_integrate(m, q.get(), p.get(), s_d, qtrial.get());
       launch_fk(m, qtrial.get(), Ft.view());
@@ -1166,18 +1192,92 @@ struct Stepper::Impl {
       launch_contact_terms(m, Ft.view(), qtrial.get(), contacts.get(), n_d, kappa_d, Pm.dhat, 0.0, sc, nullptr,
                            nullptr, DRows{});
       if (fr) launch_friction_terms(m, Ft.view(), fric.get(), nf_d, h, Pm.mu, Pm.eps_v, sc, nullptr, DRows{}, 0);
-      launch_limits(m, qtrial.get(), Pm.limit_k, Pm.limit_dhat, sc, nullptr, nullptr);
+      launch_limits(m, qtrial.get(), Pm.limit_k, Pm.limit_dhat, Pm.dhat, sc, nullptr, nullptr);
       if (drives_on) launch_drives(m, drive_view(), qtrial.get(), sc, nullptr, nullptr);
       launch_fill(sc + 4, std::numeric_limits<double>::infinity());
       launch_min_distance(contacts.get(), n_d, sc + 4);
-      launch_ls_end(it, sc, cnt.get(), pair_cap, contact_cap, cand_cap, work_cap, hl);
+      end();
+    });
+  }
+
+  // 录一个 Newton 迭代。
+  void record_graph(const StepParams& Pm) {
+    DIter* it = d_it.get();
+    double* sc = scal.get();
+    const double h = Pm.h;
+    const DCount nc_d(&it->nc, contact_cap), nf_d(&it->nf, static_cast<int>(fric.size()));
+    const DCount nrow_d(&it->nrow, row_cap);
+    const DScalar kappa_d(0, &it->kappa);
+    const bool fr = Pm.mu > 0;
+    const bool full = Pm.full_contact_hessian;                       // 阶段 14
+    const DCount row0_d(&it->row0f, (full ? 12 : 1) * contact_cap);  // 摩擦行从第几行起（k_it_begin 算）
+    const bool pd = Pm.primal_dual;  // 原始-对偶障碍（step() 开头检查过：不和完整的接触 Hessian 一起用）
+    const DPd pdv = pd_view();
+    const double* pds = pd ? pd_scale.get() : nullptr;
+    cudaGraph_t& gr = graph[full ? 1 : 0];
+    check(cudaGraphCreate(&gr, 0), "graph create");
+    cudaGraphConditionalHandle hc, hl;
+    check(cudaGraphConditionalHandleCreate(&hc, gr, 0, 0), "handle");
+    check(cudaGraphConditionalHandleCreate(&hl, gr, 0, 0), "handle");
+    std::vector<cudaGraphNode_t> deps;
+
+    // 第 1、2 步：组装（assemble）、预条件器和 PCG（pcg_solve）、收敛判断；第 3 步的开头。
+    capture_into(gr, deps, [&] {
+      launch_it_begin(it);
+      cudaMemsetAsync(sc, 0, sizeof(double));
+      cudaMemsetAsync(g.get(), 0, sizeof(double) * m.nv);
+      launch_inertia_hessian(m, F.view(), h, Hk.get());
+      if (full) {  // 阶段 14（同 assemble）
+        cudaMemsetAsync(cb.get(), 0, sizeof(double) * 21 * m.nbody);
+        launch_contact_full(m, F.view(), contacts.get(), nc_d, kappa_d, Pm.dhat, sc, g.get(), rows_view(), cb.get());
+      }
+      if ((Pm.inertia_curvature || full) && icurv_fits)
+        launch_inertia_curvature(m, F.view(), tc.get(), tA.get(), h, Pm.inertia_curvature_rot, Pm.inertia_curvature_floor,
+                                 Hk.get(), Kc.get(), curv_stats.get(), full ? cb.get() : nullptr, Pm.inertia_curvature);
+      launch_inertia_energy(m, F.view(), tc.get(), tA.get(), h, sc);
+      launch_inertia_gradient(m, F.view(), tc.get(), tA.get(), h, g.get());
+      if (!full) {
+        if (pd) launch_pd_scale(contacts.get(), nc_d, kappa_d, Pm.dhat, pdv);
+        // 两阶段曲率的开关在 DIter 的头里（主机每次迭代写，run_graph）。
+        launch_contact_terms(m, F.view(), q.get(), contacts.get(), nc_d, kappa_d, Pm.dhat, Pm.curv_scale, sc, g.get(),
+                             Hk.get(), rows_view(), pds, DCount(&it->crow, 1));
+      }
+      if (fr) launch_friction_terms(m, F.view(), fric.get(), nf_d, h, Pm.mu, Pm.eps_v, sc, g.get(), rows_view(), row0_d);
+      launch_limits(m, q.get(), Pm.limit_k, Pm.limit_dhat, Pm.dhat, sc, g.get(), Hk.get());
+      if (drives_on) launch_drives(m, drive_view(), q.get(), sc, g.get(), Hk.get());
+      launch_precond_build(m, F.view(), Hk.get(), rows_view(), nrow_d, P.get(), scale.get(), precond_work());
+      if (run_pcg_coop(m, F.view(), Hk.get(), rows_view(), nrow_d, P.get(), g.get(), p.get(), Pm.pcg_tol, Pm.pcg_max,
+                       work.get(), pcg_acc.get(), sc + 12) != 0)
+        throw std::runtime_error("cooperative PCG does not fit");
+      launch_scale(p.get(), m.nv, -1.0);
+      launch_integrate(m, q.get(), p.get(), 1.0, qtrial.get());
+      launch_fk(m, qtrial.get(), F1.view());
+      launch_fill(sc + 7, 0.0);
+      launch_max_displacement(F.X.get(), F1.X.get(), m.nvert, sc + 7);
+      launch_it_converge(it, sc, h, Pm.tol);
+      // 原始-对偶障碍：对偶更新要的量现在记下（线搜索会把 contacts 覆盖成试探点的），线搜索之后再写回表。
+      if (pd) launch_pd_prepare(m, F.view(), contacts.get(), nc_d, kappa_d, Pm.dhat, p.get(), it, pdv);
+      launch_accel_bounds(m, q.get(), F.view(), p.get(), Pm.tight_bound, A.get());
+      launch_ccd_setup(it, A.get(), m.nbody, Pm.dhat, sc, hc);
+      launch_limit_ccd(m, q.get(), p.get(), Pm.c, Pm.min_sep, sc + 3);
+      copy_frames(F, Fa);  // 第一段从当前点开始
     });
 
-    // 第 5 步：接受最后一次试探的点。
-    capture_into(graph, deps, [&] {
+    // 第 3 步：CCD 的分段（ccd()）。
+    capture_ccd_loop(gr, deps, hc, Pm);
+
+    // 第 4 步：回溯线搜索（energy_at）。
+    capture_into(gr, deps, [&] { launch_ls_setup(it, sc, hl); });
+    cudaGraph_t body = add_cond(gr, deps, hl);
+    std::vector<cudaGraphNode_t> bd;
+    capture_trial(body, bd, Pm, [&] { launch_ls_end(it, sc, cnt.get(), pair_cap, contact_cap, cand_cap, work_cap, hl); });
+
+    // 第 5 步：接受最后一次试探的点（原始-对偶障碍：先写回对偶变量，只在 status == kIterDone 时）。
+    capture_into(gr, deps, [&] {
+      if (pd) launch_pd_update(kappa_d, it, pdv);
       launch_it_accept(it, qtrial.get(), q.get(), m.nq, Ft.view(), F.view(), m.nbody, m.nv, m.nvert, cnt.get());
     });
-    check(cudaGraphInstantiate(&graph_exec, graph, 0), "graph instantiate");
+    check(cudaGraphInstantiate(&graph_exec[full ? 1 : 0], gr, 0), "graph instantiate");
   }
 
   GraphKey key_for(const StepParams& Pm) const {
@@ -1202,6 +1302,7 @@ struct Stepper::Impl {
     k.icurv_rot = Pm.inertia_curvature_rot;
     k.icurv_floor = Pm.inertia_curvature_floor;
     k.fullh = Pm.full_contact_hessian;
+    k.pd = Pm.primal_dual;
     return k;
   }
 
@@ -1209,17 +1310,18 @@ struct Stepper::Impl {
   bool ensure_graph(const StepParams& Pm) {
     pcg_acc.reserve(2 * static_cast<size_t>(Pm.pcg_max) + 4);  // 录图时不能分配显存
     const GraphKey k = key_for(Pm);
-    if (graph_exec && k == graph_key) return true;
-    drop_graph();
+    const int gi = Pm.full_contact_hessian ? 1 : 0;
+    if (graph_exec[gi] && k == graph_key[gi]) return true;
+    drop_graph(gi);
     try {
       record_graph(Pm);
     } catch (const std::exception&) {
-      drop_graph();
+      drop_graph(gi);
       cudaGetLastError();
       graph_failed = true;
       return false;
     }
-    graph_key = key_for(Pm);  // 录图时不会分配显存，版本应该没变；保险起见再取一次
+    graph_key[gi] = key_for(Pm);  // 录图时不会分配显存，版本应该没变；保险起见再取一次
     return true;
   }
 
@@ -1229,13 +1331,19 @@ struct Stepper::Impl {
   }
 
   // 一次图版的 Newton 迭代：写 kappa、nc、nf，发图，读回 DIter。
-  const DIter& run_graph_iteration(double kappa, int rpc) {
+  const DIter& run_graph_iteration(double kappa, int rpc, int crow) {
+    return run_graph(graph_exec[rpc == 12 ? 1 : 0], kappa, rpc, crow);
+  }
+
+  // 写 DIter 的头（kappa、nc、nf、rpc、crow），发图 ex，读回整个 DIter。
+  const DIter& run_graph(cudaGraphExec_t ex, double kappa, int rpc, int crow = 0) {
     h_it->kappa = kappa;
     h_it->nc = nc;
     h_it->nf = nf;
     h_it->rpc = rpc;
+    h_it->crow = crow;
     check(cudaMemcpyAsync(d_it.get(), h_it, offsetof(DIter, nrow), cudaMemcpyHostToDevice), "iter header");
-    check(cudaGraphLaunch(graph_exec, cudaStreamPerThread), "graph launch");
+    check(cudaGraphLaunch(ex, cudaStreamPerThread), "graph launch");
     check(cudaMemcpyAsync(h_it, d_it.get(), sizeof(DIter), cudaMemcpyDeviceToHost), "iter read");
     check(cudaStreamSynchronize(cudaStreamPerThread), "iter sync");
     return *h_it;
@@ -1244,9 +1352,10 @@ struct Stepper::Impl {
   // 图版的 Newton 循环（和下面 step() 里的循环一样，只是每个迭代的第 1–5 步是一次 run_graph_iteration）。
   // 第一次录图就失败时返回 false，step() 改用逐个发射的循环。
   bool newton_graph(const StepParams& Pm, SolverState* state, const KappaRange& krange, int& newton, int& pcg_total,
-                    bool& semi_stopped) {
+                    bool& semi_stopped, bool& converged) {
     double beta = 1.0;
     int redo = 0;
+    FullStepTrack fstep;  // 两阶段曲率：这一步里有没有哪次迭代走了整步（同 step.cc）
     for (int it = 1; it <= Pm.max_newton;) {
       newton = it;
       // 第 0 步：第一次出现接触时初始化 kappa（逐个发射，很少走到）。
@@ -1257,13 +1366,16 @@ struct Stepper::Impl {
         timers.assemble += ms_since(t0);
       }
       const int rpc = Pm.full_contact_hessian ? 12 : 1;
-      grow_rows(rpc * contact_cap + 2 * nf);  // 行数不超过 rpc nc + 2 nf，nc 不超过 contact_cap：图里不用再扩容
+      // 行数不超过 rpc nc + 2 nf，nc 不超过 contact_cap：图里不用再扩容
+      grow_rows(rpc * contact_cap + 2 * nf);
       if (!ensure_graph(Pm)) {
         if (it == 1) return false;
         throw std::runtime_error("CUDA graph could not be recorded in the middle of a step");
       }
+      // 两阶段曲率：走过整步以后，Gauss-Newton 行的接触的上界换成秩 1 曲率（规则同 step.cc；完整的 Hessian 没有这种行）。
+      const bool curv_rows = fstep.full_step_seen && !Pm.full_contact_hessian;
       const auto t0 = Clock::now();
-      const DIter r = run_graph_iteration(state->kappa, rpc);
+      const DIter r = run_graph_iteration(state->kappa, rpc, curv_rows ? 1 : 0);
       timers.graph += ms_since(t0);
       if (r.status == kIterOverflow) {
         // 某个缓冲区放不下：这次迭代没有接受任何东西。扩容，重新检测当前点的接触（线搜索把它们覆盖了），重来。
@@ -1283,18 +1395,14 @@ struct Stepper::Impl {
       timers.ccd_segments += r.segs;
       timers.ccd_windows += r.windows;
       pcg_total += r.pcg;
-      if (r.status == kIterConverged) break;
-      nc = r.nc;
-      // 第 6 步：kappa 调整（接受的点上的最小距离）。
-      if (Pm.adapt_kappa && state->kappa > 0) {
-        const double dmin = r.dmin;
-        if (dmin < 1e-3 * Pm.dhat && dmin < state->dmin_prev) {
-          state->kappa = std::min(2 * state->kappa, krange.max);
-        } else if (Pm.kappa_relax && dmin > 1e-2 * Pm.dhat) {
-          state->kappa = std::max(0.5 * state->kappa, krange.min);
-        }
-        state->dmin_prev = dmin;
+      if (r.status == kIterConverged) {
+        converged = true;
+        break;
       }
+      nc = r.nc;
+      // 第 6 步：kappa 调整（接受的点上的最小距离；规则在 step.cc 的 kappa_after_iterate，两边共用）。
+      kappa_after_iterate(Pm, krange.min, krange.max, r.dmin, state);
+      track_full_step(r.alpha_max, r.alpha, &fstep);  // 两阶段曲率用（同 CPU 版）
       // 第 7 步：半隐式提前停止。
       if (Pm.semi_implicit && it >= Pm.semi_kmin) {
         beta *= (1 - r.alpha_max);
@@ -1312,6 +1420,8 @@ struct Stepper::Impl {
 
   StepResult step(const StepParams& Pm, const VectorXd& q0h, const VectorXd& v0h, SolverState* state,
                   std::vector<NewtonIterate>* trace) {
+    if (Pm.primal_dual && Pm.full_contact_hessian)
+      throw std::runtime_error("full_contact_hessian on the GPU needs primal_dual = false");
     const auto t_step = Clock::now();
     const double h = Pm.h;
     SolverState local;
@@ -1319,6 +1429,8 @@ struct Stepper::Impl {
     const KappaRange krange = kappa_range(model, Pm.dhat);
 
     prepare(Pm, q0h, v0h, state->kappa);
+    // 原始-对偶障碍：对偶变量只在一步之内记（同 step.cc）。
+    if (Pm.primal_dual) launch_pd_clear(pd_view());
     auto t_up = Clock::now();
     check(cudaMemcpy(q.get(), q0.get(), sizeof(double) * m.nq, cudaMemcpyDeviceToDevice), "q = q0");
     run_fk(q.get(), F);
@@ -1326,11 +1438,12 @@ struct Stepper::Impl {
     timers.update += ms_since(t_up);
 
     int newton = 0, pcg_total = 0;
-    bool semi_stopped = false;
+    bool semi_stopped = false, converged = false;
     double beta = 1.0;
     const bool graph_done =
-        use_graph(Pm, trace) && newton_graph(Pm, state, krange, newton, pcg_total, semi_stopped);
+        use_graph(Pm, trace) && newton_graph(Pm, state, krange, newton, pcg_total, semi_stopped, converged);
     last_graph = graph_done;
+    FullStepTrack fstep;  // 两阶段曲率：这一步里有没有哪次迭代走了整步（同 step.cc）
     for (int it = 1; !graph_done && it <= Pm.max_newton; ++it) {
       newton = it;
       // 第 0 步：第一次出现接触时初始化 kappa。
@@ -1344,7 +1457,8 @@ struct Stepper::Impl {
 
       // 第 1 步：组装，PCG 解 H p = -g。
       const double dmin_here = trace ? contact_dmin(nc) : 0.0;
-      assemble(Pm, kappa);
+      // 两阶段曲率：走过整步以后，Gauss-Newton 行的接触的上界换成秩 1 曲率（规则同 step.cc）。
+      assemble(Pm, kappa, fstep.full_step_seen && !Pm.full_contact_hessian);
       int iters = pcg_solve(g.get(), p.get(), Pm.pcg_tol, Pm.pcg_max, true);
       launch_scale(p.get(), m.nv, -1.0);
 
@@ -1355,6 +1469,7 @@ struct Stepper::Impl {
       launch_fk(m, qtrial.get(), F1.view());
       set_scalar(7, 0.0);
       if (m.nvert > 0) launch_max_displacement(F.X.get(), F1.X.get(), m.nvert, scal.get() + 7);
+      if (body_rms_conv) launch_max_body_rms(m, F.view(), F1.view(), scal.get() + 7);
       double rb[13];
       check(cudaMemcpy(rb, scal.get(), sizeof(rb), cudaMemcpyDeviceToHost), "newton read");
       const double e0 = rb[0];
@@ -1364,7 +1479,7 @@ struct Stepper::Impl {
       }
       pcg_total += iters;
       double size;
-      if (m.nvert > 0) {
+      if (m.nvert > 0 || body_rms_conv) {
         size = rb[7] / h;
       } else {
         VectorXd ph(m.nv);
@@ -1372,7 +1487,12 @@ struct Stepper::Impl {
         size = host_max(ph) / h;
       }
       timers.converge += ms_since(t_conv);
-      if (size < Pm.tol) break;
+      if (size < Pm.tol) {
+        converged = true;
+        break;
+      }
+      // 原始-对偶障碍：对偶更新要的量现在记下（线搜索会把 contacts 覆盖成试探点的；CCD 不动它）。
+      if (Pm.primal_dual) launch_pd_prepare(m, F.view(), contacts.get(), nc, kappa, Pm.dhat, p.get(), nullptr, pd_view());
 
       // 第 3 步：CCD。
       const double alpha_max = ccd(Pm, q.get(), p.get());
@@ -1382,10 +1502,21 @@ struct Stepper::Impl {
       double alpha = alpha_max;
       for (;;) {
         launch_integrate(m, q.get(), p.get(), alpha, qtrial.get());
-        if (!(energy_at(Pm, qtrial.get(), kappa) > e0 && alpha > 1e-12)) break;
-        alpha *= 0.5;
+        const double e_trial = energy_at(Pm, qtrial.get(), kappa);
+        if (e_trial > e0 && alpha > 1e-12) {
+          alpha *= 0.5;
+          continue;
+        }
+        // 减半到底还是 +无穷（试探点穿进去了）：这一次一步也不走，再试一次 alpha = 0，接过当前点的 FK 和接触（同 k_ls_end）。
+        if (!std::isfinite(e_trial) && alpha > 0) {
+          alpha = 0;
+          continue;
+        }
+        break;
       }
       timers.line_search += ms_since(t_ls);
+      // 原始-对偶障碍：对偶变量写回表（同 step.cc 迭代末尾的那一段）。
+      if (Pm.primal_dual) launch_pd_update(kappa, nullptr, pd_view());
 
       // 第 5 步：记录，更新。下一次迭代、kappa 调整都要新位置上的 FK 和接触。线搜索最后一次试探的正是
       // 接受的 alpha：qtrial = q + alpha p，Ft 是它的 FK，contacts 里是它的 last_eval_n 个接触。
@@ -1397,16 +1528,9 @@ struct Stepper::Impl {
       nc = last_eval_n;
       timers.update += ms_since(t_up);
 
-      // 第 6 步：kappa 调整。
-      if (Pm.adapt_kappa && state->kappa > 0) {
-        const double dmin = last_eval_dmin;  // 接受的点上的最小距离（energy_at 顺便算的）
-        if (dmin < 1e-3 * Pm.dhat && dmin < state->dmin_prev) {
-          state->kappa = std::min(2 * state->kappa, krange.max);
-        } else if (Pm.kappa_relax && dmin > 1e-2 * Pm.dhat) {
-          state->kappa = std::max(0.5 * state->kappa, krange.min);
-        }
-        state->dmin_prev = dmin;
-      }
+      // 第 6 步：kappa 调整（接受的点上的最小距离，energy_at 顺便算的；规则同 CPU 版）。
+      kappa_after_iterate(Pm, krange.min, krange.max, last_eval_dmin, state);
+      track_full_step(alpha_max, alpha, &fstep);  // 两阶段曲率用（同 CPU 版）
 
       // 第 7 步：半隐式提前停止。
       if (Pm.semi_implicit && it >= Pm.semi_kmin) {
@@ -1426,8 +1550,9 @@ struct Stepper::Impl {
     r.newton = newton;
     r.pcg = pcg_total;
     r.semi_stopped = semi_stopped;
-    r.kappa = state->kappa;
+    r.capped = !converged && !semi_stopped;
     r.min_distance = contact_dmin(nc);
+    r.kappa = state->kappa;
     r.iterate_min_distance = std::numeric_limits<double>::infinity();
     r.min_limit_distance = min_limit_distance(model, qh);
     timers.newton += newton;
@@ -1493,14 +1618,15 @@ Frames Stepper::fk(const VectorXd& qh) {
 }
 
 Stepper::Terms Stepper::terms(const StepParams& P, const VectorXd& q0h, const VectorXd& v0h, double kappa,
-                              const VectorXd& qh) {
+                              const VectorXd& qh, bool rank1_rows) {
   Impl& I = *impl_;
   I.prepare(P, q0h, v0h, kappa);
   I.q.upload(qh.data(), I.m.nq);
   I.run_fk(I.q.get(), I.F);
   I.nc = I.detect(I.F, P.dhat);
   Terms out;
-  I.assemble(P, kappa);
+  if (P.primal_dual) launch_pd_clear(I.pd_view());
+  I.assemble(P, kappa, rank1_rows);
   out.energy = I.get_scalar(0);
   out.ncontact = I.nc;
   out.nfriction = I.nf;

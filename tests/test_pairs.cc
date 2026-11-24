@@ -2,9 +2,11 @@
 //
 //   Mesh.*      第 1 节：盒子的边和面、球和胶囊的边；世界上的静态盒子
 //   Detect.*    第 2 节：两个盒子之间找到点–三角形和边–边接触，距离和重新算的一致
+//               平行的胶囊：边–边的 mollifier 是 0，端点–边接触（胶囊端点的退化边）仍然给出障碍
+//               焊在世界上的刚体（weld 为 0）不和地面比，第 1.1 节
 //   Row.*       第 3 节：点–三角形、边–边的接触行和有限差分一致；能量的梯度也是
 //   Ccd.*       第 4 节：高速相撞的两个盒子，曲线 CCD 把步长截在相撞之前
-//   Scene.*     第 5 节：堆叠、台阶，整条轨迹不穿透，最后静止
+//   Scene.*     第 5 节：堆叠、台阶、平行胶囊的槽，整条轨迹不穿透，最后静止
 #include <cmath>
 #include <random>
 
@@ -75,7 +77,7 @@ int count(const std::vector<Contact>& C, ContactType t) {
 
 // ---------- 第 1 节：网格 ----------
 
-// 每个盒子 8 个顶点、12 条边、12 个三角形；球 1 条退化的边；胶囊 1 条边。
+// 每个盒子 8 个顶点、12 条边、12 个三角形；球 1 条退化的边；胶囊 1 条边加 2 条退化的边（两个端点）。
 TEST(Mesh, BoxesSpheresAndCapsules) {
   const Model S = load("stack.xml");
   EXPECT_EQ(S.nvertex(), 16);
@@ -89,12 +91,12 @@ TEST(Mesh, BoxesSpheresAndCapsules) {
     EXPECT_EQ(f.body, S.vertices[f.v0].body);
   }
   const Model Z = load("zoo.xml");
-  // zoo：2 个盒子（24 条边）+ 4 根胶囊（4 条边）+ 2 个球（2 条退化的边）= 30 条边，24 个三角形。
-  EXPECT_EQ(Z.nedge(), 30);
+  // zoo：2 个盒子（24 条边）+ 4 根胶囊（4 条边 + 8 条退化的边）+ 2 个球（2 条退化的边）= 38 条边，24 个三角形。
+  EXPECT_EQ(Z.nedge(), 38);
   EXPECT_EQ(Z.nface(), 24);
   int degenerate = 0;
   for (const Edge& e : Z.edges) degenerate += e.v0 == e.v1;
-  EXPECT_EQ(degenerate, 2);
+  EXPECT_EQ(degenerate, 10);
 }
 
 // 三角网格（和 libuipc 同一套胶囊网格，compare/libuipc/ragdolls_1_mesh.xml）：一个布娃娃 11 个刚体，
@@ -114,6 +116,19 @@ TEST(Mesh, TriangleMeshesFromMjcf) {
   for (const Vertex& v : M.vertices) EXPECT_EQ(v.radius, 0.0);
   // 静止姿态下不相交，最近的一对至少隔开关节处的 1.5 cm 减去网格的离散误差。
   EXPECT_GT(min_distance(M, forward_kinematics(M, M.qpos0)), 0.01);
+}
+
+// 重合的顶点合并（notes/22_primal_dual.md 第 5 节）：split_tetra.obj 每个面的角各写一遍，MuJoCo 编译后照样是
+// 12 个顶点。合并后是一个闭合的四面体：4 个顶点、6 条边、4 个三角形（V - E + F = 2）。底面离地 0.5 mm，
+// 底面的三个角各给出一个顶点–平面接触（不合并时每个角出现 3 次，是 9 个）。
+TEST(Mesh, CoincidentVerticesMerged) {
+  const MjModelPtr mj = load_mjcf(RCIPC_MODEL_DIR "/split_tetra.xml");
+  ASSERT_EQ(mj->mesh_vertnum[0], 12);  // MuJoCo 不合并
+  const Model M = from_mujoco(mj.get());
+  EXPECT_EQ(M.nvertex(), 4);
+  EXPECT_EQ(M.nedge(), 6);
+  EXPECT_EQ(M.nface(), 4);
+  EXPECT_EQ(find_contacts(M, forward_kinematics(M, M.qpos0), 1e-3).size(), 3u);
 }
 
 // 世界上的静态盒子：顶点在 0 号刚体上，接触行里它那一侧为 0；父子不检测但世界和它的子刚体要检测。
@@ -190,6 +205,79 @@ TEST(Detect, AlignedStackGivesPointTriangleContacts) {
   EXPECT_GT(parallel, 0);
   EXPECT_GT(crossing, 0);
   EXPECT_GT(contact_energy(M, C, 1.0, dhat), 0.0);
+}
+
+// 平行的胶囊（models/capsule_cradle.xml，笔记第 2.3 节）：自由胶囊和两根固定胶囊严格平行，轴间距 0.06 + gap。
+//   它们之间的边–边接触 mollifier 是 0（能量里不起作用）；障碍来自自由胶囊两个端点对两根固定胶囊的点–边接触
+//   （端点的退化边对另一条边，mollifier 是 1），一共 4 对，距离都是 gap。
+//   所以能量随 gap 变小而增大，对高度 z 的梯度是负的（斥力向上），大小约和 1/gap 成正比。
+//   没有端点的退化边时，这里的能量和梯度都恒为 0：没有东西挡住它。
+TEST(Detect, ParallelCapsulesKeepABarrier) {
+  const Model M = load("capsule_cradle.xml");
+  const double dhat = 1e-3, kappa = 1e8;
+  const auto at_gap = [&](double gap) {
+    VectorXd q = M.qpos0;
+    q[2] = 0.2 + std::sqrt((0.06 + gap) * (0.06 + gap) - 0.04 * 0.04);
+    return q;
+  };
+  double e_prev = 0, f_prev = 0;
+  for (double gap : {1e-4, 1e-5, 1e-6, 1e-7, 1e-9}) {
+    const Frames F = forward_kinematics(M, at_gap(gap));
+    const std::vector<Contact> C = find_contacts(M, F, dhat);
+    EXPECT_NEAR(min_distance(M, F), gap, 1e-12);
+    int holding = 0;
+    for (const Contact& c : C) {
+      ASSERT_EQ(c.type, ContactType::kEdgeEdge);
+      if (c.moll == 1) {
+        EXPECT_NEAR(c.d, gap, 1e-12);
+        ++holding;
+      } else {
+        EXPECT_LT(c.moll, 1e-12);  // 胶囊的轴对轴：平行，被 mollifier 关掉
+      }
+    }
+    EXPECT_EQ(holding, 4) << "gap " << gap;
+    const double e = contact_energy(M, C, kappa, dhat);
+    const double fz = -contact_gradient(M, F, C, kappa, dhat)[2];  // 对自由胶囊向上的力
+    EXPECT_GT(e, e_prev) << "gap " << gap;
+    EXPECT_GT(fz, 5 * f_prev) << "gap " << gap;  // gap 每小 10 倍（最后一次 100 倍），力至少大 5 倍
+    e_prev = e;
+    f_prev = fz;
+  }
+  EXPECT_GT(f_prev, 1e5);  // gap = 1e-9 m 时斥力已经远大于胶囊的重量（9.81 N）
+}
+
+// 焊在世界上的刚体（models/welded_base.xml，笔记第 1.1 节）：base 没有关节、直接挂在世界上，plate 焊在 base 上，
+// 两个盒子的底面都在地面下 0.03 mm。它们和世界上的静态几何一样不动，不和地面比：否则开局的最小距离是 -0.03 mm
+// （判成穿透），曲线 CCD 在这些顶点上卡住（起点已经在最小分离以内，步长 0）。
+// 焊在自由盒子上的 ball 虽然也没有关节，但跟着盒子动（weld 不是 0），照样和地面比。
+TEST(Detect, BodiesWeldedToTheWorldSkipThePlane) {
+  const Model M = load("welded_base.xml");
+  const int base = 1, plate = 2, box = 3, ball = 4;  // MJCF 里的先序编号
+  ASSERT_EQ(M.nbody(), 5);
+  ASSERT_EQ(M.bodies[plate].parent, base);
+  ASSERT_EQ(M.bodies[ball].parent, box);
+  EXPECT_EQ(M.weld[base], 0);
+  EXPECT_EQ(M.weld[plate], 0);
+  EXPECT_EQ(M.weld[ball], box);
+  StepParams P;
+  // 自由盒子放低，球离地 0.5 mm：地面接触只有球这一个，最小距离就是它。
+  VectorXd q = M.qpos0;
+  q[2] = 0.08 + 0.03 + 0.5e-3;
+  const Frames F = forward_kinematics(M, q);
+  const std::vector<Contact> C = find_contacts(M, F, P.dhat);
+  EXPECT_EQ(count(C, ContactType::kGround), 1);
+  for (const Contact& c : C) {
+    EXPECT_NE(M.weld[c.bodyA], 0);
+    if (c.type == ContactType::kGround) EXPECT_EQ(c.bodyA, ball);
+  }
+  EXPECT_NEAR(min_distance(M, F), 0.5e-3, 1e-12);
+  EXPECT_TRUE(std::isfinite(contact_energy(M, C, 1e3, P.dhat)));
+  // 往下走 1 mm：曲线 CCD 截在球碰地之前（0.5 处），但不是 0。
+  VectorXd p = VectorXd::Zero(M.nv);
+  p[2] = -1e-3;
+  const double a = curved_ccd(M, q, p, P.dhat, P.c);
+  EXPECT_GT(a, 0.25);
+  EXPECT_LT(a, 0.5);
 }
 
 // ---------- 第 3 节：接触行 ----------
@@ -341,3 +429,48 @@ TEST(Scene, LedgeNeverPenetrates) {
   EXPECT_LT(q[2], 0.45);  // 掉下来了（或者至少不在原来的高度）
 }
 
+// 焊在世界上的底座（models/welded_base.xml）：底座的盒子在地面下 0.03 mm，自由盒子带着焊在它下面的球落下来，0.4 s。
+// 每一步都不穿透、Newton 不撞上限；盒子确实落到了地面（CCD 没有被底座的顶点卡住）。
+TEST(Scene, BodiesWeldedToTheWorldDoNotStallTheStep) {
+  const Model M = load("welded_base.xml");
+  StepParams P;
+  SolverState S;
+  VectorXd q = M.qpos0, v = VectorXd::Zero(M.nv);
+  double dmin = 1e9;
+  for (int i = 0; i < 200; ++i) {
+    const StepResult r = step(M, P, q, v, &S);
+    dmin = std::min(dmin, r.min_distance);
+    EXPECT_LT(r.newton, P.max_newton) << "step " << i;
+    q = r.q;
+    v = r.v;
+  }
+  EXPECT_GT(dmin, 0.0);
+  EXPECT_LT(q[2], 0.08 + 0.03 + 2 * P.dhat);  // 起点 0.2；球底落到地面上
+}
+
+// 平行胶囊的槽（models/capsule_cradle.xml）：自由胶囊从 1.5 cm 高落进两根平行的固定胶囊之间，0.5 s。
+//   三根严格平行，所有边–边接触的 mollifier 都是 0。胶囊端点没有退化边（点–边接触）时，这个场景 0.1 s 内间隙就变成 0。
+//   检验：每一步、每次迭代的真实轨迹都不穿透，间隙没有塌下去；最后停在槽里（轴比固定胶囊高 0.0447）。
+TEST(Scene, CapsuleRestsInAParallelCradle) {
+  const Model M = load("capsule_cradle.xml");
+  StepParams P;
+  P.check_iterates = true;
+  SolverState S;
+  VectorXd q = M.qpos0, v = VectorXd::Zero(M.nv);
+  double dmin = 1e9, dmin_iter = 1e9;
+  int nmax = 0;
+  for (int i = 0; i < 250; ++i) {
+    const StepResult r = step(M, P, q, v, &S);
+    dmin = std::min(dmin, r.min_distance);
+    dmin_iter = std::min(dmin_iter, r.iterate_min_distance);
+    nmax = std::max(nmax, r.newton);
+    q = r.q;
+    v = r.v;
+  }
+  EXPECT_GT(dmin, 1e-3 * P.dhat);  // 间隙没有塌（塌的时候是 1e-11 m 以下）
+  EXPECT_GT(dmin_iter, 0.0);
+  EXPECT_LT(nmax, P.max_newton);
+  EXPECT_LT(v.norm(), 1e-2);
+  EXPECT_NEAR(q[2], 0.2 + std::sqrt(0.06 * 0.06 - 0.04 * 0.04), 1e-3);
+  EXPECT_NEAR(q[1], 0.0, 1e-3);
+}

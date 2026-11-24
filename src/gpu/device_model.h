@@ -224,9 +224,11 @@ struct DIter {
   int nc = 0;       // 当前点的接触个数（接受试探点时由设备更新）
   int nf = 0;       // 摩擦接触的个数（步首冻结）
   int rpc = 1;      // 每个接触几行：Gauss-Newton 1，完整的接触 Hessian 12（阶段 14）
+  int crow = 0;     // 1：这一次迭代 Gauss-Newton 行的接触不加阶段 6 的上界，改加秩 1 曲率（两阶段曲率，FullStepTrack）
   // 设备写：
   int nrow = 0;     // rpc nc + 2 nf
   int row0f = 0;    // 摩擦行从第几行起：rpc nc
+  int nfull = 0;    // 用旋量块的接触个数（完整的接触 Hessian 时 nc，否则 0）
   int status = 0;   // IterStatus
   int pcg = 0;      // PCG 的迭代次数
   int segs = 0;     // CCD 的段数
@@ -242,6 +244,29 @@ struct DIter {
   double alpha_max = 0, alpha = 0;
   double e_trial = 0, dmin = 0;  // 最后一次试探的能量、接触里最小的距离
 };
+
+// 原始-对偶障碍（StepParams::primal_dual，笔记 notes/22_primal_dual.md 第 2 节；CPU 版在 step.cc）的显存状态。
+// 每个接触的对偶变量 lambda 按图元（类型、模板顶点、平面）记在一张开放寻址的哈希表里：键是这些整数的 64 位散列
+// （两个不同图元撞上同一个键的概率约 n^2 / 2^65，当作不会发生），空槽是 kPdEmpty。一次 Newton 迭代：
+//   组装前 launch_pd_scale：按键查 lambda，写每个接触的 Hessian 系数 scale（lambda_eff / F；没有记录时 1）和
+//     lam（查到的 lambda，按 kappa 的变化缩放；没有记录时 F）；
+//   PCG 之后 launch_pd_prepare：记下每个接触的键、F、F'/F、沿 Newton 方向的 dd（接触缓冲区随后会被线搜索覆盖）；
+//   线搜索之后 launch_pd_update：清空表，写进新的 lambda（同 CPU 版：没见过的接触从 F 开始，夹在 >= 0.01 lambda）。
+struct DPd {
+  int cap = 0;                         // 下面每个接触的数组的长度（contact_cap）
+  double* scale = nullptr;             // 每个接触：组装用的系数
+  double* lam = nullptr;               // 每个接触：这次迭代的 lambda
+  double* F = nullptr;                 // 每个接触：原始障碍的法向力（<= 0 的不更新）
+  double* dlog = nullptr;              // 每个接触：F'/F
+  double* dd = nullptr;                // 每个接触：沿 Newton 方向 p 的 dd/ds
+  unsigned long long* key = nullptr;   // 每个接触：键
+  int* n = nullptr;                    // 显存：launch_pd_prepare 记下了几个接触
+  unsigned long long* tkey = nullptr;  // 哈希表：tcap 个槽（2 的幂）
+  double* tval = nullptr;
+  int tcap = 0;
+  double* kappa = nullptr;             // 显存：表里的 lambda 是按哪个 kappa 记的（0 = 表是空的）
+};
+constexpr unsigned long long kPdEmpty = ~0ull;
 
 // 预条件器的工作区（solver.cu 的 launch_precond_build，调用者分配）：
 //   Wb：每个刚体一个 6x6 对称矩阵 sum D w w^T（只存上三角 21 个），w 是落在这个刚体上的那一侧力旋量（关于树根）；

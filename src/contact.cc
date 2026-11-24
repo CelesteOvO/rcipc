@@ -3,12 +3,14 @@
 #include <cmath>
 #include <initializer_list>
 #include <limits>
+#include <tuple>
 
 #include <Eigen/Eigenvalues>
 
 #include "rcipc/barrier.h"
 #include "rcipc/chain.h"
 #include "rcipc/distance.h"
+#include "rcipc/inertia.h"
 
 // 接触。推导见 notes/04_ground.md（地面）和 notes/07_contact.md（刚体之间），测试见 tests/test_contact.cc。
 namespace rcipc {
@@ -136,8 +138,10 @@ template <class Visit>
 void for_each_candidate(const Model& model, const Frames& frames, double dmax, Visit visit) {
   const std::vector<Vector3d> X = world_vertices(model, frames);
   // 顶点–平面。世界上的静态几何不和平面比（它贴着地面放时距离是 0，障碍会变成无穷大；书 §8.1）。
+  //   静态几何是焊在世界上的整体（weld 为 0，notes/07_contact.md 第 1.1 节）：0 号刚体，以及到世界之间没有自由度的刚体
+  //   （Franka 的 link0）。和 Model::collide 一样按整体判断，不是按“没有关节”。
   for (int v = 0; v < model.nvertex(); ++v) {
-    if (model.vertices[v].body == 0) continue;
+    if (model.weld[model.vertices[v].body] == 0) continue;
     for (int p = 0; p < static_cast<int>(model.planes.size()); ++p) {
       const double d = model.planes[p].normal.dot(X[v]) - model.planes[p].offset - model.vertices[v].radius;
       if (d >= dmax) continue;
@@ -254,9 +258,14 @@ RowVectorXd contact_row(const Model& model, const Frames& frames, const Contact&
 double contact_energy(const Model& model, const std::vector<Contact>& contacts, double kappa, double dhat) {
   // 每个活跃接触贡献 kappa * b(d^2, dhat^2)。阶段 1 传的是 (d, dhat)，现在传的是平方（barrier.h 里说过）。
   // 边–边的能量再乘上 mollifier m（其余接触 m = 1）。
+  // d <= 0（带半径的图元穿进去了，或者正好贴上）：+无穷（2026-11-12）。b(d^2) 对 d 是偶函数，原来 d = -1e-13 和 +1e-13
+  // 的能量一样，线搜索拦不住，而梯度里的 2d 反号，障碍力反过来往里拉（笔记 notes/22_primal_dual.md 第 5 节）。
   (void)model;
   double e = 0;
-  for (const Contact& c : contacts) e += kappa * c.moll * barrier(c.d * c.d, dhat * dhat).b;
+  for (const Contact& c : contacts) {
+    if (c.d <= 0) return std::numeric_limits<double>::infinity();
+    e += kappa * c.kw * c.moll * barrier(c.d * c.d, dhat * dhat).b;
+  }
   return e;
 }
 
@@ -268,8 +277,8 @@ VectorXd contact_gradient(const Model& model, const Frames& frames, const std::v
   VectorXd g = VectorXd::Zero(model.nv);
   for (const Contact& c : contacts) {
     const BarrierValue bv = barrier(c.d * c.d, dhat * dhat);
-    g += kappa * c.moll * bv.db * contact_row(model, frames, c).transpose();
-    if (c.dmoll != 0) g += kappa * bv.b * c.dmoll * mollifier_row(model, frames, c).transpose();
+    g += kappa * c.kw * c.moll * bv.db * contact_row(model, frames, c).transpose();
+    if (c.dmoll != 0) g += kappa * c.kw * bv.b * c.dmoll * mollifier_row(model, frames, c).transpose();
   }
   return g;
 }
@@ -290,7 +299,7 @@ std::vector<Row> contact_rows(const Model& model, const Frames& frames, const st
   // 每个活跃接触一行：r 是接触行，权重 D = kappa m max(b'', 0)。
   std::vector<Row> rows;
   rows.reserve(contacts.size());
-  for (const Contact& c : contacts) rows.push_back({contact_row(model, frames, c), kappa * c.moll * barrier_row_weight(c.d, dhat)});
+  for (const Contact& c : contacts) rows.push_back({contact_row(model, frames, c), kappa * c.kw * c.moll * barrier_row_weight(c.d, dhat)});
   return rows;
 }
 
@@ -305,7 +314,7 @@ MatrixXd contact_hessian(const Model& model, const Frames& frames, const std::ve
   MatrixXd H = MatrixXd::Zero(model.nv, model.nv);
   for (const Contact& c : contacts) {
     const RowVectorXd r = contact_row(model, frames, c);
-    H += kappa * c.moll * barrier_row_weight(c.d, dhat) * r.transpose() * r;
+    H += kappa * c.kw * c.moll * barrier_row_weight(c.d, dhat) * r.transpose() * r;
   }
   return H;
 }
@@ -321,7 +330,7 @@ MatrixXd contact_curvature(const Model& model, const VectorXd& q, const std::vec
   MatrixXd H = MatrixXd::Zero(model.nv, model.nv);
   if (scale <= 0) return H;
   for (const Contact& c : contacts) {
-    const double f = 2 * kappa * c.moll * std::abs(barrier(c.d * c.d, dhat * dhat).db) * c.d;  // 法向力的大小
+    const double f = 2 * kappa * c.kw * c.moll * std::abs(barrier(c.d * c.d, dhat * dhat).db) * c.d;  // 法向力的大小
     for (int body : {c.bodyA, c.bodyB}) {
       if (body == 0) continue;
       const std::vector<ChainJoint> chain = chain_joints(model, q, body);
@@ -377,21 +386,28 @@ Matrix3d skew(const Vector3d& v) {
 Matrix3d rotation_curvature(const Matrix3d& Q) { return 0.5 * (Q + Q.transpose()) - Q.trace() * Matrix3d::Identity(); }
 
 // 一个接触的全部一阶、二阶导数（对模板顶点坐标，kappa 已乘上）：f 是 3 nstencil 的梯度，H 是 3 nstencil x 3 nstencil。
+// H 为 nullptr 时只算 f（链上项只要顶点上的力；|Delta|^2 的二阶导数是这里最贵的一块）。
 void vertex_derivatives(const Contact& c, const Vector3d* X, double radii, double kappa, double dhat, VectorXd* f,
                         MatrixXd* H) {
+  kappa *= c.kw;  // 按接触对的 kappa（Contact::kw）
   const int n = 3 * c.nstencil;
   // 第 1 层：y = |Delta|^2 对顶点的导数。地面：y = (n . X - offset)^2，梯度 2 ell n，二阶 2 n n^T。
   const double ell = c.d + radii;  // |Delta|
   VectorXd gy(n);
   for (int i = 0; i < c.nstencil; ++i) gy.segment<3>(3 * i) = 2 * ell * c.w[i] * c.n;
-  const MatrixXd Hy = squared_distance_hessian(c, X);
   // 第 2 层：x = d^2 = (sqrt(y) - R)^2。dx/dy = d / ell，d^2x/dy^2 = R / (2 ell^3)。
   const double alpha = c.d / ell;
   const BarrierValue bv = barrier(c.d * c.d, dhat * dhat);
   const VectorXd gb = bv.db * alpha * gy;
-  const MatrixXd Hb = (bv.ddb * alpha * alpha + bv.db * radii / (2 * ell * ell * ell)) * gy * gy.transpose() + bv.db * alpha * Hy;
-  if (c.type != ContactType::kEdgeEdge || (c.moll == 1 && c.dmoll == 0)) {
-    *f = kappa * gb;
+  const bool mollified = c.type == ContactType::kEdgeEdge && !(c.moll == 1 && c.dmoll == 0);
+  if (!mollified) *f = kappa * gb;
+  if (!H && !mollified) return;
+  MatrixXd Hb;
+  if (H) {
+    const MatrixXd Hy = squared_distance_hessian(c, X);
+    Hb = (bv.ddb * alpha * alpha + bv.db * radii / (2 * ell * ell * ell)) * gy * gy.transpose() + bv.db * alpha * Hy;
+  }
+  if (!mollified) {
     *H = kappa * Hb;
     return;
   }
@@ -414,11 +430,12 @@ void vertex_derivatives(const Contact& c, const Vector3d* X, double radii, doubl
   T.block<3, 3>(3, 6) = -Matrix3d::Identity();
   T.block<3, 3>(3, 9) = Matrix3d::Identity();
   const VectorXd gcX = T.transpose() * gc;
+  // E / kappa = m b：梯度 m b' + b m'，二阶 m H_b + b (m'' gc gc^T + m' H_c) + m' (gc gb^T + gb gc^T)。
+  *f = kappa * (c.moll * gb + bv.b * c.dmoll * gcX);
+  if (!H) return;
   const MatrixXd HcX = T.transpose() * Cuv * T;
   const double eps = 1e-3 * u.squaredNorm() * v.squaredNorm();
   const double ddm = c.dmoll != 0 && eps > 0 ? -2.0 / (eps * eps) : 0.0;
-  // E / kappa = m b：梯度 m b' + b m'，二阶 m H_b + b (m'' gc gc^T + m' H_c) + m' (gc gb^T + gb gc^T)。
-  *f = kappa * (c.moll * gb + bv.b * c.dmoll * gcX);
   *H = kappa * (c.moll * Hb + bv.b * (ddm * gcX * gcX.transpose() + c.dmoll * HcX) +
                 c.dmoll * (gcX * gb.transpose() + gb * gcX.transpose()));
 }
@@ -550,8 +567,7 @@ Matrix12d contact_wrench_hessian(const Model& model, const Frames& frames, const
 void contact_rows_full(const Model& model, const Frames& frames, const std::vector<Contact>& contacts, double kappa,
                        double dhat, std::vector<Row>* rows, double rel_tol) {
   for (const Contact& c : contacts) {
-    const Matrix12d H = contact_wrench_hessian(model, frames, c, kappa, dhat);
-    const Eigen::SelfAdjointEigenSolver<Matrix12d> es(H);
+    const Eigen::SelfAdjointEigenSolver<Matrix12d> es(contact_wrench_hessian(model, frames, c, kappa, dhat));
     const double lmax = es.eigenvalues().maxCoeff();
     if (!(lmax > 0)) continue;
     for (int k = 0; k < 12; ++k) {
@@ -571,24 +587,20 @@ void contact_rows_full(const Model& model, const Frames& frames, const std::vect
   }
 }
 
-MatrixXd contact_chain_curvature(const Model& model, const Frames& frames, const std::vector<Contact>& contacts,
-                                 double kappa, double dhat) {
-  // 精确的 delta 空间 Hessian 里的几何项（inertia_curvature 的公式，Q_j = (X - o_j) f^T）减去旋量块里已经有的
-  // （rot_rot(a_i, Q, a_j) 对称化，Q = sum (X - xpos) f^T）。记 F = sum f、P = sum (X - xpos) f^T：
-  //   同一个关节的两个转动 i、j（锚点 o）：精确 sym rot_rot(a_i, P + (xpos - o) F^T, a_j)，块里 sym rot_rot(a_i, P, a_j)，
-  //     剩 sym rot_rot(a_i, (xpos - o) F^T, a_j)；
-  //   上游转动 up、下游转动 dn：精确 rot_rot(a_up, P + (xpos - o_dn) F^T, a_dn)（不对称化），块里 sym rot_rot(a_up, P, a_dn)；
-  //   上游转动、下游滑动：精确 (a_up x a_dn) . F，块里 0；
-  //   其余 0。
+namespace {
+
+// 一个接触的链上项，逐项交给 add(i, j, term)（i、j 是自由度，上三角的一项；i != j 时对称的那一项调用者自己加）。
+// 公式见 contact_chain_curvature。
+template <class Add>
+void chain_curvature_terms(const Model& model, const Frames& frames, const Contact& c, double kappa, double dhat,
+                           Add&& add) {
   const auto rot_rot = [](const Vector3d& a, const Matrix3d& Q, const Vector3d& b) { return a.dot(Q * b) - a.dot(b) * Q.trace(); };
-  MatrixXd K = MatrixXd::Zero(model.nv, model.nv);
-  for (const Contact& c : contacts) {
+  {
     Vector3d X[4];
     double radii;
     stencil_points(model, frames, c, X, &radii);
     VectorXd f;
-    MatrixXd HX;
-    vertex_derivatives(c, X, radii, kappa, dhat, &f, &HX);
+    vertex_derivatives(c, X, radii, kappa, dhat, &f, nullptr);  // 只要顶点上的力
     for (int side = 0; side < 2; ++side) {
       const int body = side == 0 ? c.bodyA : c.bodyB;
       if (body == 0) continue;
@@ -606,6 +618,22 @@ MatrixXd contact_chain_curvature(const Model& model, const Frames& frames, const
         if (j < 0) continue;
         for (int k = 0; k < model.joints[j].nv; ++k) chain.push_back(model.joints[j].dadr + k);
       }
+      //   不同关节的一对（上游 up 必须是转动）：项 = a_up . w_dn，w_dn 只和下游的自由度有关，每个自由度先算一次：
+      //     下游转动：rot_rot(a, Q, b) = a^T (Q - tr Q I) b，Q = P + e F^T（e = xpos - o_dn），减去 sym rot_rot(., P, .)，
+      //       w = (P - sym P + e F^T - (e . F) I) a_dn；
+      //     下游滑动：(a_up x a_dn) . F = a_up . (a_dn x F)，w = a_dn x F。
+      const Matrix3d Pa = 0.5 * (P - P.transpose());
+      std::vector<Vector3d> wdn(chain.size());
+      for (size_t u = 0; u < chain.size(); ++u) {
+        const int i = chain[u];
+        const Vector3d& a = frames.dof_axis[i];
+        if (model.dof_rot[i]) {
+          const Vector3d e = ref - frames.dof_anchor[i];
+          wdn[u] = Pa * a + e * F.dot(a) - e.dot(F) * a;
+        } else {
+          wdn[u] = a.cross(F);
+        }
+      }
       for (size_t u = 0; u < chain.size(); ++u) {
         for (size_t w = u; w < chain.size(); ++w) {
           const int i = chain[u], j = chain[w];
@@ -615,25 +643,33 @@ MatrixXd contact_chain_curvature(const Model& model, const Frames& frames, const
               const Matrix3d Qo = (ref - frames.dof_anchor[j]) * F.transpose();
               term = 0.5 * (rot_rot(frames.dof_axis[i], Qo, frames.dof_axis[j]) + rot_rot(frames.dof_axis[j], Qo, frames.dof_axis[i]));
             }
-          } else {
-            const int up = j, dn = i;  // chain 从刚体往根排，后面的在上游
-            const Vector3d& au = frames.dof_axis[up];
-            const Vector3d& ad = frames.dof_axis[dn];
-            if (model.dof_rot[up]) {
-              if (model.dof_rot[dn]) {
-                term = rot_rot(au, P + (ref - frames.dof_anchor[dn]) * F.transpose(), ad) -
-                       0.5 * (rot_rot(au, P, ad) + rot_rot(ad, P, au));
-              } else {
-                term = au.cross(ad).dot(F);
-              }
-            }
+          } else if (model.dof_rot[j]) {  // chain 从刚体往根排，后面的 j 在上游
+            term = frames.dof_axis[j].dot(wdn[u]);
           }
-          K(i, j) += term;
-          if (i != j) K(j, i) += term;
+          if (term != 0) add(i, j, term);
         }
       }
     }
   }
+}
+
+}  // namespace
+
+MatrixXd contact_chain_curvature(const Model& model, const Frames& frames, const std::vector<Contact>& contacts,
+                                 double kappa, double dhat) {
+  // 精确的 delta 空间 Hessian 里的几何项（inertia_curvature 的公式，Q_j = (X - o_j) f^T）减去旋量块里已经有的
+  // （rot_rot(a_i, Q, a_j) 对称化，Q = sum (X - xpos) f^T）。记 F = sum f、P = sum (X - xpos) f^T：
+  //   同一个关节的两个转动 i、j（锚点 o）：精确 sym rot_rot(a_i, P + (xpos - o) F^T, a_j)，块里 sym rot_rot(a_i, P, a_j)，
+  //     剩 sym rot_rot(a_i, (xpos - o) F^T, a_j)；
+  //   上游转动 up、下游转动 dn：精确 rot_rot(a_up, P + (xpos - o_dn) F^T, a_dn)（不对称化），块里 sym rot_rot(a_up, P, a_dn)；
+  //   上游转动、下游滑动：精确 (a_up x a_dn) . F，块里 0；
+  //   其余 0。
+  MatrixXd K = MatrixXd::Zero(model.nv, model.nv);
+  for (const Contact& c : contacts)
+    chain_curvature_terms(model, frames, c, kappa, dhat, [&](int i, int j, double term) {
+      K(i, j) += term;
+      if (i != j) K(j, i) += term;
+    });
   return K;
 }
 
@@ -675,6 +711,68 @@ double initial_kappa(const Model& model, const Frames& frames, const std::vector
     if (balance > 0) kappa = balance;  // 惯性在把物体拉离障碍时 balance <= 0，这时没有平衡可言，用参考值
   }
   return std::min(std::max(kappa, range.min), range.max);
+}
+
+// ---------- 秩 1 曲率行（两阶段曲率，笔记 notes/22_primal_dual.md 第 4 节） ----------
+
+Vector3d point_acceleration_along(const Model& model, const Frames& frames, int body, const Vector3d& X,
+                                  const VectorXd& v) {
+  // X''[v, v] = sum_{j,k} v_j v_k d^2 X / dq_j dq_k（二阶导数见笔记 16 第 2 节），沿链从根往叶走一遍，O(链长)：
+  //   转动 l：J_l = a_l x (X - o_l)，对角项 v_l^2 a_l x J_l；
+  //   上游的转动 j、下游的 l（转动，或平移 J_l = a_l）：交叉项 2 v_j v_l a_j x J_l，按 Omega = sum_{上游的转动} v_j a_j 累加；
+  //   同一个球关节（或自由关节的转动部分）里的两个转动 i、j（i 在前）：二阶导数是对称的一半 (a_i x J_j + a_j x J_i) / 2，
+  //     按顺序累加只给了 a_i x J_j，补上差 v_i v_j (a_j x J_i - a_i x J_j)；
+  //   自由关节的平移排在它的转动前面、不进 Omega，所以平移和自己的转动之间是 0。
+  std::vector<int> bodies;  // 从刚体往根
+  for (int b = body; b != 0; b = model.bodies[b].parent) bodies.push_back(b);
+  Vector3d acc = Vector3d::Zero(), Om = Vector3d::Zero();
+  Vector3d pa[2], pJ[2];
+  double pv[2] = {0, 0};
+  for (auto it = bodies.rbegin(); it != bodies.rend(); ++it) {
+    const int j = model.bodies[*it].joint;
+    if (j < 0) continue;
+    int nprev = 0;  // 这个关节里前面的转动
+    for (int k = 0; k < model.joints[j].nv; ++k) {
+      const int d = model.joints[j].dadr + k;
+      const double vd = v[d];
+      const Vector3d& a = frames.dof_axis[d];
+      Vector3d J = a;
+      if (model.dof_rot[d]) {
+        J = a.cross(X - frames.dof_anchor[d]);
+        acc += vd * vd * a.cross(J);
+      }
+      acc += 2 * vd * Om.cross(J);
+      if (!model.dof_rot[d]) continue;
+      for (int i = 0; i < nprev; ++i) acc += pv[i] * vd * (a.cross(pJ[i]) - pa[i].cross(J));
+      if (nprev < 2) {
+        pa[nprev] = a;
+        pJ[nprev] = J;
+        pv[nprev] = vd;
+        ++nprev;
+      }
+      Om += vd * a;
+    }
+  }
+  return acc;
+}
+
+double contact_curvature_row_weight(const Model& model, const Frames& frames, const Contact& c, const RowVectorXd& r,
+                                    double kappa, double dhat) {
+  // r^T S r：S 是 Gauss-Newton 丢掉的轨迹曲率项 sum_v f_v . d^2 X_v / d delta^2，f_v = dE/dX_v = kappa m b'(x) 2 d w_v n
+  //   （阶段 6 笔记第 2 节的 2 kappa b' Delta . Delta''；带半径时 Delta . Delta'' 换成 d n . Delta''，Delta'' 按固定的权重）。
+  //   只在 r 这一个方向上是精确的。b' < 0，所以弧线朝障碍弯（n . Delta'' < 0）时为正；负的不加，模型保持半正定。
+  //   作为 r r^T 的权重：沿 r 看 (D r r^T) 给 D |r|^4，所以 D = r^T S r / |r|^4。
+  const double r2 = r.squaredNorm();
+  if (r2 <= 0 || c.d <= 0) return 0;
+  const VectorXd v = r.transpose();
+  Vector3d Dpp = Vector3d::Zero();
+  for (int i = 0; i < c.nstencil; ++i) {
+    const Vertex& V = model.vertices[c.verts[i]];
+    if (V.body == 0 || c.w[i] == 0) continue;
+    Dpp += c.w[i] * point_acceleration_along(model, frames, V.body, world_point(frames, V.body, V.local), v);
+  }
+  const double rSr = kappa * c.kw * c.moll * barrier(c.d * c.d, dhat * dhat).db * 2 * c.d * c.n.dot(Dpp);
+  return rSr > 0 ? rSr / (r2 * r2) : 0;
 }
 
 }  // namespace rcipc

@@ -3,6 +3,7 @@
 //   Chain.*      链上的关节和静态力臂
 //   Majoriser.*  上界的结构；它加上 Gauss-Newton 项以后在每个方向上都不比真实 Hessian 弯得少
 //   Lever.*      顶杆：Gauss-Newton 第一步就被 CCD 截断、把间隙挖到极小点以下；加上上界后间隙单调；收敛点相同
+//   RankOneRow.* 两阶段曲率的秩 1 行（笔记 22 第 4 节）：沿行的轨迹曲率，和差分一致，不超过上界
 #include "rcipc/contact.h"
 
 #include <cmath>
@@ -10,6 +11,7 @@
 
 #include <gtest/gtest.h>
 
+#include "rcipc/barrier.h"
 #include "rcipc/ccd.h"
 #include "rcipc/chain.h"
 #include "rcipc/kinematics.h"
@@ -220,4 +222,69 @@ TEST(Lever, EveryScaleReachesTheSamePointWithoutPenetration) {
   }
   EXPECT_NEAR(q_end[0][0], q_end[2][0], 1e-6);
   EXPECT_NEAR(q_end[1][0], q_end[2][0], 1e-6);
+}
+
+// X''[v, v]（point_acceleration_along）和沿 q ⊕ s v 的二阶中心差分一致：四种关节、随机姿态、随机方向（含滑动）、
+//   每个刚体上一个随机点。
+TEST(RankOneRow, PointAccelerationMatchesFiniteDifference) {
+  const Model M = load("zoo.xml");
+  std::mt19937 rng(81);
+  std::uniform_real_distribution<double> u(-1, 1);
+  const double s = 1e-4;
+  for (int i = 0; i < 5; ++i) {
+    const VectorXd q = random_q(M, rng);
+    VectorXd v(M.nv);
+    for (int d = 0; d < M.nv; ++d) v[d] = u(rng);
+    const Frames F0 = forward_kinematics(M, q);
+    const Frames Fp = forward_kinematics(M, integrate(M, q, v, s));
+    const Frames Fm = forward_kinematics(M, integrate(M, q, v, -s));
+    for (int b = 1; b < M.nbody(); ++b) {
+      const Vector3d local(u(rng), u(rng), u(rng));
+      const Vector3d fd = (world_point(Fp, b, local) - 2 * world_point(F0, b, local) + world_point(Fm, b, local)) / (s * s);
+      const Vector3d an = point_acceleration_along(M, F0, b, world_point(F0, b, local), v);
+      EXPECT_LT((an - fd).norm(), 1e-5 * (1 + an.norm())) << "pose " << i << ", body " << b << ": " << an.transpose()
+                                                           << " vs " << fd.transpose();
+    }
+  }
+}
+
+// 秩 1 权重就是沿行 r 的轨迹曲率项：kappa m b' 2 d n . Delta''[r, r]（Delta 按固定的权重，二阶中心差分），负的取 0，
+//   除以 |r|^4。而且沿 r 不超过阶段 6 的对角上界（上界只管转动之间的二阶导数，所以方向里的滑动分量置 0）。
+TEST(RankOneRow, WeightIsTheTrajectoryCurvatureAlongTheRow) {
+  const Model M = load("zoo.xml");
+  std::mt19937 rng(82);
+  const double dhat = 1.0, kappa = 1.0, s = 1e-4;
+  int positive = 0, total = 0;
+  for (int i = 0; i < 5; ++i) {
+    const VectorXd q = random_q(M, rng);
+    const Frames F0 = forward_kinematics(M, q);
+    const std::vector<Contact> C = find_contacts(M, F0, dhat);
+    ASSERT_FALSE(C.empty());
+    for (const Contact& c : C) {
+      Eigen::RowVectorXd r = contact_row(M, F0, c);
+      for (const Joint& j : M.joints)
+        if (j.type == JointType::kSlide) r[j.dadr] = 0;
+      if (r.squaredNorm() == 0) continue;
+      const auto delta = [&](double t) {
+        const Frames F = forward_kinematics(M, integrate(M, q, r.transpose(), t));
+        Vector3d D = Vector3d::Zero();
+        for (int k = 0; k < c.nstencil; ++k) {
+          const Vertex& V = M.vertices[c.verts[k]];
+          D += c.w[k] * world_point(V.body == 0 ? F0 : F, V.body, V.local);
+        }
+        return D;
+      };
+      const double npp = c.n.dot(delta(s) - 2 * delta(0) + delta(-s)) / (s * s);
+      const double rSr = kappa * c.kw * c.moll * barrier(c.d * c.d, dhat * dhat).db * 2 * c.d * npp;
+      const double r4 = r.squaredNorm() * r.squaredNorm();
+      const double w = contact_curvature_row_weight(M, F0, c, r, kappa, dhat);
+      EXPECT_NEAR(w * r4, std::max(rSr, 0.0), 1e-5 * (1 + std::abs(rSr))) << "pose " << i;
+      const double bound = r * contact_curvature(M, q, {c}, kappa, dhat, 1.0) * r.transpose();
+      EXPECT_LE(w * r4, bound * (1 + 1e-9) + 1e-12) << "pose " << i;
+      positive += w > 0;
+      ++total;
+    }
+  }
+  EXPECT_GT(positive, 0);
+  EXPECT_LT(positive, total);
 }

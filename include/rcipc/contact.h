@@ -28,17 +28,21 @@ enum class ContactType {
 struct Contact {
   ContactType type;
   int nstencil;       // 模板里的顶点个数：地面 1，其余 4
-  int verts[4];       // 顶点编号
-  double w[4];        // 权重
+  int verts[4] = {-1, -1, -1, -1};  // 顶点编号（前 nstencil 个有效，其余 -1）
+  double w[4] = {0, 0, 0, 0};        // 权重（前 nstencil 个有效，其余 0）
   Eigen::Vector3d n;  // 单位向量，从 B 侧的最近点指向 A 侧的最近点（地面：平面法向），Delta = |Delta| n
   double d;           // 距离（已减半径，m），CCD 保证它 > 0
   int bodyA, bodyB;   // 两侧的刚体（地面：bodyB = 0）
-  int plane;          // 地面接触的平面编号，其余 -1
+  int plane = -1;     // 地面接触的平面编号，其余 -1
   // 边–边的 mollifier（笔记 notes/07_contact.md 第 2.3 节，IPC 原文 §4.2）：两条边接近平行时最近点不唯一，
   // 距离有“折角”，Newton 会在折角两侧来回跳。把边–边的能量乘上 m(c)，c = |e_a x e_b|^2，
   // c >= eps 时 m = 1，c < eps 时 m = (2 - c / eps) c / eps，平行时 m = 0（这时点–三角形接触会接管）。
   double moll = 1;   // m(c)
   double dmoll = 0;  // dm/dc（c >= eps 时 0）
+  // 这个接触的障碍刚度是 kappa * kw：能量、梯度、Hessian 都只是乘上它（contact.cc、friction.cc 的 lambda）。
+  //   find_contacts 给 1。原始-对偶障碍（StepParams::primal_dual）组装时在接触的副本上把它乘以 lambda_eff / F，
+  //   只改 Hessian（笔记 notes/22_primal_dual.md 第 2 节）。
+  double kw = 1;
 };
 
 // 顶点 v 到平面 p 的带符号距离（已减半径）。
@@ -142,5 +146,16 @@ KappaRange kappa_range(const Model& model, double dhat);
 // step() 传的 g_e 是步首 q_n 处的惯性梯度 -m (v / h + g)（这一步要刹住的动量加重力），不是当前迭代点的。
 double initial_kappa(const Model& model, const Frames& frames, const std::vector<Contact>& contacts,
                      const Eigen::VectorXd& g_inertia, double dhat);
+
+// ---------- 秩 1 曲率行（两阶段曲率，笔记 notes/22_primal_dual.md 第 4 节；书 §8.6） ----------
+
+// 刚体 body 上的点 X（世界坐标）沿自由度方向 v（长度 nv）的二阶导数 X''[v, v] = sum_{j,k} v_j v_k d^2 X / dq_j dq_k。O(链长)。
+Eigen::Vector3d point_acceleration_along(const Model& model, const Frames& frames, int body, const Eigen::Vector3d& X,
+                                         const Eigen::VectorXd& v);
+
+// 接触 c 的秩 1 曲率权重：Gauss-Newton 丢掉的轨迹曲率项 S（阶段 6 用对角上界盖住的那一项）只取沿它自己那一行 r 的方向，
+//   max(0, r^T S r) / |r|^4，加到这一行的权重 D 上（行数不变）。r 是 contact_row。
+double contact_curvature_row_weight(const Model& model, const Frames& frames, const Contact& c,
+                                    const Eigen::RowVectorXd& r, double kappa, double dhat);
 
 }  // namespace rcipc

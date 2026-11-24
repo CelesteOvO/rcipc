@@ -85,6 +85,8 @@ class Stepper {
   // 步首用 (q0, v0) 准备惯性目标和滞后摩擦（kappa 是摩擦用的），然后在 q 处组装 Newton 系统：
   //   energy = 惯性 + kappa 障碍 + 摩擦 + 限位，g 是梯度，H 是稠密的 Hessian（树块 + 曲率上界 + 所有行），
   //   ncontact 是 d̂ 以内的接触个数，nfriction 是摩擦接触个数。
+  //   rank1_rows 时按“这一次迭代用秩 1 曲率行”组装（两阶段曲率：Gauss-Newton 行的接触不加上界、行的权重加秩 1 曲率）。
+  //   原始-对偶障碍的表先清空，所以组装的是一步里第一次迭代的系统（还没有对偶变量）。
   struct Terms {
     double energy = 0;
     Eigen::VectorXd g;
@@ -92,7 +94,7 @@ class Stepper {
     int ncontact = 0, nfriction = 0;
   };
   Terms terms(const StepParams& P, const Eigen::VectorXd& q0, const Eigen::VectorXd& v0, double kappa,
-              const Eigen::VectorXd& q);
+              const Eigen::VectorXd& q, bool rank1_rows = false);
   // 用最近一次 terms() 组装的系统，PCG 解 H x = rhs（容差 tol），返回解和迭代次数。
   Eigen::VectorXd solve(const Eigen::VectorXd& rhs, double tol, int* iterations = nullptr);
   // 用最近一次 terms() 组装的系统建树块预条件器，返回稠密的块对角 P^-1（nv x nv）。

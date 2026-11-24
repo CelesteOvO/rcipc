@@ -29,6 +29,7 @@ rcipc_test(test_scenes rcipc)      # 阶段 10：关节限位、布娃娃、链�
 rcipc_test(test_drives rcipc)      # 阶段 12：驱动、阻尼、armature
 rcipc_test(test_mechanisms rcipc)  # 阶段 12 之后：圆柱、夹爪等机构场景
 rcipc_test(test_contact_hessian rcipc)  # 阶段 14：完整的接触 Hessian
+rcipc_test(test_primal_dual rcipc)      # 原始-对偶障碍（StepParams::primal_dual，scene_demo 的 pd=）
 if(TARGET rcipc_gpu)
   rcipc_test(test_gpu rcipc_gpu)    # 阶段 11：GPU 版和 CPU 版逐项对比
 endif()

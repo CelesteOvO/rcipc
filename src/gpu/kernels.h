@@ -36,15 +36,19 @@ void launch_inertia_curvature(const DModel& m, const DFrames& F, const double* t
                               double floor, double* Hk, double* K, unsigned long long* dropped,
                               const double* CB = nullptr, bool inertia = true);
 // 关节限位（limits.cc）：能量累加到 *e、梯度累加到 g、对角累加到 Hk（哪个为空就不算）。
-void launch_limits(const DModel& m, const double* q, double k, double dhat, double* e, double* g, double* Hk);
+// 激活距离按关节类型：铰链 dhat_hinge（rad），滑动 dhat_slide（m，和接触同一个；LimitBarrier）。
+void launch_limits(const DModel& m, const double* q, double k, double dhat_hinge, double dhat_slide, double* e, double* g,
+                   double* Hk);
 // 阶段 12：驱动、阻尼、armature（drive.cc）：能量累加到 *e，梯度累加到 g，对角 Hessian 累加到 Hk（哪个为空就不算）。
 void launch_drives(const DModel& m, const DDrive& D, const double* q, double* e, double* g, double* Hk);
 // 限位的 CCD（limit_ccd）：结果 atomic_min 到 *tmin（调用者先设成 1）。
-void launch_limit_ccd(const DModel& m, const double* q, const double* p, double c, double* tmin);
+void launch_limit_ccd(const DModel& m, const double* q, const double* p, double c, double sep, double* tmin);
 // *p = v（一个线程的内核）。用它代替从主机拷一个数过去：那样的拷贝要等前面的内核都做完。
 void launch_fill(double* p, double v);
 // 两组顶点坐标之间的最大位移，atomic_max 到 *out（调用者先设成 0）。
 void launch_max_displacement(const double* Xa, const double* Xb, int n, double* out);
+// 没有顶点的模型用：刚体质量的均方根位移的最大值（同 CPU 版 max_vertex_displacement），atomic_max 到 *out。
+void launch_max_body_rms(const DModel& m, const DFrames& Fa, const DFrames& Fb, double* out);
 
 // ---------- contact.cc 对应的部分：contact.cu ----------
 
@@ -70,6 +74,7 @@ void launch_detect_async(const DModel& m, const DFrames& F, const double* boxes,
 // 窄相的剔除（narrow.cu）：候选刚体对里，在刚体坐标系里剔掉“距离一定不小于阈值”的图元对，剩下的写进 C。
 // 检测时 A 为空，阈值是 dmax；CCD 时阈值是 max(2 xi, xi + 4 Dmax / c)（A 是加速度界，D 是每个刚体的最大位移）。
 // 都再加上两个图元的半径。F 是剔除用的位置的 FK（CCD 时是段起点）。window 见 launch_ccd_cull。
+// CCD 时（A 不为空）dmax 是最小分离 sep：阈值和盒子的余量都再加上它。
 void launch_narrow(const DModel& m, const DFrames& F, const double* boxes, const int* pairs, const int* npairs_d,
                    int pair_cap, double dmax, const double* A, const double* D, DScalar len, double c, DNarrow N,
                    DCands C, bool window = false);
@@ -77,13 +82,35 @@ void launch_narrow(const DModel& m, const DFrames& F, const double* boxes, const
 void launch_to_float(const double* x, int n, float* out);
 // 接触的各项（contact_energy、contact_gradient、contact_rows、contact_curvature）：
 //   能量累加到 *e，梯度累加到 g，曲率上界累加到 Hk 的对角，行写到 rows 的第 0..n-1 行（哪个为空就不算）。
+//   pd_scale 不为空时（原始-对偶障碍，launch_pd_scale 写的）：行的权重和曲率上界乘上第 i 个接触的系数，能量、梯度不变。
+//   crow 非 0 时（两阶段曲率，FullStepTrack）：Gauss-Newton 行的接触不加曲率上界，
+//   改在行的权重上加秩 1 曲率 max(0, r^T S r) / |r|^4（contact_curvature_row_weight）。
 void launch_contact_terms(const DModel& m, const DFrames& F, const double* q, const DContact* c, DCount n, DScalar kappa,
-                          double dhat, double curv_scale, double* e, double* g, double* Hk, DRows rows);
+                          double dhat, double curv_scale, double* e, double* g, double* Hk, DRows rows,
+                          const double* pd_scale = nullptr, DCount crow = DCount());
+
 // 阶段 14（contact_full.cu）：完整的接触 Hessian（contact_rows_full）。能量累加到 *e，梯度累加到 g，
 // 第 i 个接触的 12 x 12 旋量块特征分解后写到 rows 的第 12 i .. 12 i + 11 行（用不到的行两侧刚体是 0、D = 0），
 // 链上剩余项要的每刚体量原子加到 CB（nbody x 21，调用者清零；可为空）。rows.D 为空时只算能量和梯度。
 void launch_contact_full(const DModel& m, const DFrames& F, const DContact* c, DCount n, DScalar kappa, double dhat,
                          double* e, double* g, DRows rows, double* CB);
+
+// ---------- 原始-对偶障碍（StepParams::primal_dual，DPd）：contact.cu ----------
+
+// 组装之前：按键查 lambda，写 pd.scale、pd.lam。kappa 是这次迭代的；表里的 lambda 按 kappa / *pd.kappa 缩放。
+//   lambda_eff = w lambda + (1 - w) F，w = min(1, 1 / g)，g = -d F'/F；scale = lambda_eff / F（没有记录时 1）。
+void launch_pd_scale(const DContact* c, DCount n, DScalar kappa, double dhat, const DPd& pd);
+// PCG 之后（p 是 Newton 方向）：记下每个接触的键、F、F'/F、dd = 行 . p / (2 d)，和个数 *pd.n。
+// it 不为空时只在 it->status == kIterRunning（没有收敛）时记，否则 *pd.n = 0（同 CPU 版：收敛的迭代不更新）。
+void launch_pd_prepare(const DModel& m, const DFrames& F, const DContact* c, DCount n, DScalar kappa, double dhat,
+                       const double* p, const DIter* it, const DPd& pd);
+// 线搜索之后：清空表，写进 *pd.n 个接触的新 lambda，*pd.kappa = kappa。
+// it 不为空时只在 it->status == kIterDone 时做（溢出的迭代会重做，不更新）。
+void launch_pd_update(DScalar kappa, const DIter* it, const DPd& pd);
+// 清空表、*pd.kappa = 0（每步开头）。
+void launch_pd_clear(const DPd& pd);
+// 换了一张更大的表：把旧表（okey、oval，ocap 个槽）的记录重新散列进 pd 的表（调用者先清空它）。
+void launch_pd_rehash(const unsigned long long* okey, const double* oval, int ocap, const DPd& pd);
 // 测试用：把行展开成逐个自由度的值（每行 2 CH 个槽，用不到的 idx = -1）。
 void launch_rows_expand(const DModel& m, const DFrames& F, DRows rows, int nrow, int* idx, double* val);
 // 接触里最小的距离，atomic_min 到 *out（调用者先设成 +无穷）。
@@ -102,15 +129,16 @@ void launch_friction_terms(const DModel& m, const DFrames& F, const DFriction* f
 void launch_accel_bounds(const DModel& m, const double* q, const DFrames& F, const double* p, bool tight, double* A);
 // 一段 [s0, s0 + len] 里的 CCD（curved_ccd 的第 2 步）：顶点–平面的闭式解，和候选刚体对之间的逐对 ACCD。
 //   段内的截断位置 atomic_min 到 *tmin（调用者先设成 1），需要的更短段长 atomic_min 到 *ds_need（先设成 len）。
+// sep 是最小分离（StepParams::min_sep，同 curved_ccd）：距离都减去它，起点已经 <= sep 的对把截断位置写成 0（卡住）。
 void launch_ground_ccd(const DModel& m, const double* Xa, const double* Xb, const double* A, DScalar len, double c,
-                       double* tmin, double* ds_need);
+                       double sep, double* tmin, double* ds_need);
 // 刚体之间的 CCD 分两步。
 // 1. 剔除（launch_narrow）：Fa 是段起点的 FK，boxes 是这一段每个刚体的扫掠盒，D 是 launch_body_disp 算的每个刚体的
 //    最大位移，npairs_d 是显存里的刚体对个数（launch_body_pairs）。window 时 [段起点, 段起点 + len] 当作窗口剔，
 //    候选盖住窗口里的任何一段（这时刚体对的余量也要放大：段长按 kWindowPairLen len 传给 launch_body_pairs，笔记第 13 节）。
 void launch_ccd_cull(const DModel& m, const DFrames& Fa, const double* boxes, const double* D, const double* A,
-                     DScalar len, double c, const int* pairs, const int* npairs_d, int pair_cap, DNarrow N, DCands C,
-                     bool window);
+                     DScalar len, double c, double sep, const int* pairs, const int* npairs_d, int pair_cap, DNarrow N,
+                     DCands C, bool window);
 // 窗口的刚体对：余量 2 xi 要求段长放大 sqrt(2) 倍，再多留一点盖住舍入。
 constexpr double kWindowPairLen = 1.42;
 // 2. 复核和 ACCD：C 里的候选（上一次剔除留下的，可以是窗口的）在这一段 [Xa, Xb] 上做，boxes 是这一段的扫掠盒。
@@ -118,8 +146,8 @@ constexpr double kWindowPairLen = 1.42;
 //    tail.split < kAccdMax 时，ACCD 走了 split 步还没完的对由整个 warp 一起先试着证明它返回 1，
 //    证不出来再接着走；结果不变（笔记第 14 节）。
 void launch_ccd_exact(const DModel& m, const double* Xa, const double* Xb, const double* boxes, const double* A,
-                      DScalar len, double c, const int* npairs_d, int pair_cap, DNarrow N, DCands C, DTail tail,
-                      double* tmin, double* ds_need, double* seen);
+                      DScalar len, double c, double sep, const int* npairs_d, int pair_cap, DNarrow N, DCands C,
+                      DTail tail, double* tmin, double* ds_need, double* seen);
 // ACCD 最多走几步（和 CPU 版的 accd 一样），和默认先串行走几步再交给尾巴的内核。
 constexpr int kAccdMax = 1000;
 constexpr int kAccdSplit = 16;

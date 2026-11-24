@@ -1,11 +1,12 @@
 // 阶段 10：关节限位和场景（笔记 notes/10_scenes.md）。
 //
-//   Limits.*   第 1 节：限位的能量、梯度、Hessian、CCD
+//   Limits.*   第 1 节：限位的能量、梯度、Hessian、CCD；激活距离按关节类型
 //   Ragdoll.*  第 2 节：一个布娃娃落地：步末和迭代轨迹都不穿模，关节不越界，最后静止
 //   Chain.*    第 3 节：链条甩到地面：不穿模
 //   Pile.*     第 4 节：三个布娃娃叠在一起：不穿模
 // 场景测试在 Debug 下很慢，这里只跑最关键的一段时间；完整的跑法见 toys/scenes（scene_demo）。
 #include <cmath>
+#include <limits>
 #include <random>
 
 #include <gtest/gtest.h>
@@ -61,7 +62,8 @@ TEST(Limits, EnergyDerivativesAndCcd) {
   int limited = 0;
   for (const Joint& j : M.joints) limited += j.limited;
   EXPECT_EQ(limited, 4);
-  const double k = 10.0, dhat = 0.1, eps = 1e-7;
+  const LimitBarrier L{10.0, 0.1, 1e-3};  // 布娃娃的限位都是铰链，用 0.1 rad
+  const double eps = 1e-7;
   std::mt19937 rng(100);
   std::uniform_real_distribution<double> u(0.0, 1.0);
   for (int trial = 0; trial < 5; ++trial) {
@@ -69,14 +71,14 @@ TEST(Limits, EnergyDerivativesAndCcd) {
     for (const Joint& j : M.joints) {
       if (j.limited) q[j.qadr] = j.range[0] + (j.range[1] - j.range[0]) * (trial == 0 ? 0.02 : u(rng));  // 第一次贴着下端
     }
-    const VectorXd g = limit_gradient(M, q, k, dhat), hd = limit_hessian_diagonal(M, q, k, dhat);
+    const VectorXd g = limit_gradient(M, q, L), hd = limit_hessian_diagonal(M, q, L);
     for (const Joint& j : M.joints) {
       if (!j.limited) continue;
       const int d = j.dadr;
       const VectorXd e = VectorXd::Unit(M.nv, d);
-      const double fd = (limit_energy(M, integrate(M, q, e, eps), k, dhat) - limit_energy(M, integrate(M, q, e, -eps), k, dhat)) / (2 * eps);
+      const double fd = (limit_energy(M, integrate(M, q, e, eps), L) - limit_energy(M, integrate(M, q, e, -eps), L)) / (2 * eps);
       EXPECT_NEAR(g[d], fd, 1e-6 * (1 + std::abs(fd))) << "joint " << j.qadr;
-      const double fdh = (limit_gradient(M, integrate(M, q, e, eps), k, dhat)[d] - limit_gradient(M, integrate(M, q, e, -eps), k, dhat)[d]) / (2 * eps);
+      const double fdh = (limit_gradient(M, integrate(M, q, e, eps), L)[d] - limit_gradient(M, integrate(M, q, e, -eps), L)[d]) / (2 * eps);
       EXPECT_NEAR(hd[d], fdh, 1e-5 * (1 + std::abs(fdh))) << "joint " << j.qadr;
       EXPECT_GE(hd[d], 0.0);
     }
@@ -87,7 +89,7 @@ TEST(Limits, EnergyDerivativesAndCcd) {
       if (!lim) EXPECT_EQ(g[d], 0.0);
     }
   }
-  // CCD：膝盖离下端 0.05 rad，想往下转 0.2 rad：alpha = 0.9 * 0.05 / 0.2。
+  // CCD：膝盖离下端 0.05 rad，想往下转 0.2 rad：alpha = 0.9 * (0.05 - sep) / 0.2（sep 是最小分离）。
   VectorXd q = M.qpos0;
   const Joint* knee = nullptr;
   for (const Joint& j : M.joints) if (j.limited && j.axis.x() == 1) knee = &j;
@@ -95,10 +97,60 @@ TEST(Limits, EnergyDerivativesAndCcd) {
   q[knee->qadr] = knee->range[0] + 0.05;
   VectorXd p = VectorXd::Zero(M.nv);
   p[knee->dadr] = -0.2;
-  EXPECT_NEAR(limit_ccd(M, q, p, 0.9), 0.9 * 0.05 / 0.2, 1e-12);
+  EXPECT_NEAR(limit_ccd(M, q, p, 0.9, 0.0), 0.9 * 0.05 / 0.2, 1e-12);
+  EXPECT_NEAR(limit_ccd(M, q, p, 0.9, 1e-3), 0.9 * (0.05 - 1e-3) / 0.2, 1e-12);
   p[knee->dadr] = 0.2;  // 往上转：离上端 2.35，不限制
   EXPECT_EQ(limit_ccd(M, q, p, 0.9), 1.0);
   EXPECT_NEAR(min_limit_distance(M, q), 0.05, 1e-12);  // 膝盖贴着下端 0.05；其余关节离端点至少 0.05（qpos0 的余量）
+
+  // 浮点下的两处（最小分离，笔记 22 第 5 节）：
+  // 1. 已经在最小分离以内（离下端 1e-13 rad）：往下转一点也不能走，往上转不受限（q 沿 p 是直线，往回走总是安全的）。
+  //    原来这里得到负的步长。
+  q[knee->qadr] = knee->range[0] + 1e-13;
+  p[knee->dadr] = -0.2;
+  EXPECT_EQ(limit_ccd(M, q, p, 0.9), 0.0);
+  p[knee->dadr] = 0.2;
+  EXPECT_EQ(limit_ccd(M, q, p, 0.9), 1.0);
+  // 2. 越过了限位：能量是 +无穷，不是 NaN（NaN > e0 为假，线搜索会接受越界的试探点）。
+  q[knee->qadr] = knee->range[0] - 1e-9;
+  EXPECT_EQ(limit_energy(M, q, L), std::numeric_limits<double>::infinity());
+}
+
+// 激活距离跟着关节的单位走（notes/22_primal_dual.md 第 5 节）：slide_limit.xml 有一根滑动关节（行程 0..0.04 m，
+// 像 Panda 的手指）和一根铰链（-1..1 rad）。滑动关节用接触的 dhat（1 mm），铰链用 limit_dhat（0.1 rad）。
+//   1. 行程中间的滑动关节没有障碍力；离上端 0.5 mm 时有。离端点 0.05 rad 的铰链有。
+//   2. 位置驱动把滑块推向上端 0.04（目标正好在限位上）：停在离上端不到 1 mm 的地方。
+//      原来两种关节共用 0.1，对 4 cm 的行程两端的障碍处处活跃：离上端 1 cm 时障碍力已经是 12 N，驱动只有 1 N。
+TEST(Limits, WidthFollowsJointUnits) {
+  const Model M = load("slide_limit.xml");
+  ASSERT_EQ(M.joints.size(), 2u);
+  const Joint& slide = M.joints[0];
+  const Joint& hinge = M.joints[1];
+  ASSERT_EQ(slide.type, JointType::kSlide);
+  ASSERT_EQ(hinge.type, JointType::kHinge);
+  StepParams P;
+  const LimitBarrier L = P.limit_barrier();
+  EXPECT_EQ(L.dhat(JointType::kSlide), P.dhat);
+  EXPECT_EQ(L.dhat(JointType::kHinge), P.limit_dhat);
+
+  VectorXd q = M.qpos0;  // 滑块在 0.02（ref），铰链在 0
+  EXPECT_NEAR(q[slide.qadr], 0.02, 1e-15);
+  EXPECT_FALSE(limits_active(M, q, L));
+  EXPECT_EQ(limit_gradient(M, q, L).norm(), 0.0);
+  q[slide.qadr] = 0.0395;
+  EXPECT_TRUE(limits_active(M, q, L));
+  EXPECT_GT(limit_gradient(M, q, L)[slide.dadr], 0.0);  // 能量往上端增大
+  q[slide.qadr] = 0.02;
+  q[hinge.qadr] = 0.95;
+  EXPECT_TRUE(limits_active(M, q, L));
+  EXPECT_GT(limit_gradient(M, q, L)[hinge.dadr], 0.0);
+
+  P.h = 0.01;
+  P.ctrl = VectorXd::Constant(1, 0.04);
+  const RunStats s = run(M, P, 100);
+  EXPECT_GT(s.q[slide.qadr], 0.039);
+  EXPECT_LT(s.q[slide.qadr], 0.04);
+  EXPECT_EQ(s.capped, 0);
 }
 
 // ---------- 第 2 节：布娃娃 ----------

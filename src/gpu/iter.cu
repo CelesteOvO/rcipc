@@ -22,6 +22,7 @@ __global__ void k_it_begin(DIter* it) {
   // 组装之前：行数 = 每接触的行数 x 接触 + 2 x 摩擦，计数清零。
   it->nrow = it->rpc * it->nc + 2 * it->nf;
   it->row0f = it->rpc * it->nc;
+  it->nfull = it->rpc == 12 ? it->nc : 0;
   it->status = kIterRunning;
   it->segs = it->windows = it->trials = 0;
   it->adv = 0;
@@ -34,7 +35,7 @@ __global__ void k_it_converge(DIter* it, const double* scal, double h, double to
   it->e0 = scal[0];
   it->pcg = static_cast<int>(scal[12]);
   it->size = scal[7] / h;
-  if (it->size < tol) it->status = kIterConverged;
+  if (it->status == kIterRunning && it->size < tol) it->status = kIterConverged;  // 组装时溢出过的不改
 }
 
 __global__ void k_ccd_setup(DIter* it, const double* A, int nbody, double dhat, double* scal,
@@ -95,6 +96,11 @@ __global__ void k_ccd_seg_end(DIter* it, const double* scal, int pair_cap, int w
     set_cont(it, h, 0);
     return;
   }
+  if (t_min <= 0) {  // 有一对卡在最小分离以内（只有它会给出 0）：段起点之后一点也不能走，不用再缩短重做
+    it->t_ccd = it->s0;
+    set_cont(it, h, 0);
+    return;
+  }
   if (ds_need < it->len) {  // 某个顶点嫌这一段太长：缩短，重做这一段
     it->ds = fmin(0.5 * it->len, ds_need);
     set_cont(it, h, 1);
@@ -151,6 +157,13 @@ __global__ void k_ls_end(DIter* it, const double* scal, const int* cnt, int pair
   if (it->e_trial > it->e0 && it->alpha > 1e-12) {
     it->alpha *= 0.5;
     it->s = it->alpha;
+    set_cont(it, h, 1);
+    return;
+  }
+  if (!isfinite(it->e_trial) && it->alpha > 0) {
+    // 试探点穿进去了（能量 +无穷）：这一次一步也不走。再试一次 alpha = 0（就是当前点），接受它的 FK 和接触。
+    it->alpha = 0;
+    it->s = 0;
     set_cont(it, h, 1);
     return;
   }
